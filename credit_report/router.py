@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from credit_report.api import auth, blocks, calculations, conflicts, facts, reports, audit
+from credit_report.api import auth, blocks, calculations, conflicts, facts, generate, reports, audit
 
 router = APIRouter(prefix="/api/credit-report")
 
@@ -13,3 +13,4 @@ router.include_router(conflicts.router)
 router.include_router(audit.router)
 router.include_router(calculations.router)
 router.include_router(blocks.router)
+router.include_router(generate.router)

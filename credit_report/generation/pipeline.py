@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from credit_report.audit.events import write_event
+from credit_report.config import (
+    CR_MAX_CONCURRENT_GENERATIONS,
+    CREDIT_REPORT_MODEL,
+    GENERATION_ORDER,
+    SECTION_HARD_DEPENDENCIES,
+)
+from credit_report.generation.claude_client import generate_section_markdown
+from credit_report.generation.evidence import retrieve_evidence
+from credit_report.models import SectionInput, SectionOutput
+
+_generation_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_GENERATIONS)
+
+
+async def get_section_output(
+    db: AsyncSession, report_id: str, section_no: int
+) -> Optional[SectionOutput]:
+    result = await db.execute(
+        select(SectionOutput).where(
+            SectionOutput.report_id == report_id,
+            SectionOutput.section_no == section_no,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def check_hard_dependencies(
+    db: AsyncSession, report_id: str, section_no: int
+) -> list[int]:
+    """Return list of hard-dependency section numbers that are not yet done."""
+    deps = SECTION_HARD_DEPENDENCIES.get(section_no, [])
+    missing: list[int] = []
+    for dep_no in deps:
+        output = await get_section_output(db, report_id, dep_no)
+        if not output or output.status != "done":
+            missing.append(dep_no)
+    return missing
+
+
+async def run_section_generation(
+    db: AsyncSession,
+    report_id: str,
+    section_no: int,
+    actor_user_id: str,
+    preceding_outputs: Optional[dict[int, str]] = None,
+) -> SectionOutput:
+    """
+    Run the full generation pipeline for a single section.
+
+    Steps:
+      1. Load the analyst JSON input for this section (empty dict if not saved yet).
+      2. Retrieve keyword-matched evidence chunks from uploaded PDFs.
+      3. Mark the SectionOutput record as "generating" (upsert).
+      4. Call Claude (rate-limited by _generation_semaphore).
+      5. Persist the result and write an audit event.
+    """
+    si_result = await db.execute(
+        select(SectionInput).where(
+            SectionInput.report_id == report_id,
+            SectionInput.section_no == section_no,
+        )
+    )
+    si = si_result.scalar_one_or_none()
+    input_json: dict = json.loads(si.input_json) if si and si.input_json else {}
+
+    evidence_chunks = retrieve_evidence(report_id, section_no)
+
+    existing = await get_section_output(db, report_id, section_no)
+    if existing:
+        existing.status = "generating"
+        output = existing
+    else:
+        output = SectionOutput(
+            id=str(uuid.uuid4()),
+            report_id=report_id,
+            section_no=section_no,
+            status="generating",
+        )
+        db.add(output)
+    await db.flush()
+
+    try:
+        async with _generation_semaphore:
+            markdown, tokens_used = await generate_section_markdown(
+                section_no=section_no,
+                input_json=input_json,
+                evidence_chunks=evidence_chunks,
+                preceding_outputs=preceding_outputs,
+            )
+
+        output.markdown = markdown
+        output.status = "done"
+        output.model_id = CREDIT_REPORT_MODEL
+        output.tokens_used = tokens_used
+        output.generated_at = datetime.now(timezone.utc)
+
+        await write_event(
+            db,
+            action="section.generated",
+            actor_user_id=actor_user_id,
+            actor_role="system",
+            report_id=report_id,
+            target_type="section_output",
+            target_id=f"{report_id}/{section_no}",
+            after=f"tokens={tokens_used} model={CREDIT_REPORT_MODEL}",
+        )
+    except Exception as exc:
+        output.status = "error"
+        await write_event(
+            db,
+            action="section.generation_error",
+            actor_user_id=actor_user_id,
+            actor_role="system",
+            report_id=report_id,
+            target_type="section_output",
+            target_id=f"{report_id}/{section_no}",
+            after=str(exc)[:500],
+        )
+        raise
+
+    await db.flush()
+    return output
+
+
+async def run_full_report_generation(
+    db: AsyncSession,
+    report_id: str,
+    actor_user_id: str,
+) -> dict[int, str]:
+    """
+    Generate all sections in GENERATION_ORDER, skipping any whose hard
+    dependencies were not satisfied at the time they are reached.
+
+    Returns {section_no: status_string}.
+    """
+    results: dict[int, str] = {}
+    generated_outputs: dict[int, str] = {}
+
+    for section_no in GENERATION_ORDER:
+        missing_deps = await check_hard_dependencies(db, report_id, section_no)
+        if missing_deps:
+            results[section_no] = f"skipped_missing_deps:{missing_deps}"
+            continue
+
+        try:
+            output = await run_section_generation(
+                db=db,
+                report_id=report_id,
+                section_no=section_no,
+                actor_user_id=actor_user_id,
+                preceding_outputs=generated_outputs,
+            )
+            results[section_no] = output.status
+            if output.markdown:
+                generated_outputs[section_no] = output.markdown
+        except Exception as exc:
+            results[section_no] = f"error:{exc}"
+
+    return results
