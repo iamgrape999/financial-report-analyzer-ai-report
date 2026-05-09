@@ -16,16 +16,16 @@ services:
         fromDatabase:
           name: financial-report-db
           property: connectionString
-      - key: ANTHROPIC_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
       - key: SECRET_KEY
         generateValue: true
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: CREDIT_REPORT_MODEL
-        value: claude-sonnet-4-6
       - key: CR_MAX_CONCURRENT_GENERATIONS
         value: "1"
       - key: ACCESS_TOKEN_EXPIRE_MINUTES

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-import anthropic
+from google import genai
+from google.genai import types as genai_types
 
 from credit_report.config import (
-    ANTHROPIC_API_KEY,
     CONTINUATION_END_TOKENS,
     CONTINUATION_RESUME_TOKENS,
-    CREDIT_REPORT_MODEL,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
     CR_SECTION_MAX_TOKENS,
     SECTION_MAX_OUTPUT_TOKENS,
 )
@@ -18,13 +19,11 @@ MAX_CONTINUATION_ROUNDS = 3
 
 
 def _detect_continuation_token(text: str, section_no: int) -> bool:
-    """Return True if text ends with the section's continuation marker."""
     token = CONTINUATION_END_TOKENS.get(section_no)
     return bool(token and token in text)
 
 
 def _strip_continuation_token(text: str, section_no: int) -> str:
-    """Remove the continuation marker from text and strip trailing whitespace."""
     token = CONTINUATION_END_TOKENS.get(section_no)
     if token:
         text = text.replace(token, "")
@@ -40,15 +39,15 @@ async def generate_section_markdown(
     model_id: Optional[str] = None,
 ) -> tuple[str, int]:
     """
-    Call Claude and assemble multi-part section Markdown with continuation support.
+    Call Gemini and assemble multi-part section Markdown with continuation support.
 
     Returns (full_markdown, total_tokens_used).
     """
-    key = api_key or ANTHROPIC_API_KEY
-    model = model_id or CREDIT_REPORT_MODEL
+    key = api_key or GEMINI_API_KEY
+    model = model_id or GEMINI_MODEL
     max_tokens = SECTION_MAX_OUTPUT_TOKENS.get(section_no) or CR_SECTION_MAX_TOKENS
 
-    client = anthropic.AsyncAnthropic(api_key=key)
+    client = genai.Client(api_key=key)
 
     parts: list[str] = []
     total_tokens = 0
@@ -66,20 +65,27 @@ async def generate_section_markdown(
             continuation_resume_token=resume_token,
         )
 
-        response = await client.messages.create(
+        response = await client.aio.models.generate_content(
             model=model,
-            max_tokens=max_tokens,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
+            contents=user_prompt,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=max_tokens,
+            ),
         )
 
-        text = response.content[0].text if response.content else ""
-        total_tokens += response.usage.input_tokens + response.usage.output_tokens
+        text = response.text or ""
+        usage = response.usage_metadata
+        if usage:
+            total_tokens += (usage.prompt_token_count or 0) + (usage.candidates_token_count or 0)
 
         needs_continuation = _detect_continuation_token(text, section_no)
         parts.append(_strip_continuation_token(text, section_no))
 
-        if not needs_continuation or response.stop_reason != "end_turn":
+        finish_reason = (
+            response.candidates[0].finish_reason if response.candidates else None
+        )
+        if not needs_continuation or str(finish_reason) != "STOP":
             break
 
     return "\n\n".join(parts).strip(), total_tokens
