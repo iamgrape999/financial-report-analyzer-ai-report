@@ -26,6 +26,10 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: AUTO_CREATE_TABLES
+        value: "false"
       - key: DAILY_TOKEN_LIMIT
         value: "4000000"
       - key: CR_MAX_CONCURRENT_GENERATIONS

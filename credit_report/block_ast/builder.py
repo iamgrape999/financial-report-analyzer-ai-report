@@ -20,8 +20,8 @@ _NUMERIC_RE = re.compile(r"(?<![A-Za-z%])([\d]{1,3}(?:,\d{3})*(?:\.\d+)?|\d+\.\d
 
 CHART_PLACEHOLDER_RE = re.compile(
     r"\[(?:Org Chart|Share Price Chart|Alliance Chart|Debt Maturity Chart|"
-    r"System-generated ESG rating image|Group Limit chart|[^\]]*(?:Chart|Image|Figure|Graph|Chart)[^\]]*)\\
-]",
+    r"System-generated ESG rating image|Group Limit chart|"
+    r"[^\]]*(?:Chart|Image|Figure|Graph)[^\]]*)\]",
     re.IGNORECASE,
 )
 

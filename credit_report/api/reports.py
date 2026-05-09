@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.audit.events import write_event
 from credit_report.database import get_db
+from credit_report.fact_store.input_extractor import InputFactExtractor
+from credit_report.fact_store.repository import upsert_facts
 from credit_report.models import Report, SectionInput
 from credit_report.schemas import (
     CreateReportRequest,
@@ -24,6 +26,19 @@ from credit_report.security.models import User
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 VALID_STATUSES = ("draft", "validated", "review_in_progress", "approved")
+
+
+def _can_view_report(report: Report, current_user: User) -> bool:
+    """Return whether a user can read a report in the current coarse RBAC model."""
+    return current_user.role in {"admin", "reviewer", "approver"} or report.created_by == current_user.id
+
+
+def _assert_can_view_report(report: Report, current_user: User) -> None:
+    if not _can_view_report(report, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this report.",
+        )
 
 
 def _assert_owner_or_admin(report: Report, current_user: User) -> None:
@@ -83,12 +98,11 @@ async def list_reports(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    query = select(Report).where(Report.is_deleted == False)
+    if current_user.role not in {"admin", "reviewer", "approver"}:
+        query = query.where(Report.created_by == current_user.id)
     result = await db.execute(
-        select(Report)
-        .where(Report.is_deleted == False)
-        .order_by(Report.created_at.desc())
-        .offset(skip)
-        .limit(limit)
+        query.order_by(Report.created_at.desc()).offset(skip).limit(limit)
     )
     return list(result.scalars().all())
 
@@ -105,6 +119,7 @@ async def get_report(
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    _assert_can_view_report(report, current_user)
     return report
 
 
@@ -128,6 +143,8 @@ async def update_status(
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    if payload.status != "approved":
+        _assert_owner_or_admin(report, current_user)
 
     old_status = report.status
     report.status = payload.status
@@ -185,12 +202,13 @@ async def save_section_input(
     if section_no < 1 or section_no > 10:
         raise HTTPException(status_code=400, detail="section_no must be 1-10")
 
-    # Verify report exists
     result = await db.execute(
         select(Report).where(Report.id == report_id, Report.is_deleted == False)
     )
-    if not result.scalar_one_or_none():
+    report = result.scalar_one_or_none()
+    if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    _assert_owner_or_admin(report, current_user)
 
     # Upsert section input
     si_result = await db.execute(
@@ -213,11 +231,8 @@ async def save_section_input(
         )
         db.add(si)
 
-    # Auto-extract facts from analyst JSON (import here to avoid circular deps)
+    # Auto-extract facts from analyst JSON. Extraction failures never block input save.
     try:
-        from credit_report.fact_store.input_extractor import InputFactExtractor
-        from credit_report.fact_store.repository import upsert_facts
-
         extractor = InputFactExtractor(section_no)
         cleaned = _strip_instruction_keys(payload.input_json)
         facts_data = extractor.extract(report_id, cleaned)
@@ -261,6 +276,14 @@ async def get_section_input(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    report_result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_deleted == False)
+    )
+    report = report_result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _assert_can_view_report(report, current_user)
+
     result = await db.execute(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
@@ -284,6 +307,14 @@ async def list_section_inputs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    report_result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_deleted == False)
+    )
+    report = report_result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _assert_can_view_report(report, current_user)
+
     result = await db.execute(
         select(SectionInput).where(SectionInput.report_id == report_id)
     )
