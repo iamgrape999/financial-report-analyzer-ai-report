@@ -1,0 +1,77 @@
+# Section 5 — Collateral / Guarantor / Support: fact extraction mappings
+facts:
+  # LTC
+  - id_template: "FAC-LTC-PCT-CURRENT"
+    path: "5C_post_delivery_security.ltc_ltv_analysis.initial_metrics.ltc_pct"
+    metric: "ltc_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: null
+    unit: "percent"
+
+  - id_template: "FAC-VESSEL-CONTRACT-PRICE-CURRENT"
+    path: "5C_post_delivery_security.ltc_ltv_analysis.initial_metrics.vessel_contract_price_usd_m"
+    metric: "vessel_contract_price"
+    entity: "VESSEL"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-FACILITY-AMOUNT-CURRENT"
+    path: "5C_post_delivery_security.ltc_ltv_analysis.initial_metrics.facility_amount_usd_m"
+    metric: "facility_amount"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  # ACR covenant
+  - id_template: "FAC-ACR-MIN-PCT-CURRENT"
+    path: "5E_value_maintenance_clause.clause_details.minimum_threshold_pct"
+    metric: "acr_minimum_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: null
+    unit: "percent"
+
+  # RG coverage — max CUB drawdown
+  - id_template: "FAC-RG-MAX-CUB-DRAWDOWN-CURRENT"
+    path: "5B_pre_delivery_security.refund_guarantee.rg_coverage.vessel_contract_price_usd_m"
+    metric: "rg_vessel_contract_price"
+    entity: "RG"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  # Guarantor financials
+  - id_template: "FIN-TOTAL-ASSETS-TWD-{entity}-CURRENT"
+    path: "5F_corporate_guarantee.guarantor_financial_summary.total_assets_twd_b"
+    metric: "total_assets_twd"
+    entity: "EMC"
+    period: "CURRENT"
+    currency: "TWD"
+    unit: "billion"
+
+  - id_template: "FIN-TOTAL-EQUITY-USD-{entity}-CURRENT"
+    path: "5F_corporate_guarantee.guarantor_financial_summary.total_equity_usd_b"
+    metric: "total_equity_usd"
+    entity: "EMC"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "billion"
+
+  - id_template: "FIN-CASH-TWD-{entity}-CURRENT"
+    path: "5F_corporate_guarantee.guarantor_financial_summary.cash_balance_twd_b"
+    metric: "cash_balance_twd"
+    entity: "EMC"
+    period: "CURRENT"
+    currency: "TWD"
+    unit: "billion"
+
+  - id_template: "FIN-CASH-USD-{entity}-CURRENT"
+    path: "5F_corporate_guarantee.guarantor_financial_summary.cash_balance_usd_b"
+    metric: "cash_balance_usd"
+    entity: "EMC"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "billion"

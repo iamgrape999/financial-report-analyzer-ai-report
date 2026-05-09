@@ -1,0 +1,93 @@
+# Section 2 — Overall Comments: fact extraction mappings
+# JSONPath expressions relative to the cleaned input JSON root
+facts:
+  # Borrower solvency metrics
+  - id_template: "FIN-CASH-{entity}-{period}"
+    path: "2B_solvency.borrower_metrics.cash_balance_usd_m"
+    metric: "cash_balance"
+    entity_path: "2B_solvency.borrower_metrics.entity"
+    period_path: "2B_solvency.borrower_metrics.reference_period"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FIN-DEBT-{entity}-{period}"
+    path: "2B_solvency.borrower_metrics.total_debt_usd_m"
+    metric: "total_debt"
+    entity_path: "2B_solvency.borrower_metrics.entity"
+    period_path: "2B_solvency.borrower_metrics.reference_period"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FIN-EBITDA-{entity}-{period}"
+    path: "2B_solvency.borrower_metrics.op_ebitda_usd_m"
+    metric: "op_ebitda"
+    entity_path: "2B_solvency.borrower_metrics.entity"
+    period_path: "2B_solvency.borrower_metrics.reference_period"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "RATIO-DEBT-EBITDA-{entity}-{period}"
+    path: "2B_solvency.borrower_metrics.total_debt_to_ebitda"
+    metric: "debt_to_ebitda"
+    entity_path: "2B_solvency.borrower_metrics.entity"
+    period_path: "2B_solvency.borrower_metrics.reference_period"
+    currency: null
+    unit: "x"
+
+  - id_template: "RATIO-ICR-EBITDA-{entity}-{period}"
+    path: "2B_solvency.borrower_metrics.interest_coverage_ebitda_to_interest"
+    metric: "interest_coverage_ebitda"
+    entity_path: "2B_solvency.borrower_metrics.entity"
+    period_path: "2B_solvency.borrower_metrics.reference_period"
+    currency: null
+    unit: "x"
+
+  # Guarantor solvency metrics (TWD)
+  - id_template: "FIN-CASH-TWD-{entity}-{period}"
+    path: "2B_solvency.guarantor_metrics.cash_balance_twd_b"
+    metric: "cash_balance_twd"
+    entity_path: "2B_solvency.guarantor_metrics.entity"
+    period_path: "2B_solvency.guarantor_metrics.reference_period"
+    currency: "TWD"
+    unit: "billion"
+
+  - id_template: "FIN-CASH-USD-{entity}-{period}"
+    path: "2B_solvency.guarantor_metrics.cash_balance_usd_b"
+    metric: "cash_balance_usd"
+    entity_path: "2B_solvency.guarantor_metrics.entity"
+    period_path: "2B_solvency.guarantor_metrics.reference_period"
+    currency: "USD"
+    unit: "billion"
+
+  - id_template: "FIN-DEBT-TWD-{entity}-{period}"
+    path: "2B_solvency.guarantor_metrics.total_debt_twd_b"
+    metric: "total_debt_twd"
+    entity_path: "2B_solvency.guarantor_metrics.entity"
+    period_path: "2B_solvency.guarantor_metrics.reference_period"
+    currency: "TWD"
+    unit: "billion"
+
+  - id_template: "RATIO-ICR-EBITDA-{entity}-{period}"
+    path: "2B_solvency.guarantor_metrics.interest_coverage_ebitda_to_interest"
+    metric: "interest_coverage_ebitda"
+    entity_path: "2B_solvency.guarantor_metrics.entity"
+    period_path: "2B_solvency.guarantor_metrics.reference_period"
+    currency: null
+    unit: "x"
+
+  # Collateral ratios
+  - id_template: "FAC-LTC-PCT-CURRENT"
+    path: "2D_collateral_summary.collateral_items[1].ltc_pct"
+    metric: "ltc_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: null
+    unit: "percent"
+
+  - id_template: "FAC-ACR-MIN-PCT-CURRENT"
+    path: "2D_collateral_summary.collateral_items[1].acr_minimum_pct"
+    metric: "acr_minimum_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: null
+    unit: "percent"

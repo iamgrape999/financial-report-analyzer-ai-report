@@ -1,0 +1,60 @@
+# Section 1 — Credit Facility & Case Details: fact extraction mappings
+facts:
+  # Facility totals
+  - id_template: "FAC-TOTAL-CREDIT-PROPOSED-CURRENT"
+    path: "1A_facility_summary.totals.total_credit_proposed_usd_m"
+    metric: "total_credit_proposed"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-TOTAL-CREDIT-CURRENT-CURRENT"
+    path: "1A_facility_summary.totals.total_credit_current_usd_m"
+    metric: "total_credit_current"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-TOTAL-OUTSTANDING-CURRENT"
+    path: "1A_facility_summary.totals.total_credit_outstanding_usd_m"
+    metric: "total_credit_outstanding"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  # Regulatory compliance — Banking Act 33-3
+  - id_template: "REG-BA33-LIMIT-USD-CURRENT"
+    path: "1B_regulatory_compliance.banking_act_33_3.limit_usd_m"
+    metric: "ba33_limit"
+    entity: "CUB"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "REG-BA33-NW-TWD-CURRENT"
+    path: "1B_regulatory_compliance.banking_act_33_3.bank_nw_twd_bn"
+    metric: "bank_nw_twd"
+    entity: "CUB"
+    period: "CURRENT"
+    currency: "TWD"
+    unit: "billion"
+
+  # Unsecured exposure
+  - id_template: "FAC-UNSECURED-TOTAL-USD-CURRENT"
+    path: "1B_regulatory_compliance.unsecured_exposure_analysis.total_unsecured_usd_m"
+    metric: "total_unsecured_exposure"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-SECURED-TOTAL-USD-CURRENT"
+    path: "1B_regulatory_compliance.unsecured_exposure_analysis.total_secured_usd_m"
+    metric: "total_secured_exposure"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"

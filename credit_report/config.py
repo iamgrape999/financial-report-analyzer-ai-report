@@ -3,19 +3,26 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# ── Database ────────────────────────────────────────────────────────────────────────────────
+ENVIRONMENT: str = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "development")).lower()
+IS_PRODUCTION: bool = ENVIRONMENT in {"prod", "production"} or os.getenv("RENDER", "").lower() == "true"
+
+# ── Database ─────────────────────────────────────────────────────────────────────────────────────
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
     "sqlite+aiosqlite:///./data/credit_report.db",
 )
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "false" if IS_PRODUCTION else "true").lower() == "true"
 
-# ── LLM ────────────────────────────────────────────────────────────────────────────────────
+# ── LLM ──────────────────────────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 CREDIT_REPORT_MODEL: str = os.getenv("CREDIT_REPORT_MODEL", "claude-sonnet-4-6")
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 CR_SECTION_MAX_TOKENS: int = int(os.getenv("CR_SECTION_MAX_TOKENS", "8192"))
 CR_MAX_CONCURRENT_GENERATIONS: int = int(os.getenv("CR_MAX_CONCURRENT_GENERATIONS", "2"))
+DAILY_TOKEN_LIMIT: int = int(os.getenv("DAILY_TOKEN_LIMIT", "4000000"))
 
 SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
     7: 16384,
@@ -25,26 +32,29 @@ SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
     "default": 8192,
 }
 
-# ── Storage ──────────────────────────────────────────────────────────────────────────────────
+# ── Storage ──────────────────────────────────────────────────────────────────────────────────────
 CREDIT_REPORTS_ROOT: Path = Path(os.getenv("CREDIT_REPORTS_ROOT", "./data/credit_reports"))
 CR_MAX_CHUNKS_PER_SECTION: int = int(os.getenv("CR_MAX_CHUNKS_PER_SECTION", "12"))
 CREDIT_REPORT_MAX_UPLOAD_MB: int = int(os.getenv("CREDIT_REPORT_MAX_UPLOAD_MB", "50"))
 
-# ── Auth ────────────────────────────────────────────────────────────────────────────────────
-SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "*")
+
+# ── Auth ──────────────────────────────────────────────────────────────────────────────────────
+DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
+SECRET_KEY: str = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)
 ALGORITHM: str = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-# ── PromptOps ────────────────────────────────────────────────────────────────────────────────
+# ── PromptOps ──────────────────────────────────────────────────────────────────────────────────────
 PROMPT_AUTO_DEPLOY: bool = os.getenv("PROMPT_AUTO_DEPLOY", "false").lower() == "true"
 GOLDEN_DATASET_ROOT: Path = Path(os.getenv("GOLDEN_DATASET_ROOT", "./data/golden_datasets"))
 
-# ── Paths ────────────────────────────────────────────────────────────────────────────────────
+# ── Paths ──────────────────────────────────────────────────────────────────────────────────────
 MODULE_ROOT: Path = Path(__file__).parent
 INDUSTRY_TEMPLATES_ROOT: Path = MODULE_ROOT / "industry_templates"
 
-# ── Generation ordering ────────────────────────────────────────────────────────────────────────────────
+# ── Generation ordering ────────────────────────────────────────────────────────────────────────────────────────────
 GENERATION_ORDER: list[int] = [4, 7, 1, 3, 2, 5, 6, 8, 9, 10]
 
 SECTION_HARD_DEPENDENCIES: dict[int, list[int]] = {
@@ -61,7 +71,7 @@ SECTION_SOFT_DEPENDENCIES: dict[int, list[int]] = {
     2: [4],
 }
 
-# ── Evidence retrieval keywords per section ─────────────────────────────────────────────────────────────
+# ── Evidence retrieval keywords per section ──────────────────────────────────────────────────────────────────────────────────
 SECTION_RETRIEVAL_KEYWORDS: dict[int, list[str]] = {
     1: ["facility", "tenor", "collateral", "guarantor", "regulatory", "Banking Act", "33-3"],
     2: ["solvency", "repayment", "guarantor", "collateral", "risk", "tariff", "DSCR"],
@@ -75,7 +85,7 @@ SECTION_RETRIEVAL_KEYWORDS: dict[int, list[str]] = {
     10: ["appendix", "capacity", "projection", "DSCR", "FY2025"],
 }
 
-# ── Continuation tokens ────────────────────────────────────────────────────────────────────────────────
+# ── Continuation tokens ────────────────────────────────────────────────────────────────────────────────────────────
 CONTINUATION_END_TOKENS: dict[int, str | None] = {
     1: "[§1 CONTINUED IN NEXT OUTPUT]",
     2: "[§2 CONTINUED IN NEXT OUTPUT]",
@@ -101,3 +111,20 @@ CONTINUATION_RESUME_TOKENS: dict[int, str | None] = {
     9: "[§9 CONTINUED]",
     10: "[§10 CONTINUED]",
 }
+
+
+def validate_runtime_security() -> None:
+    """Fail fast when production security-sensitive settings are unsafe."""
+    if IS_PRODUCTION and SECRET_KEY == DEFAULT_SECRET_KEY:
+        raise RuntimeError("SECRET_KEY must be set to a strong non-default value in production")
+
+
+def parse_cors_origins(raw_origins: str | None = None) -> list[str]:
+    """Parse comma-separated CORS origins, removing blanks and duplicates."""
+    raw = CORS_ALLOW_ORIGINS if raw_origins is None else raw_origins
+    origins: list[str] = []
+    for origin in raw.split(","):
+        cleaned = origin.strip()
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
+    return origins or ["*"]

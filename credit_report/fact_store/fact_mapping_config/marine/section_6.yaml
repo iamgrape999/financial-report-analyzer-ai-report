@@ -1,0 +1,17 @@
+# Section 6 — Project Analysis: fact extraction mappings
+facts:
+  - id_template: "FAC-CONTRACT-PRICE-USD-CURRENT"
+    path: "6C_contract_structure.contract_price_usd_m"
+    metric: "vessel_contract_price"
+    entity: "VESSEL"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-VESSEL-TEU-CURRENT"
+    path: "6A_project_overview.vessel_specifications.capacity_teu"
+    metric: "vessel_teu_capacity"
+    entity: "VESSEL"
+    period: "CURRENT"
+    currency: null
+    unit: "TEU"

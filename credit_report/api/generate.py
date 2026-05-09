@@ -27,7 +27,7 @@ router = APIRouter(prefix="/reports/{report_id}", tags=["generation"])
 _MAX_UPLOAD_BYTES = CREDIT_REPORT_MAX_UPLOAD_MB * 1024 * 1024
 
 
-# ── Schemas ───────────────────────────────────────────────────────────────────
+# ── Schemas ─────────────────────────────────────────────────────────────────────────────
 
 class DocumentOut(BaseModel):
     id: str
@@ -58,7 +58,7 @@ class GenerateAllResult(BaseModel):
     sections: dict[str, str]
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────────────────────
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
     result = await db.execute(
@@ -68,6 +68,29 @@ async def _require_report(db: AsyncSession, report_id: str) -> Report:
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     return report
+
+
+def _can_view_report(report: Report, current_user: User) -> bool:
+    return current_user.role in {"admin", "reviewer", "approver"} or report.created_by == current_user.id
+
+
+def _assert_can_view_report(report: Report, current_user: User) -> None:
+    if not _can_view_report(report, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this report.",
+        )
+
+
+def _assert_owner_or_admin(report: Report, current_user: User) -> None:
+    """Raise 403 if the user is not the report creator and not an admin."""
+    if current_user.role == "admin":
+        return
+    if report.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this report.",
+        )
 
 
 def _output_to_schema(o: SectionOutput) -> SectionOutputOut:
@@ -81,7 +104,7 @@ def _output_to_schema(o: SectionOutput) -> SectionOutputOut:
     )
 
 
-# ── Document management ───────────────────────────────────────────────────────
+# ── Document management ───────────────────────────────────────────────────────────────────────────────────
 
 @router.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def upload_document(
@@ -91,7 +114,8 @@ async def upload_document(
     current_user: User = Depends(require_analyst),
 ):
     """Upload a PDF evidence document for a report."""
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
@@ -125,7 +149,8 @@ async def list_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_can_view_report(report, current_user)
     result = await db.execute(
         select(SectionDocument)
         .where(SectionDocument.report_id == report_id, SectionDocument.is_deleted == False)
@@ -141,6 +166,8 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
     result = await db.execute(
         select(SectionDocument).where(
             SectionDocument.id == doc_id,
@@ -154,7 +181,7 @@ async def delete_document(
     doc.is_deleted = True
 
 
-# ── Section generation ────────────────────────────────────────────────────────
+# ── Section generation ───────────────────────────────────────────────────────────────────────────────────
 
 @router.post("/generate/{section_no}", response_model=GenerateOneResult)
 async def generate_section(
@@ -167,7 +194,8 @@ async def generate_section(
     if section_no < 1 or section_no > 10:
         raise HTTPException(status_code=400, detail="section_no must be 1–10")
 
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
 
     missing = await check_hard_dependencies(db, report_id, section_no)
     if missing:
@@ -182,8 +210,10 @@ async def generate_section(
             report_id=report_id,
             section_no=section_no,
             actor_user_id=current_user.id,
+            actor_role=current_user.role,
         )
     except Exception as exc:
+        await db.commit()
         raise HTTPException(status_code=500, detail=f"Generation failed: {exc}")
 
     return GenerateOneResult(
@@ -200,16 +230,18 @@ async def generate_full_report(
     current_user: User = Depends(require_analyst),
 ):
     """Trigger AI generation for all sections in dependency order."""
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
     results = await run_full_report_generation(
         db=db,
         report_id=report_id,
         actor_user_id=current_user.id,
+        actor_role=current_user.role,
     )
     return GenerateAllResult(sections={str(k): v for k, v in results.items()})
 
 
-# ── Section output retrieval ──────────────────────────────────────────────────
+# ── Section output retrieval ──────────────────────────────────────────────────────────────────────────────────
 
 @router.get("/sections/{section_no}/output", response_model=SectionOutputOut)
 async def get_section_output_endpoint(
@@ -218,7 +250,8 @@ async def get_section_output_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_can_view_report(report, current_user)
     output = await get_section_output(db, report_id, section_no)
     if not output:
         raise HTTPException(status_code=404, detail="Section output not found")
@@ -231,7 +264,8 @@ async def list_outputs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_can_view_report(report, current_user)
     result = await db.execute(
         select(SectionOutput)
         .where(SectionOutput.report_id == report_id)
