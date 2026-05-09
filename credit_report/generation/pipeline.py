@@ -18,6 +18,7 @@ from credit_report.config import (
 )
 from credit_report.generation.claude_client import generate_section_markdown
 from credit_report.generation.evidence import retrieve_evidence
+from credit_report.generation.quota import check_quota, record_tokens
 from credit_report.models import SectionInput, SectionOutput
 
 _generation_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_GENERATIONS)
@@ -59,12 +60,17 @@ async def run_section_generation(
     Run the full generation pipeline for a single section.
 
     Steps:
-      1. Load the analyst JSON input for this section (empty dict if not saved yet).
-      2. Retrieve keyword-matched evidence chunks from uploaded PDFs.
-      3. Mark the SectionOutput record as "generating" (upsert).
-      4. Call Claude (rate-limited by _generation_semaphore).
-      5. Persist the result and write an audit event.
+      1. Enforce per-user daily token quota (raises 429 if exhausted).
+      2. Load the analyst JSON input for this section.
+      3. Retrieve keyword-matched evidence chunks from uploaded PDFs.
+      4. Mark the SectionOutput record as "generating" (upsert).
+      5. Call Gemini (rate-limited by _generation_semaphore).
+      6. Record tokens consumed against the user's daily quota.
+      7. Persist the result and write an audit event.
     """
+    # Step 1: quota gate — fail fast before any expensive work
+    await check_quota(db, actor_user_id)
+
     si_result = await db.execute(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
@@ -104,6 +110,9 @@ async def run_section_generation(
         output.model_id = CREDIT_REPORT_MODEL
         output.tokens_used = tokens_used
         output.generated_at = datetime.now(timezone.utc)
+
+        # Record consumption against the user's daily quota
+        await record_tokens(db, actor_user_id, tokens_used)
 
         await write_event(
             db,

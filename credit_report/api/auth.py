@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import time
 import uuid
+from collections import defaultdict
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,22 +29,62 @@ from credit_report.security.auth import (
 )
 from credit_report.security.models import User, VALID_ROLES
 
+# ── Login brute-force protection ─────────────────────────────────────────────
+# Per-IP failed attempt tracking (in-memory; resets on restart which is fine
+# for a single-instance deployment — Render free tier runs one instance).
+_failed: dict[str, list[float]] = defaultdict(list)
+_MAX_FAILURES = 10    # max failures before block
+_WINDOW_SECS = 300    # 5-minute sliding window for counting failures
+_BLOCK_SECS = 900     # 15-minute block after threshold exceeded
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    return forwarded.split(",")[0].strip() if forwarded else (request.client.host or "unknown")
+
+
+def _check_brute_force(ip: str) -> None:
+    now = time.time()
+    _failed[ip] = [t for t in _failed[ip] if now - t < _BLOCK_SECS]
+    recent = [t for t in _failed[ip] if now - t < _WINDOW_SECS]
+    if len(recent) >= _MAX_FAILURES:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again in 15 minutes.",
+        )
+
+
+def _record_failure(ip: str) -> None:
+    _failed[ip].append(time.time())
+
+
+def _clear_failures(ip: str) -> None:
+    _failed.pop(ip, None)
+
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    # form_data.username is the email field (OAuth2 standard uses "username")
+    ip = _client_ip(request)
+    _check_brute_force(ip)
+
+    # form_data.username holds the email (OAuth2 standard field name)
     result = await db.execute(select(User).where(User.email == form_data.username))
     user = result.scalar_one_or_none()
     if not user or not verify_password(form_data.password, user.hashed_password):
+        _record_failure(ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
+        _record_failure(ip)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account inactive")
 
+    _clear_failures(ip)
     await write_event(db, action="auth.login", actor_user_id=user.id, actor_role=user.role)
     return TokenResponse(
         access_token=create_access_token(user.id, user.role),

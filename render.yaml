@@ -26,6 +26,8 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: DAILY_TOKEN_LIMIT
+        value: "4000000"
       - key: CR_MAX_CONCURRENT_GENERATIONS
         value: "1"
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
