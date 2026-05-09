@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from credit_report import router as credit_report_router
-from credit_report.database import Base, engine
+from credit_report.database import AsyncSessionLocal, Base, engine
 
 # Import all models so Base.metadata knows about every table
 import credit_report.models  # noqa: F401
@@ -18,11 +20,34 @@ import credit_report.calculation_engine.models  # noqa: F401
 import credit_report.block_ast.models  # noqa: F401
 import credit_report.generation.models  # noqa: F401
 
+from credit_report.security.models import User
+from credit_report.security.auth import hash_password
+
+
+async def _seed_admin() -> None:
+    email = os.getenv("ADMIN_EMAIL", "")
+    password = os.getenv("ADMIN_PASSWORD", "")
+    if not email or not password:
+        return
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.email == email))
+        if result.scalar_one_or_none():
+            return
+        session.add(User(
+            id=str(uuid.uuid4()),
+            email=email,
+            hashed_password=hash_password(password),
+            role="admin",
+            is_active=True,
+        ))
+        await session.commit()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _seed_admin()
     yield
 
 
