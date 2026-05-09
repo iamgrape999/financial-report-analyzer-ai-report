@@ -1,0 +1,26 @@
+fastapi
+uvicorn[standard]
+requests
+pydantic
+python-dotenv
+google-genai
+boto3
+botocore
+cerebras-cloud-sdk
+mistralai
+
+# Credit Report AI Pipeline — Sprint 1
+anthropic>=0.43.0
+pdfminer.six
+pypdf>=4.0.0
+python-multipart
+markdown
+sqlalchemy>=2.0
+alembic
+asyncpg
+aiosqlite
+httpx
+itsdangerous>=2.0
+passlib>=1.7
+jsonpath-ng
+pyyaml
