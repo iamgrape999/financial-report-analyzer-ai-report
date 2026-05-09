@@ -24,3 +24,4 @@ itsdangerous>=2.0
 passlib>=1.7
 jsonpath-ng
 pyyaml
+pytest-asyncio
