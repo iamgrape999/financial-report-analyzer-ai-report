@@ -26,6 +26,17 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 VALID_STATUSES = ("draft", "validated", "review_in_progress", "approved")
 
 
+def _assert_owner_or_admin(report: Report, current_user: User) -> None:
+    """Raise 403 if the user is not the report creator and not an admin."""
+    if current_user.role == "admin":
+        return
+    if report.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this report.",
+        )
+
+
 def _strip_instruction_keys(obj):
     """Recursively remove keys starting with '_' from the input JSON."""
     if isinstance(obj, dict):
@@ -147,6 +158,7 @@ async def delete_report(
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    _assert_owner_or_admin(report, current_user)
 
     report.is_deleted = True
     await write_event(
@@ -160,7 +172,7 @@ async def delete_report(
     )
 
 
-# ── Section Inputs ────────────────────────────────────────────────────────────────────────────
+# ── Section Inputs ────────────────────────────────────────────────────────────────────────────────────────────
 
 @router.put("/{report_id}/inputs/{section_no}", response_model=SectionInputResponse)
 async def save_section_input(

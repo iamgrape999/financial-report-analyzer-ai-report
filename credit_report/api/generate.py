@@ -27,7 +27,7 @@ router = APIRouter(prefix="/reports/{report_id}", tags=["generation"])
 _MAX_UPLOAD_BYTES = CREDIT_REPORT_MAX_UPLOAD_MB * 1024 * 1024
 
 
-# ── Schemas ───────────────────────────────────────────────────────────────────
+# ── Schemas ─────────────────────────────────────────────────────────────────────────────
 
 class DocumentOut(BaseModel):
     id: str
@@ -58,7 +58,7 @@ class GenerateAllResult(BaseModel):
     sections: dict[str, str]
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────────────────────
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
     result = await db.execute(
@@ -68,6 +68,17 @@ async def _require_report(db: AsyncSession, report_id: str) -> Report:
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     return report
+
+
+def _assert_owner_or_admin(report: Report, current_user: User) -> None:
+    """Raise 403 if the user is not the report creator and not an admin."""
+    if current_user.role == "admin":
+        return
+    if report.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this report.",
+        )
 
 
 def _output_to_schema(o: SectionOutput) -> SectionOutputOut:
@@ -81,7 +92,7 @@ def _output_to_schema(o: SectionOutput) -> SectionOutputOut:
     )
 
 
-# ── Document management ───────────────────────────────────────────────────────
+# ── Document management ───────────────────────────────────────────────────────────────────────────────────
 
 @router.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def upload_document(
@@ -154,7 +165,7 @@ async def delete_document(
     doc.is_deleted = True
 
 
-# ── Section generation ────────────────────────────────────────────────────────
+# ── Section generation ───────────────────────────────────────────────────────────────────────────────────
 
 @router.post("/generate/{section_no}", response_model=GenerateOneResult)
 async def generate_section(
@@ -167,7 +178,8 @@ async def generate_section(
     if section_no < 1 or section_no > 10:
         raise HTTPException(status_code=400, detail="section_no must be 1–10")
 
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
 
     missing = await check_hard_dependencies(db, report_id, section_no)
     if missing:
@@ -200,7 +212,8 @@ async def generate_full_report(
     current_user: User = Depends(require_analyst),
 ):
     """Trigger AI generation for all sections in dependency order."""
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
     results = await run_full_report_generation(
         db=db,
         report_id=report_id,
@@ -209,7 +222,7 @@ async def generate_full_report(
     return GenerateAllResult(sections={str(k): v for k, v in results.items()})
 
 
-# ── Section output retrieval ──────────────────────────────────────────────────
+# ── Section output retrieval ──────────────────────────────────────────────────────────────────────────────────
 
 @router.get("/sections/{section_no}/output", response_model=SectionOutputOut)
 async def get_section_output_endpoint(
