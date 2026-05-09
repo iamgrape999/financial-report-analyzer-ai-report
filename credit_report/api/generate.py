@@ -194,6 +194,7 @@ async def generate_section(
             report_id=report_id,
             section_no=section_no,
             actor_user_id=current_user.id,
+            actor_role=current_user.role,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Generation failed: {exc}")
@@ -218,6 +219,7 @@ async def generate_full_report(
         db=db,
         report_id=report_id,
         actor_user_id=current_user.id,
+        actor_role=current_user.role,
     )
     return GenerateAllResult(sections={str(k): v for k, v in results.items()})
 

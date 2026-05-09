@@ -54,6 +54,7 @@ async def run_section_generation(
     report_id: str,
     section_no: int,
     actor_user_id: str,
+    actor_role: str = "analyst",
     preceding_outputs: Optional[dict[int, str]] = None,
 ) -> SectionOutput:
     """
@@ -69,7 +70,7 @@ async def run_section_generation(
       7. Persist the result and write an audit event.
     """
     # Step 1: quota gate — fail fast before any expensive work
-    await check_quota(db, actor_user_id)
+    await check_quota(db, actor_user_id, role=actor_role)
 
     si_result = await db.execute(
         select(SectionInput).where(
@@ -146,6 +147,7 @@ async def run_full_report_generation(
     db: AsyncSession,
     report_id: str,
     actor_user_id: str,
+    actor_role: str = "analyst",
 ) -> dict[int, str]:
     """
     Generate all sections in GENERATION_ORDER, skipping any whose hard
@@ -168,6 +170,7 @@ async def run_full_report_generation(
                 report_id=report_id,
                 section_no=section_no,
                 actor_user_id=actor_user_id,
+                actor_role=actor_role,
                 preceding_outputs=generated_outputs,
             )
             results[section_no] = output.status
