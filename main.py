@@ -3,12 +3,16 @@ from __future__ import annotations
 import os
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from credit_report import router as credit_report_router
+from credit_report.config import AUTO_CREATE_TABLES, parse_cors_origins, validate_runtime_security
 from credit_report.database import AsyncSessionLocal, Base, engine
 
 # Import all models so Base.metadata knows about every table
@@ -22,6 +26,8 @@ import credit_report.generation.models  # noqa: F401
 
 from credit_report.security.models import User
 from credit_report.security.auth import hash_password
+
+UI_DIR = Path(__file__).parent / "credit_report" / "ui"
 
 
 async def _seed_admin() -> None:
@@ -45,8 +51,10 @@ async def _seed_admin() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    validate_runtime_security()
+    if AUTO_CREATE_TABLES:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     await _seed_admin()
     yield
 
@@ -58,15 +66,31 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins = parse_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*").split(","),
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials="*" not in cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(credit_report_router)
+
+
+@app.get("/app", include_in_schema=False)
+async def app_index():
+    """Redirect the bare UI path to the mounted static app index."""
+    return RedirectResponse(url="/app/")
+
+
+app.mount("/app", StaticFiles(directory=UI_DIR, html=True), name="credit-report-ui")
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    return RedirectResponse(url="/app/")
 
 
 @app.get("/health", tags=["health"])

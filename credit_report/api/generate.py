@@ -70,6 +70,18 @@ async def _require_report(db: AsyncSession, report_id: str) -> Report:
     return report
 
 
+def _can_view_report(report: Report, current_user: User) -> bool:
+    return current_user.role in {"admin", "reviewer", "approver"} or report.created_by == current_user.id
+
+
+def _assert_can_view_report(report: Report, current_user: User) -> None:
+    if not _can_view_report(report, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this report.",
+        )
+
+
 def _assert_owner_or_admin(report: Report, current_user: User) -> None:
     """Raise 403 if the user is not the report creator and not an admin."""
     if current_user.role == "admin":
@@ -102,7 +114,8 @@ async def upload_document(
     current_user: User = Depends(require_analyst),
 ):
     """Upload a PDF evidence document for a report."""
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
@@ -136,7 +149,8 @@ async def list_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_can_view_report(report, current_user)
     result = await db.execute(
         select(SectionDocument)
         .where(SectionDocument.report_id == report_id, SectionDocument.is_deleted == False)
@@ -152,6 +166,8 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
     result = await db.execute(
         select(SectionDocument).where(
             SectionDocument.id == doc_id,
@@ -197,6 +213,7 @@ async def generate_section(
             actor_role=current_user.role,
         )
     except Exception as exc:
+        await db.commit()
         raise HTTPException(status_code=500, detail=f"Generation failed: {exc}")
 
     return GenerateOneResult(
@@ -233,7 +250,8 @@ async def get_section_output_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_can_view_report(report, current_user)
     output = await get_section_output(db, report_id, section_no)
     if not output:
         raise HTTPException(status_code=404, detail="Section output not found")
@@ -246,7 +264,8 @@ async def list_outputs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _require_report(db, report_id)
+    report = await _require_report(db, report_id)
+    _assert_can_view_report(report, current_user)
     result = await db.execute(
         select(SectionOutput)
         .where(SectionOutput.report_id == report_id)

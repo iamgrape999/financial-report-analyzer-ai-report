@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+ENVIRONMENT: str = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "development")).lower()
+IS_PRODUCTION: bool = ENVIRONMENT in {"prod", "production"} or os.getenv("RENDER", "").lower() == "true"
+
 # ── Database ─────────────────────────────────────────────────────────────────────────────────────
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
@@ -10,12 +13,12 @@ DATABASE_URL: str = os.getenv(
 )
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "false" if IS_PRODUCTION else "true").lower() == "true"
 
 # ── LLM ──────────────────────────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-CREDIT_REPORT_MODEL: str = os.getenv("CREDIT_REPORT_MODEL", "claude-sonnet-4-6")
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GENERATION_MODEL_ID: str = os.getenv("GENERATION_MODEL_ID", GEMINI_MODEL)
 CR_SECTION_MAX_TOKENS: int = int(os.getenv("CR_SECTION_MAX_TOKENS", "8192"))
 CR_MAX_CONCURRENT_GENERATIONS: int = int(os.getenv("CR_MAX_CONCURRENT_GENERATIONS", "2"))
 DAILY_TOKEN_LIMIT: int = int(os.getenv("DAILY_TOKEN_LIMIT", "4000000"))
@@ -33,8 +36,11 @@ CREDIT_REPORTS_ROOT: Path = Path(os.getenv("CREDIT_REPORTS_ROOT", "./data/credit
 CR_MAX_CHUNKS_PER_SECTION: int = int(os.getenv("CR_MAX_CHUNKS_PER_SECTION", "12"))
 CREDIT_REPORT_MAX_UPLOAD_MB: int = int(os.getenv("CREDIT_REPORT_MAX_UPLOAD_MB", "50"))
 
+CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "*")
+
 # ── Auth ──────────────────────────────────────────────────────────────────────────────────────
-SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
+SECRET_KEY: str = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)
 ALGORITHM: str = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -104,3 +110,22 @@ CONTINUATION_RESUME_TOKENS: dict[int, str | None] = {
     9: "[§9 CONTINUED]",
     10: "[§10 CONTINUED]",
 }
+
+
+def validate_runtime_security() -> None:
+    """Fail fast when production security-sensitive settings are unsafe."""
+    if IS_PRODUCTION and SECRET_KEY == DEFAULT_SECRET_KEY:
+        raise RuntimeError("SECRET_KEY must be set to a strong non-default value in production")
+    if IS_PRODUCTION and "*" in parse_cors_origins():
+        raise RuntimeError("CORS_ALLOW_ORIGINS must list explicit trusted origins in production")
+
+
+def parse_cors_origins(raw_origins: str | None = None) -> list[str]:
+    """Parse comma-separated CORS origins, removing blanks and duplicates."""
+    raw = CORS_ALLOW_ORIGINS if raw_origins is None else raw_origins
+    origins: list[str] = []
+    for origin in raw.split(","):
+        cleaned = origin.strip()
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
+    return origins or ["*"]

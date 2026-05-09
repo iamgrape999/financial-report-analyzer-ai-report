@@ -20,7 +20,7 @@ Covers:
   16. Hard dependency check — fails when dep missing
   17. Hard dependency check — fails when dep still generating
   18. Pipeline — stores SectionOutput status=done on success
-  19. Pipeline — stores SectionOutput status=error on Claude failure
+  19. Pipeline — stores SectionOutput status=error on Gemini failure
   20. Full report pipeline — all sections generated when no deps missing
   21. Full report pipeline — section 2 skipped when section 7 not done
 """
@@ -45,7 +45,7 @@ import credit_report.generation.models  # noqa: F401
 import credit_report.models  # noqa: F401
 import credit_report.security.models  # noqa: F401
 
-from credit_report.generation.claude_client import (
+from credit_report.generation.gemini_client import (
     _detect_continuation_token,
     _strip_continuation_token,
 )
@@ -269,7 +269,7 @@ async def test_pipeline_stores_done_output_on_success(db: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_pipeline_marks_error_on_claude_failure(db: AsyncSession):
+async def test_pipeline_marks_error_on_gemini_failure(db: AsyncSession):
     db.add(SectionInput(
         id=str(uuid.uuid4()),
         report_id=REPORT_ID,

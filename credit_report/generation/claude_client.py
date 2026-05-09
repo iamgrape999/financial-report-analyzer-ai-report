@@ -1,91 +1,14 @@
-from __future__ import annotations
+"""Backward-compatible import shim for the Gemini generation client.
 
-from typing import Optional
+The implementation was renamed to ``gemini_client`` to reflect the actual
+provider used by the pipeline. This module remains temporarily so older tests
+or integrations importing ``credit_report.generation.claude_client`` continue
+to work while callers migrate.
+"""
 
-from google import genai
-from google.genai import types as genai_types
-
-from credit_report.config import (
-    CONTINUATION_END_TOKENS,
-    CONTINUATION_RESUME_TOKENS,
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
-    CR_SECTION_MAX_TOKENS,
-    SECTION_MAX_OUTPUT_TOKENS,
+from credit_report.generation.gemini_client import (  # noqa: F401
+    MAX_CONTINUATION_ROUNDS,
+    _detect_continuation_token,
+    _strip_continuation_token,
+    generate_section_markdown,
 )
-from credit_report.generation.prompt_builder import build_section_prompt
-
-MAX_CONTINUATION_ROUNDS = 3
-
-
-def _detect_continuation_token(text: str, section_no: int) -> bool:
-    token = CONTINUATION_END_TOKENS.get(section_no)
-    return bool(token and token in text)
-
-
-def _strip_continuation_token(text: str, section_no: int) -> str:
-    token = CONTINUATION_END_TOKENS.get(section_no)
-    if token:
-        text = text.replace(token, "")
-    return text.strip()
-
-
-async def generate_section_markdown(
-    section_no: int,
-    input_json: dict,
-    evidence_chunks: list[str],
-    preceding_outputs: Optional[dict[int, str]] = None,
-    api_key: Optional[str] = None,
-    model_id: Optional[str] = None,
-) -> tuple[str, int]:
-    """
-    Call Gemini and assemble multi-part section Markdown with continuation support.
-
-    Returns (full_markdown, total_tokens_used).
-    """
-    key = api_key or GEMINI_API_KEY
-    model = model_id or GEMINI_MODEL
-    max_tokens = SECTION_MAX_OUTPUT_TOKENS.get(section_no) or CR_SECTION_MAX_TOKENS
-
-    client = genai.Client(api_key=key)
-
-    parts: list[str] = []
-    total_tokens = 0
-
-    for round_no in range(MAX_CONTINUATION_ROUNDS):
-        is_continuation = round_no > 0
-        resume_token = CONTINUATION_RESUME_TOKENS.get(section_no) if is_continuation else None
-
-        system_prompt, user_prompt = build_section_prompt(
-            section_no=section_no,
-            input_json=input_json,
-            evidence_chunks=evidence_chunks,
-            preceding_outputs=preceding_outputs,
-            is_continuation=is_continuation,
-            continuation_resume_token=resume_token,
-        )
-
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=user_prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=max_tokens,
-            ),
-        )
-
-        text = response.text or ""
-        usage = response.usage_metadata
-        if usage:
-            total_tokens += (usage.prompt_token_count or 0) + (usage.candidates_token_count or 0)
-
-        needs_continuation = _detect_continuation_token(text, section_no)
-        parts.append(_strip_continuation_token(text, section_no))
-
-        finish_reason = (
-            response.candidates[0].finish_reason if response.candidates else None
-        )
-        if not needs_continuation or str(finish_reason) != "STOP":
-            break
-
-    return "\n\n".join(parts).strip(), total_tokens

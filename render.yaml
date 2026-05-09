@@ -20,12 +20,18 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      - key: GENERATION_MODEL_ID
+        value: gemini-2.5-flash
       - key: SECRET_KEY
         generateValue: true
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: AUTO_CREATE_TABLES
+        value: "false"
       - key: DAILY_TOKEN_LIMIT
         value: "4000000"
       - key: CR_MAX_CONCURRENT_GENERATIONS
@@ -33,4 +39,4 @@ services:
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
       - key: CORS_ALLOW_ORIGINS
-        value: "*"
+        sync: false

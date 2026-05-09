@@ -12,11 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from credit_report.audit.events import write_event
 from credit_report.config import (
     CR_MAX_CONCURRENT_GENERATIONS,
-    CREDIT_REPORT_MODEL,
+    GENERATION_MODEL_ID,
     GENERATION_ORDER,
     SECTION_HARD_DEPENDENCIES,
 )
-from credit_report.generation.claude_client import generate_section_markdown
+from credit_report.generation.gemini_client import generate_section_markdown
 from credit_report.generation.evidence import retrieve_evidence
 from credit_report.generation.quota import check_quota, record_tokens
 from credit_report.models import SectionInput, SectionOutput
@@ -108,7 +108,7 @@ async def run_section_generation(
 
         output.markdown = markdown
         output.status = "done"
-        output.model_id = CREDIT_REPORT_MODEL
+        output.model_id = GENERATION_MODEL_ID
         output.tokens_used = tokens_used
         output.generated_at = datetime.now(timezone.utc)
 
@@ -123,7 +123,7 @@ async def run_section_generation(
             report_id=report_id,
             target_type="section_output",
             target_id=f"{report_id}/{section_no}",
-            after=f"tokens={tokens_used} model={CREDIT_REPORT_MODEL}",
+            after=f"tokens={tokens_used} model={GENERATION_MODEL_ID}",
         )
     except Exception as exc:
         output.status = "error"

@@ -10,7 +10,6 @@ cerebras-cloud-sdk
 mistralai
 
 # Credit Report AI Pipeline — Sprint 1
-anthropic>=0.43.0
 pdfminer.six
 pypdf>=4.0.0
 python-multipart
