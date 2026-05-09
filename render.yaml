@@ -1,0 +1,34 @@
+databases:
+  - name: financial-report-db
+    databaseName: financial_report
+    user: financial_report
+    plan: free
+
+services:
+  - type: web
+    name: financial-report-analyzer
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: financial-report-db
+          property: connectionString
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CREDIT_REPORT_MODEL
+        value: claude-sonnet-4-6
+      - key: CR_MAX_CONCURRENT_GENERATIONS
+        value: "1"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: CORS_ALLOW_ORIGINS
+        value: "*"

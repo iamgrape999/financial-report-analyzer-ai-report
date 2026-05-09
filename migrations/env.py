@@ -17,6 +17,7 @@ import credit_report.audit.events  # noqa: F401
 import credit_report.models  # noqa: F401
 import credit_report.calculation_engine.models  # noqa: F401
 import credit_report.block_ast.models  # noqa: F401
+import credit_report.generation.models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
