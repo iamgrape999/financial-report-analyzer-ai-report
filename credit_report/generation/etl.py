@@ -144,34 +144,170 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
   }
 }""",
 
-    4: """Section 4 — Corporate Background:
-{company_name_en, company_name_zh, legal_entity_type, registration_number, ubn,
-incorporation_date, listing_date, stock_exchange, incorporation_country,
-ultimate_beneficial_owner, chairman, general_manager, finance_manager,
-shareholders[{name, stake_percent, country}],
-key_management[{name, title, years_experience, background}],
-business_description, primary_business, years_in_operation,
-global_ranking, teu_capacity, market_share_pct,
-fleet_owned[{vessel, type, dwt, teu, year_built, flag, charter}],
-total_fleet_teu, major_customers[{name, contract_type, duration_years}],
-annual_revenue, currency, reporting_entity,
-ebitda, market_position, group_auditor,
-banking_relationships[{bank, product}],
-peer_comparison[{company, fleet_teu, market_share_pct}]}""",
+    4: """Section 4 — Corporate History and Overview:
+{
+  "4A_borrower": {
+    "company_name_en": null,
+    "company_name_zh": null,
+    "legal_entity_type": null,
+    "registration_number": null,
+    "ubn": null,
+    "incorporation_country": null,
+    "incorporation_date": null,
+    "listing_exchange": null,
+    "listing_date": null,
+    "reporting_entity": null,
+    "group_auditor": null,
+    "fiscal_year_end": null,
+    "principal_office": null
+  },
+  "4B_ownership": {
+    "shareholders": [{"name": null, "stake_percent": null, "country": null, "notes": null}],
+    "ultimate_beneficial_owner": null,
+    "ubo_stake_pct": null,
+    "ubo_holding_entity": null,
+    "group_structure_narrative": null
+  },
+  "4C_management": [
+    {"name": null, "title": null, "years_experience": null, "background": null}
+  ],
+  "4D_business": {
+    "primary_business": null,
+    "trade_routes": null,
+    "operational_model": null,
+    "years_in_operation": null,
+    "global_ranking": null,
+    "market_share_pct": null
+  },
+  "4E_financials": {
+    "currency": null,
+    "unit": null,
+    "fiscal_year": null,
+    "revenue": null,
+    "ebitda": null,
+    "ebitda_margin_pct": null,
+    "net_income": null,
+    "net_cash_debt": null,
+    "net_debt_ebitda": null,
+    "fx_rate_to_usd": null,
+    "revenue_breakdown": [{"segment": null, "amount": null, "pct_of_total": null}]
+  },
+  "4F_fleet": {
+    "total_owned_teu": null,
+    "total_fleet_teu": null,
+    "fleet_breakdown": [
+      {"category": null, "vessel_count": null, "total_teu": null, "total_dwt": null, "notes": null}
+    ],
+    "fleet_detail": [
+      {"vessel_name": null, "type": null, "teu": null, "dwt": null,
+       "year_built": null, "flag": null, "class_society": null, "employment": null}
+    ]
+  },
+  "4G_debt_profile": [
+    {"lender_bond": null, "facility_type": null, "ccy": null,
+     "amount": null, "maturity": null, "secured_unsecured": null}
+  ],
+  "4H_banking_relationships": [
+    {"bank": null, "product": null, "limit_usd_m": null, "since": null}
+  ],
+  "4I_market_data": {
+    "ccfi_level": null,
+    "scfi_level": null,
+    "ccfi_yoy_pct": null,
+    "order_book_pct_of_fleet": null,
+    "alliance_membership": null,
+    "imo_regulatory_notes": null,
+    "tariff_risk_notes": null
+  },
+  "4J_peer_comparison": [
+    {"company": null, "fleet_teu": null, "market_share_pct": null,
+     "alliance": null, "listed_yn": null}
+  ],
+  "4K_major_customers": [
+    {"name": null, "contract_type": null, "duration_years": null}
+  ]
+}""",
 
-    5: """Section 5 — Collateral / Support:
-{collateral_type, refund_guarantee{issuer, issuer_rating, amount_usd_m,
-  coverage_pct_max_exposure, coverage_pct_first_milestones, expiry, legal_structure},
-vessel_valuations[{vessel, dwt, teu, year_built, market_value_usd_m, distressed_value_usd_m,
-  valuation_date, valuer, valuation_basis}],
-contract_price_usd_m, loan_amount_usd_m,
-ltc_percent, acr_percent, ltv_at_maturity_percent, balloon_usd_m, balloon_ltv_pct,
-value_maintenance_clause{acr_threshold_pct, ltv_threshold_pct, test_frequency_years,
-  cure_period_banking_days, remedy_options[]},
-insurance{h_and_m, p_and_i, war_risk},
-guarantor_support{market_cap_usd_m, total_fleet_teu, guarantee_scope, support_history},
-responsible_person_guarantee (bool),
-collateral_adequacy_conclusion}""",
+    5: """Section 5 — Collateral / Responsible Person / Guarantor / Support:
+{
+  "5A_security_overview": {
+    "is_secured": null,
+    "unsecured_reason": null,
+    "security_instruments": [{"rank": null, "instrument": null, "description": null}]
+  },
+  "5B_refund_guarantee": {
+    "applicable": null,
+    "issuer_full_name": null,
+    "issuer_rating": null,
+    "rating_agency": null,
+    "legal_structure": null,
+    "governing_law": null,
+    "assigned_to_cub": null,
+    "expiry_condition": null,
+    "milestones": [
+      {"milestone": null, "sched_date": null, "rg_amount_usd_m": null,
+       "max_loan_os_usd_m": null, "coverage_pct": null,
+       "drawdown_usd_m": null, "cum_drawdown_usd_m": null, "status": null}
+    ],
+    "footnotes": null
+  },
+  "5C_vessel_mortgage": {
+    "applicable": null,
+    "vessel_valuations": [
+      {"vessel": null, "teu": null, "dwt": null, "year_built": null,
+       "valuer": null, "valuation_date": null,
+       "market_value_usd_m": null, "distressed_value_usd_m": null}
+    ],
+    "gongwen_ref": null,
+    "valuation_compliant": null,
+    "contract_price_usd_m": null,
+    "loan_amount_usd_m": null,
+    "ltc_pct": null,
+    "ltc_limit_pct": null,
+    "acr_at_delivery_pct": null,
+    "acr_floor_pct": null,
+    "balloon_usd_m": null,
+    "ltv_at_maturity_pct": null,
+    "ltv_cap_pct": null,
+    "amortisation_schedule": [
+      {"period": null, "date": null, "principal_usd_m": null, "interest_usd_m": null,
+       "total_debt_service_usd_m": null, "outstanding_balance_usd_m": null, "ltv_pct": null}
+    ]
+  },
+  "5D_insurance": [
+    {"type": null, "insurer_or_club": null, "insured_value_usd_m": null, "notes": null}
+  ],
+  "5E_value_maintenance_clause": {
+    "acr_covenant_pct": null,
+    "ltv_covenant_pct": null,
+    "test_frequency_verbatim": null,
+    "cure_period_banking_days": null,
+    "remedy_options": [],
+    "cure_mechanism_verbatim": null
+  },
+  "5F_corporate_guarantee": {
+    "applicable": null,
+    "guarantor_full_name": null,
+    "guarantor_listed_exchange": null,
+    "relationship_to_borrower": null,
+    "guarantee_scope": null,
+    "guarantee_phases": [],
+    "fx_rate_to_usd": null,
+    "guarantor_financials": [
+      {"metric": null, "fy_prior_twd_bn": null, "fy_prior_usd_bn": null,
+       "fy_current_twd_bn": null, "fy_current_usd_bn": null}
+    ],
+    "support_capacity_assessment": null,
+    "historical_support_record": null,
+    "guarantee_language": null
+  },
+  "5G_responsible_person": {
+    "provided": null,
+    "name": null,
+    "title": null,
+    "scope": null
+  }
+}""",
 
     6: """Section 6 — Project Analysis:
 {vessel_name, hull_number, vessel_type, vessel_class, dwt, teu, grt, loa_m, beam_m,
