@@ -32,7 +32,7 @@ def upgrade() -> None:
     sa.Column('after', sa.Text(), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
     sa.Column('extra', sa.Text(), nullable=True),
-    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_audit_events_action'), 'audit_events', ['action'], unique=False)
@@ -56,7 +56,7 @@ def upgrade() -> None:
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('last_edited_by', sa.String(length=36), nullable=True),
     sa.Column('override_reason', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('report_id', 'metric_name', 'entity', 'period', name='uq_fact_key')
@@ -70,7 +70,7 @@ def upgrade() -> None:
     sa.Column('booking_branch', sa.String(length=10), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('created_by', sa.String(length=36), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('is_deleted', sa.Boolean(), nullable=False),
     sa.PrimaryKeyConstraint('id')
@@ -81,7 +81,7 @@ def upgrade() -> None:
     sa.Column('section_no', sa.Integer(), nullable=False),
     sa.Column('input_json', sa.Text(), nullable=True),
     sa.Column('saved_by', sa.String(length=36), nullable=True),
-    sa.Column('saved_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('saved_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_section_inputs_report_id'), 'section_inputs', ['report_id'], unique=False)
@@ -103,7 +103,7 @@ def upgrade() -> None:
     sa.Column('hashed_password', sa.String(length=255), nullable=False),
     sa.Column('role', sa.String(length=20), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
@@ -125,7 +125,7 @@ def upgrade() -> None:
     sa.Column('resolution_reason', sa.Text(), nullable=True),
     sa.Column('resolved_by', sa.String(length=36), nullable=True),
     sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.ForeignKeyConstraint(['fact_a_id'], ['canonical_facts.id'], ),
     sa.ForeignKeyConstraint(['fact_b_id'], ['canonical_facts.id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -150,7 +150,7 @@ def upgrade() -> None:
     sa.Column('state', sa.String(length=20), nullable=False),
     sa.Column('edited_by', sa.String(length=36), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.ForeignKeyConstraint(['fact_id'], ['canonical_facts.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

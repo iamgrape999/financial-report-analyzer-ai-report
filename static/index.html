@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Financial Report Analyzer</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<style>
+/* ── Cathay Financial Holdings (國泰金控) brand: white / green / black ── */
+:root{--cg:#00703C;--cg-dark:#005a30;--cg-light:#e8f5ee;--cg-border:#b2dfce;}
+body{background:#f5f5f5;font-family:'Segoe UI',system-ui,sans-serif;color:#1a1a1a;}
+.navbar{background:#00703C;}
+.navbar-brand{letter-spacing:.3px;}
+.card{border:none;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);}
+.card-header{border-radius:12px 12px 0 0!important;font-weight:600;}
+#loginCard{max-width:420px;margin:6rem auto;}
+#loginCard .card-body{border-top:4px solid #00703C;border-radius:0 0 12px 12px;}
+.view{display:none;}.view.active{display:block;}
+.report-row{cursor:pointer;transition:background .12s;}.report-row:hover{background:#e8f5ee;}
+.sec-badge{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;}
+.s-done{background:#d1fae5;color:#065f46;}
+.s-generating{background:#fef3c7;color:#92400e;}
+.s-error{background:#fee2e2;color:#991b1b;}
+.s-pending{background:#e5e7eb;color:#374151;}
+.input-ok{color:#16a34a;font-weight:700;}
+.input-miss{color:#dc2626;font-weight:700;}
+.markdown-body{font-size:14px;line-height:1.78;}
+.markdown-body table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:13px;}
+.markdown-body th,.markdown-body td{border:1px solid #d1d5db;padding:6px 10px;text-align:left;}
+.markdown-body th{background:#e8f5ee;font-weight:600;color:#1a1a1a;}
+.markdown-body h2{font-size:1.2rem;margin-top:1.5rem;border-bottom:2px solid #00703C;padding-bottom:5px;}
+.markdown-body h3{font-size:1.05rem;margin-top:1.1rem;color:#00703C;}
+.markdown-body pre{background:#f4f4f5;padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;}
+#toast-cont{position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;}
+.spinner-sm{width:14px;height:14px;border-width:2px;}
+.section-panel{border-top:3px solid #00703C;}
+textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:vertical;}
+/* Review view */
+.review-sticky{position:sticky;top:0;z-index:100;background:#fff;border-bottom:3px solid #00703C;padding:8px 16px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.review-section-card{margin-bottom:2.5rem;scroll-margin-top:60px;}
+.review-section-card .card-header{font-size:1rem;font-weight:700;background:#00703C;color:#fff;}
+.sec2-stale{background:#fffbeb;border:1px solid #f59e0b;border-radius:10px;padding:12px 16px;margin:12px 16px;}
+/* Field completeness */
+.field-check-list{font-size:12px;line-height:1.6;}
+.field-filled{color:#16a34a;}
+.field-missing{color:#dc2626;margin-bottom:2px;}
+.completeness-bar{height:8px;border-radius:4px;background:#e5e7eb;overflow:hidden;margin:4px 0 8px;}
+#completenessPanel{background:#fafafa;border-radius:8px;}
+/* Bootstrap color overrides — Cathay green replaces Bootstrap blue */
+.btn-primary{background-color:#00703C!important;border-color:#00703C!important;color:#fff!important;}
+.btn-primary:hover,.btn-primary:focus,.btn-primary:active{background-color:#005a30!important;border-color:#005a30!important;}
+.btn-outline-primary{color:#00703C!important;border-color:#00703C!important;background:transparent!important;}
+.btn-outline-primary:hover{background-color:#00703C!important;color:#fff!important;}
+.bg-primary{background-color:#00703C!important;}
+.text-primary{color:#00703C!important;}
+.border-primary{border-color:#00703C!important;}
+.nav-tabs .nav-link.active{color:#00703C!important;border-color:#b2dfce #b2dfce #fff!important;}
+.nav-tabs .nav-link:hover{color:#005a30!important;}
+.table-light>*>tr>th,.table-light>*>tr>td,.table thead.table-light th{background-color:#e8f5ee!important;color:#1a1a1a;}
+.badge.bg-info{background-color:#0e9f6e!important;}
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-3 py-2 d-flex justify-content-between" style="border-bottom:3px solid #005a30;">
+  <span class="navbar-brand fw-bold" style="letter-spacing:.4px;">🏦 Financial Report Analyzer &nbsp;<small style="font-size:11px;opacity:.8;font-weight:400;">國泰金控</small></span>
+  <div class="d-flex align-items-center gap-2">
+    <button class="btn btn-sm btn-outline-light" onclick="toggleLang()" id="langBtn" title="Switch language / 切換語言">中文</button>
+    <div id="navUser" class="d-none text-white small d-flex align-items-center gap-2">
+      <span id="navRole" class="badge bg-light text-dark"></span>
+      <span id="navEmail"></span>
+      <button class="btn btn-sm btn-outline-light" onclick="logout()" id="btnLogout">Logout</button>
+    </div>
+  </div>
+</nav>
+<div id="toast-cont"></div>
+
+<!-- ══════════ LOGIN ══════════ -->
+<div id="viewLogin" class="view active container">
+  <div id="loginCard" class="card p-4">
+    <h4 class="text-center mb-4 fw-bold text-primary">Sign In</h4>
+    <div id="loginErr" class="alert alert-danger d-none small"></div>
+    <div class="mb-3"><label class="form-label fw-semibold">Email</label>
+      <input id="loginEmail" type="email" class="form-control" autofocus></div>
+    <div class="mb-4"><label class="form-label fw-semibold">Password</label>
+      <input id="loginPw" type="password" class="form-control"></div>
+    <button class="btn btn-primary w-100 fw-semibold" onclick="doLogin()">
+      <span id="loginSpin" class="spinner-border spinner-sm d-none me-2"></span>Sign In</button>
+  </div>
+</div>
+
+<!-- ══════════ DASHBOARD ══════════ -->
+<div id="viewDashboard" class="view container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="fw-bold mb-0">📋 Reports</h5>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createModal">+ New Report</button>
+  </div>
+  <div class="card">
+    <div class="card-body p-0">
+      <table class="table table-hover mb-0">
+        <thead class="table-light"><tr>
+          <th class="ps-3">Borrower</th><th>Type</th><th>Branch</th><th>Status</th><th>Created</th>
+        </tr></thead>
+        <tbody id="rptBody"><tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ REPORT DETAIL ══════════ -->
+<div id="viewReport" class="view container-fluid py-3 px-4">
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <button class="btn btn-outline-secondary btn-sm" onclick="showDashboard()">← Reports</button>
+    <h6 id="rptTitle" class="mb-0 fw-bold text-truncate flex-grow-1"></h6>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <!-- Report info -->
+    <div class="col-lg-5">
+      <div class="card h-100">
+        <div class="card-header bg-primary text-white py-2">Report Info</div>
+        <div class="card-body small" id="rptMeta"></div>
+      </div>
+    </div>
+    <!-- Evidence Documents -->
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-header py-2">📎 Evidence Documents <small class="text-muted fw-normal">(optional — enables ETL & improves AI quality)</small></div>
+        <div class="card-body small d-flex flex-column gap-2">
+          <select id="docType" class="form-select form-select-sm">
+            <option value="annual_report">📋 年報 / Annual Report</option>
+            <option value="financial_statement">💹 財務報告 / Financial Statement (Audited)</option>
+            <option value="analyst_presentation">🎤 法說會 / Analyst Presentation</option>
+            <option value="interim_report">📊 半年報 / Interim Report</option>
+            <option value="valuation_report">🚢 估值報告 / Vessel Valuation Report</option>
+            <option value="charter_agreement">📄 租船合約 / Charter Agreement</option>
+            <option value="shipbuilding_contract">⚓ 造船合約 / Shipbuilding Contract</option>
+            <option value="kyc_document">🔍 KYC文件 / KYC Document</option>
+            <option value="legal_document">⚖️ 法律文件 / Legal Document</option>
+            <option value="external_report">📰 外部報告 / External Report</option>
+            <option value="other">📁 其他 / Other</option>
+          </select>
+          <div class="d-flex gap-2">
+            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff" class="form-control form-control-sm">
+            <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload</button>
+          </div>
+          <small class="text-muted">PDF · DOCX · PPTX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
+          <div id="docList"><span class="text-muted">No documents uploaded yet.</span></div>
+        </div>
+      </div>
+    </div>
+    <!-- Actions -->
+    <div class="col-lg-3">
+      <div class="card h-100">
+        <div class="card-header py-2">Actions</div>
+        <div class="card-body d-flex flex-column gap-2">
+          <button class="btn btn-success btn-sm fw-semibold" onclick="preflight()">
+            <span id="genAllSpin" class="spinner-border spinner-sm d-none me-1"></span>⚡ Generate Full Report</button>
+          <button class="btn btn-primary btn-sm" onclick="openReview()">📖 Full Report Review</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="loadReportDetail(currentRid)">🔄 Refresh</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preflight alert -->
+  <div id="preflightAlert" class="alert alert-warning d-none small mb-3">
+    <strong>⚠ Cannot generate full report.</strong>
+    <div id="preflightMsg" class="mt-1"></div>
+  </div>
+
+  <!-- Sections table -->
+  <div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between">
+      <span>Sections — Click a row to edit input or view output</span>
+      <span class="text-muted small">✓ = input saved &nbsp;✗ = input missing</span>
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light"><tr>
+          <th class="ps-2" style="width:36px">#</th>
+          <th>Section</th>
+          <th class="text-center" style="width:48px">Input</th>
+          <th style="width:100px">Output</th>
+          <th style="width:80px">Tokens</th>
+          <th style="width:130px">Generated</th>
+          <th style="width:44px"></th>
+        </tr></thead>
+        <tbody id="secTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Section panel (input + output tabs) -->
+  <div class="card section-panel" id="secPanel" style="display:none">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+      <span id="secPanelTitle" class="fw-semibold"></span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="closePanel()">×</button>
+    </div>
+    <ul class="nav nav-tabs px-3 pt-2" id="panelTabs">
+      <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('input');return false">📋 Raw JSON</a></li>
+      <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('form');return false">📝 Structured Form</a></li>
+      <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('output');return false">📄 Generated Output</a></li>
+    </ul>
+
+    <!-- Input tab -->
+    <div id="tabInput" class="p-3">
+      <div class="d-flex gap-2 mb-2 flex-wrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate()">📋 Load Template</button>
+        <small class="text-muted align-self-center">Replace template values with actual report data, then Save.</small>
+      </div>
+      <textarea id="jsonEd" class="form-control json-ed" rows="20"></textarea>
+      <div class="d-flex gap-2 mt-2 align-items-center">
+        <button class="btn btn-primary btn-sm" onclick="saveSectionInput()">💾 Save Input</button>
+        <span id="savedAt" class="text-muted small"></span>
+      </div>
+      <!-- Field completeness checklist -->
+      <div id="completenessPanel" class="mt-3 p-3 border" style="display:none;"></div>
+    </div>
+
+    <!-- Structured Form tab -->
+    <div id="tabForm" class="p-3" style="display:none">
+      <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+        <button class="btn btn-primary btn-sm" onclick="saveFormInput()">💾 Save Form</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="syncFormToJson()">↔ Sync to JSON</button>
+        <small class="text-muted">Fill in each field below and click Save. ✗ fields are required for 90% completeness.</small>
+      </div>
+      <div id="formFields" class="row g-2"></div>
+    </div>
+
+    <!-- Output tab -->
+    <div id="tabOutput" class="p-3" style="display:none">
+      <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+        <button class="btn btn-success btn-sm" onclick="generateCurrentSection()">
+          <span id="secGenSpin" class="spinner-border spinner-sm d-none me-1"></span>⚡ Generate This Section</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadSectionOutput(currentPanelSec)">🔄 Refresh</button>
+        <span id="sec2Notice" class="badge bg-warning text-dark d-none">§2 should be regenerated after all other sections are done</span>
+      </div>
+      <div id="outputContent" class="markdown-body border rounded p-3" style="min-height:150px;max-height:700px;overflow-y:auto;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ FULL REPORT REVIEW ══════════ -->
+<div id="viewReview" class="view">
+  <div class="review-sticky">
+    <button class="btn btn-outline-secondary btn-sm" onclick="showView('viewReport')">← Back</button>
+    <strong class="me-2 small">Jump to:</strong>
+    <div id="reviewNav" class="d-flex gap-1 flex-wrap"></div>
+    <div class="ms-auto d-flex gap-2 flex-wrap">
+      <button class="btn btn-sm btn-outline-dark" onclick="exportReport()">📄 HTML</button>
+      <button class="btn btn-sm btn-outline-dark" onclick="exportMarkdown()">⬇ .md</button>
+      <button class="btn btn-sm btn-outline-dark" onclick="exportTxt()">📃 TXT</button>
+      <button class="btn btn-sm btn-outline-dark" onclick="exportPdf()">🖨 PDF</button>
+      <button class="btn btn-sm fw-semibold" style="background:#00703C;color:#fff" onclick="exportDocx()">
+        <span id="docxSpin" class="spinner-border spinner-sm d-none me-1"></span>📝 DOCX
+      </button>
+    </div>
+  </div>
+
+  <!-- §2 stale warning -->
+  <div id="sec2StaleWarn" class="sec2-stale d-none">
+    <strong>⚠ Section 2 (Overall Comments) may be outdated</strong> — one or more other sections were generated after §2 was written. §2 should be regenerated so it reflects the complete report.
+    <button class="btn btn-sm btn-warning ms-3" onclick="regenSec2()">🔄 Regenerate §2 Overall Comments (with full context)</button>
+    <span id="regenSpin" class="spinner-border spinner-sm d-none ms-2"></span>
+  </div>
+
+  <!-- Field completeness & quality report -->
+  <div id="qualityReport" class="container pt-3" style="max-width:960px;display:none;">
+    <div class="card mb-3">
+      <div class="card-header py-2" style="background:#1a1a1a;color:#fff;font-weight:700;">📊 Report Field Completeness &amp; Quality Check</div>
+      <div class="card-body" id="qualityReportContent"></div>
+    </div>
+  </div>
+  <div id="reviewContent" class="container py-3" style="max-width:960px;"></div>
+</div>
+
+<!-- Create Report Modal -->
+<div class="modal fade" id="createModal" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title fw-bold">New Report</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <div class="mb-3"><label class="form-label fw-semibold">Borrower Name</label>
+        <input id="nBorrower" class="form-control" placeholder="ACME Shipping Ltd."></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Industry</label>
+        <select id="nIndustry" class="form-select">
+          <option value="marine">Marine / Shipping</option>
+          <option value="corporate">Corporate</option>
+          <option value="trade">Trade Finance</option>
+        </select></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Report Type</label>
+        <input id="nType" class="form-control" placeholder="e.g. Credit Risk Assessment"></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Booking Branch</label>
+        <input id="nBranch" class="form-control" placeholder="e.g. Singapore"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+      <button class="btn btn-primary fw-semibold" onclick="createReport()">Create</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- ETL Modal -->
+<div class="modal fade" id="etlModal" tabindex="-1">
+  <div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header" style="background:#1a1a1a;color:#fff;">
+      <h5 class="modal-title fw-bold">🔍 AI Document ETL — Extracted Section Data</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body" id="etlModalBody">
+      <div class="text-center py-5">
+        <div class="spinner-border text-success" style="width:3rem;height:3rem;"></div>
+        <div class="mt-3 text-muted">Running AI extraction… this may take 20-40 seconds</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="text-muted small me-auto" id="etlModalStatus"></span>
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+  </div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- html-docx-js: client-side DOCX fallback (~50 KB) -->
+<script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
+<script>
+const API='/api/credit-report';
+let token=localStorage.getItem('token');
+let currentRole=localStorage.getItem('role');
+let currentEmail=localStorage.getItem('email');
+let currentRid=null;
+let currentPanelSec=null;
+let sectionInputMap={};     // {n: {has_data, saved_at}}
+let sectionInputDataMap={}; // {n: parsed input_json object} — cached for quality checks
+let sectionOutputMap={};    // {n: output_obj}
+let allOutputs=[];
+let uploadedDocs=[];        // cached document list for duplicate detection
+let lang=localStorage.getItem('lang')||'en';
+
+const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix'};
+const SNAMES_ZH={1:'融資結構與主要條款',2:'綜合評述',3:'信用風險評估',4:'借款人背景',5:'擔保品評估',6:'船舶融資概覽',7:'財務分析',8:'法律文件與抵押',9:'法規遵循清單',10:'附錄'};
+function snm(n){return lang==='zh'?(SNAMES_ZH[n]||SNAMES[n]):SNAMES[n];}
+
+const DOC_TYPE_LABELS={
+  annual_report:'年報 / Annual Report',
+  financial_statement:'財務報告 / Financial Statement',
+  analyst_presentation:'法說會 / Analyst Presentation',
+  interim_report:'半年報 / Interim Report',
+  valuation_report:'估值報告 / Valuation Report',
+  charter_agreement:'租船合約 / Charter Agreement',
+  shipbuilding_contract:'造船合約 / Shipbuilding Contract',
+  kyc_document:'KYC文件 / KYC Document',
+  legal_document:'法律文件 / Legal Document',
+  external_report:'外部報告 / External Report',
+  other:'其他 / Other',
+};
+
+function toggleLang(){
+  lang=lang==='zh'?'en':'zh';
+  localStorage.setItem('lang',lang);
+  document.getElementById('langBtn').textContent=lang==='zh'?'EN':'中文';
+  document.getElementById('btnLogout').textContent=lang==='zh'?'登出':'Logout';
+  // Re-render active view
+  renderSectionsTable();
+  if(document.getElementById('viewReview').classList.contains('active'))renderReview();
+}
+
+const TEMPLATES={
+  1:{report_date:"2026-05-07",bank_name:"Cathay United Bank",unit:"million USD",borrower_parent_group:"Evergreen Group (長榮集團)",risk_level:"Medium risk",all_facilities:[{item:1,borrower:"Evergreen Marine (Asia) Pte. Ltd. (EMA)",booking_office:"SG",current_facility_usd_m:null,proposed_facility_usd_m:178.50,is_new:true,outstanding_usd_m:0,ccy:"USD",tenor:"7 years after Vessel Delivery Date or 11 years after Initial Drawdown Date, whichever earlier",facility_type:"Committed Bilateral Term Loan (SLL)",collateral:"Pre-delivery: Refund Guarantee issued by Industrial Bank of Korea, assigned to CUB; Post-delivery: one 20,000 TEU LNG dual fuel containership (Hull No. 2891)",guarantor:"Evergreen Marine Corporation (Taiwan) Ltd (EMC)",notes:"[NEW]"},{item:2,borrower:"EMA",booking_office:"SG",current_facility_usd_m:128.75,proposed_facility_usd_m:128.75,is_new:false,outstanding_usd_m:0,ccy:"USD",tenor:"7 years after Vessel Delivery Date or 11 years after Initial Drawdown Date, whichever earlier",facility_type:"Committed Bilateral Term Loan (SLL)",collateral:"Pre-delivery: Refund Guarantee issued by Export-Import Bank of Korea, assigned to CUB; Post-delivery: one 14,000 TEU methanol dual fuel containership (Hull No. K712)",guarantor:"EMC",notes:""},{item:3,borrower:"EMA",booking_office:"SG",current_facility_usd_m:25.00,proposed_facility_usd_m:25.00,is_new:false,outstanding_usd_m:0,ccy:"USD",tenor:"3 years; maturity 15 Aug 2026",facility_type:"Committed Revolving Credit Facility",collateral:"NIL",guarantor:"EMC",notes:""},{item:4,borrower:"EMA",booking_office:"HO",current_facility_usd_m:85.00,proposed_facility_usd_m:85.00,is_new:false,outstanding_usd_m:0,ccy:"USD",tenor:"7 years after Delivery Date; maturity 15 Mar 2033",facility_type:"Committed Bilateral Term Loan",collateral:"One 12,500 TEU container ship (M/V Tree Pioneer)",guarantor:"EMC",notes:""}],credit_limit_total_current_usd_m:238.75,credit_limit_total_proposed_usd_m:417.25,outstanding_total_usd_m:0,psr_total_current_usd_m:13.68,psr_mtm_usd_m:3.90,psr_total_proposed_usd_m:0.88,borrower_proposed_exposure_total_usd_m:418.13,item_footnotes:["[1] Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period. Latest Vessel Delivery Date 27 Dec 2028.","[2] PSR limit is advised to client. ISDA not signed yet as client advised they do not require IRS in the near term.","[3] Last annual review of PSR spot limit was approved on 22 Dec 2025. This proposal requests to align maturity with Evergreen Group Annual Review date.","[4] Please refer to Appendix I for total CUB's exposure to Evergreen Group."],regulatory_compliance:{bank_net_worth_twd_bn:275,single_borrower_limit_pct:5,single_borrower_limit_twd_bn:13.75,usd_equivalent_usd_m:436,exchange_rate:31.52,exchange_rate_date:"2025-12-12",china_invested_enterprise:false,compliance_status:"Compliant",unsecured_drawdown_cap_pct:32,unsecured_drawdown_cap_usd_m:71.40,credit_breakdown:[{facility:"New vessel loan (Item 1)",credit_limit_usd_m:178.50,unsecured_usd_m:71.40,secured:"After delivery: 60% of appraised value"},{facility:"Existing vessel loan (Item 2)",credit_limit_usd_m:128.75,unsecured_usd_m:128.75,secured:"—"},{facility:"RCF (Item 3)",credit_limit_usd_m:25.00,unsecured_usd_m:25.00,secured:"—"},{facility:"Existing vessel loan (Item 4)",credit_limit_usd_m:85.00,unsecured_usd_m:23.62,secured:61.38}]},group_limit:{approved_group_limit_usd_m:750,total_proposed_group_utilization_usd_m:673.13,ema_proposed_exposure_usd_m:418.13,within_limit:true},purpose_of_report:"This report seeks approval for a new USD178.50m committed secured 11-year sustainability-linked bilateral term loan facility to EMA to finance one 20,000 TEU dual fuel (LNG, Diesel) containership under construction by Samsung Heavy Industries Co., Ltd. in South Korea. The facility amount represents 80% of vessel contract price of USD223.13m and is guaranteed by EMC. Pre-delivery security is Assignment of Refund Guarantee; post-delivery security is first priority vessel mortgage with ACR >= 120% / LTV < 83%. This report also proposes aligning the USD0.88m FX spot facility maturity with the Evergreen Group Annual Review date of 28 Feb 2026.",borrower:"Evergreen Marine (Asia) Pte. Ltd. (EMA)",guarantors:["Evergreen Marine Corporation (Taiwan) Ltd (EMC)"],lender:"Cathay United Bank Singapore Branch (CUB SG)",facility_type:"Committed Bilateral Term Loan (Sustainability-Linked)",tenor_years:11,tenor_structure:"4+7 (pre-delivery + post-delivery)",facility_amount_usd_m:178.50,facility_amount_formula:"Lesser of USD178,500,000 and 80% of Initial Market Value of Vessel",ltc_percent:80,purpose:"Acquisition of one 20,000 TEU dual fuel (LNG, Diesel) containership (Hull No. 2891) under construction at Samsung Heavy Industries Co., Ltd., South Korea",availability_period:"Till 6 months from vessel delivery date; undrawn limits automatically cancelled",maturity_date:"Estimated 30 Jun 2035",maturity_formula:"7 years after Delivery Date or 11 years after Initial Drawdown Date, whichever earlier",repayment_schedule:"First 5% repayment 6 months from delivery; subsequent 12 semi-annual instalments of 5% each; final 35% balloon at maturity",balloon_percent:35,mandatory_prepayment_triggers:["Upon sale, total loss, or requisition of title of Vessel, together with applicable breakage costs"],drawdown_conditions:{max_drawdowns:5,per_drawdown_cap_pct_of_cost:80,aggregate_cap_pct_of_contract:80,aggregate_cap_usd_m:178.50,pre_delivery_cap_usd_m:71.40},interest_rate_basis:"Term SOFR",pricing:"Term SOFR + 0.85%",margin_bps:85,interest_period:"3 months or 1 month, not exceeding 3 months",upfront_fee_pct:0.10,upfront_fee_usd:178500,annual_renewal_fee_usd:10000,security_pre_delivery:"Assignment of Refund Guarantee issued by Industrial Bank of Korea (IBK), fully covering each pre-delivery installment, assigned to CUB SG",security_post_delivery:"First priority perfected mortgage on Vessel for 120% of Facility Amount plus interest and costs, and assignment of insurances",collateral:["Pre-delivery: Assignment of Refund Guarantee (IBK) assigned to CUB","Post-delivery: First priority mortgage on Vessel for 120% of Facility Amount","Post-delivery: Assignment of earnings and insurances","EMC Corporate Guarantee"],value_maintenance_clause:{acr_minimum_pct:120,ltv_maximum_pct:83,testing_frequency:"Every 2 years post delivery",cure_period_days:21,cure_mechanism:"Partial prepayment or provision of additional collateral"},sustainability_linked_kpi:{description:"Annual testing; KPIs cover EMC fleet Scope 1 CO2 intensity reduction, MSCI ESG rating, and DJSI inclusion",max_margin_ratchet_bps:5,ratchet_direction:"Margin increase on KPI miss / decrease on KPI achievement"},financial_covenants:"NIL",other_conditions:["EMC to remain listed throughout the loan facility"],governing_law:"Singapore",conditions_precedent:["Execution of facility and security documents","EMC Corporate Guarantee","Assignment of Refund Guarantee from IBK to CUB SG","Satisfactory legal opinions","Evidence of upfront fee payment","KYC/AML completion","EMA and EMC board resolutions","Evidence of vessel construction contract and insurance arrangements","Customary conditions as specified in the Facility Agreement"],deal_comparison:[{term:"Guarantor",proposed:"EMC",previous:"EMC"},{term:"Amount",proposed:"USD178.50m (80% LTC)",previous:"USD128.75m (80% LTC)"},{term:"Purpose",proposed:"One 20,000 TEU newbuild",previous:"One 14,000 TEU newbuild"},{term:"Vessel Type",proposed:"20,000 TEU LNG dual fuel",previous:"14,000 TEU methanol dual fuel"},{term:"Tenor",proposed:"11 years (4+7)",previous:"11 years (4+7)"},{term:"Margin",proposed:"0.85% p.a.",previous:"0.85% p.a."},{term:"Upfront Fee",proposed:"0.10%",previous:"0.10%"},{term:"SLL Ratchet",proposed:"Max 5bps p.a.",previous:"Max 5bps p.a."},{term:"Drawdowns",proposed:"<=5",previous:"<=5"},{term:"Availability Period",proposed:"Till 6 months post delivery; undrawn cancelled",previous:"Till 6 months post delivery; undrawn cancelled"},{term:"Security",proposed:"Pre: RG Assignment (IBK); Post: First mortgage",previous:"Pre: RG Assignment (KEXIM); Post: First mortgage"},{term:"FMV Maintenance",proposed:">=120%",previous:">=120%"}]},
+  2:{note:"Generate LAST — AI synthesizes all §1,3-10 content",credit_decision:"APPROVE",recommendation_rationale:"Strong parent guarantee from EMC (listed on TWSE; D/E 0.31x; interest coverage 31.2x); conservative LTC 80% with ACR >= 120% / LTV <= 83% post-delivery; pre-delivery risk fully covered by IBK Refund Guarantee; sustainability-linked structure aligns with ESG objectives.",credit_overview_table:[{topic:"Borrower and group",comment:"EMA is a wholly-owned Singapore subsidiary of EMC and principal operating entity for Oakwood Maritime Group's international container shipping operations, managing 128 vessels with 1.02 million TEU capacity. EMC is the 12th largest containership operator globally with approximately 3.8% market share."},{topic:"Listed parent",comment:"EMC is listed on TWSE: 2609 and is the 3rd largest containership operator in Taiwan. EMC reported FY2024 revenue of TWD385.2bn (USD12.2bn) and net income of TWD78.5bn (USD2.5bn)."},{topic:"Balance sheet",comment:"As of 30 Sep 2025, EMC maintained net cash of TWD5.2bn (USD165m), down from TWD72bn at FYE2024 due to fleet renewal capex and TWD50/share dividend. EMC retains additional debt capacity of approximately TWD391bn (USD12.4bn) based on historical average D/E of 0.92x."},{topic:"Proposed transaction",comment:"The facility finances 80% of USD223.13m contract price for one 20,000 TEU LNG dual fuel containership scheduled for delivery on 30 Jun 2028. Security comprises pre-delivery RG assignment from IBK and post-delivery first priority mortgage."},{topic:"Market context",comment:"SCFI averaged 1,752 points in 9M2025, down 38% from 9M2024 but still above pre-pandemic levels. Red Sea disruptions provide near-term rate support. EMA benefits from THE Alliance network optimization."},{topic:"Main risks",comment:"Main risks are prolonged container shipping downturn, orderbook oversupply, and US-China tariff impact. Mitigants include EMC balance sheet strength, diversified trade lanes, dual-fuel fleet renewal, and long-term container trade growth."}],solvency_table:[{topic:"EMA metrics (FY2024)",comment:"Total assets USD8.52bn; total equity USD5.18bn; cash USD2.20bn; total debt USD1.95bn; net cash USD250m; revenue USD7.85bn; EBITDA USD3.05bn; net income USD1.62bn; D/E 0.38x; current ratio 1.85x; interest coverage 36.5x."},{topic:"EMC metrics (FY2024 / 3Q2025)",comment:"Total assets TWD895bn (USD28.4bn); total equity TWD420bn (USD13.3bn); cash TWD195bn (USD6.2bn); total debt TWD128bn (USD4.1bn); EBITDA TWD148.3bn; net income TWD78.5bn; interest coverage 31.2x; D/E 0.31x as of 30 Sep 2025."}],borrower_metrics:{entity:"EMA (FY2024)",currency:"USD",total_assets_bn:8.52,total_equity_bn:5.18,cash_bn:2.20,total_debt_bn:1.95,net_cash_m:250,revenue_bn:7.85,ebitda_bn:3.05,net_income_bn:1.62,de_ratio:0.38,current_ratio:1.85,interest_coverage:36.5},guarantor_metrics:{entity:"EMC (FY2024/3Q2025)",currency:"TWD/USD",total_assets_twd_bn:895,total_equity_twd_bn:420,cash_twd_bn:195,total_debt_twd_bn:128,ebitda_twd_bn:148.3,net_income_twd_bn:78.5,de_ratio:0.31,interest_coverage:31.2,as_of_date:"2025-09-30"},market_index:"SCFI",market_index_level:1752,market_index_period:"9M2025 average",market_index_yoy_change_pct:-38,ltc_percent:80,acr_min_pct:120,ltv_max_pct:83,key_strengths:["EMA wholly-owned subsidiary of EMC with strong parent guarantee (EMC listed TWSE 2609; 3rd largest Taiwan containership operator)","Conservative LTC 80%; ACR >= 120% / LTV <= 83% post-delivery with value maintenance clause","Pre-delivery risk fully mitigated by Refund Guarantee from Industrial Bank of Korea (IBK)","EMC financially strong: D/E 0.31x; interest coverage 31.2x; net cash positive as of 3Q2025","Sustainability-linked structure with MSCI ESG / DJSI KPIs; dual-fuel vessel aligns with IMO decarbonisation","THE Alliance network optimization provides market access and rate support"],key_risks:[{risk:"Container shipping market downturn",mitigant:"EMC balance sheet (net cash TWD5.2bn); diversified trade lanes",residual:"Low-Medium"},{risk:"Orderbook oversupply — global fleet growth",mitigant:"Dual-fuel advantage; THE Alliance capacity discipline",residual:"Medium"},{risk:"US-China tariff impact on trade volumes",mitigant:"Diversified trade routes; EMA not a China-invested enterprise",residual:"Medium"},{risk:"Construction delivery risk (Samsung HI)",mitigant:"Established Korean yard; IBK Refund Guarantee covers all pre-delivery installments",residual:"Low"}],conditions_precedent:["Execution of facility and security documents","EMC Corporate Guarantee","Assignment of Refund Guarantee from IBK to CUB SG","Satisfactory legal opinions","KYC/AML completion","EMA and EMC board resolutions"]},
+  3:{internal_rating:"BB+",rating_rationale:"Established operator with stable income, moderate leverage, conservative collateral structure",pd_basis_points:150,pd_assessment:"Low-Medium",lgd_percent:45,el_bps:68,mas_612_applicable:true,mas_612_classification:"Performing — Standard",industry_risk_level:"Medium",industry_risk_rationale:"Dry bulk shipping subject to cyclical rate volatility; partially offset by long-term charter income",esg_category:"B",esg_screening:"Passed",poseidon_principles_aligned:true,climate_risk:"Medium — IMO 2030 targets require CII Grade B or better",sanctions_ofac:"Clear",sanctions_eu:"Clear",sanctions_mas:"Clear",sanctions_un:"Clear",sanctions_hm_treasury:"Clear",ofac_screening_date:"2024-01-15",screening_system:"World-Check / Accuity",key_risks:["Construction delay risk — mitigated by turnkey contract","Charter rate volatility post-expiry","Tariff/trade war impact on dry bulk volumes"],mitigants:["Fixed-price turnkey contract with reputable shipyard","3-year time charter locks in income","Refund guarantee covers pre-delivery risk"],risk_matrix:[{risk:"Market risk",probability:"Medium",impact:"High",rating:"8",mitigation:"Charter income"},{risk:"Construction risk",probability:"Low",impact:"High",rating:"6",mitigation:"Refund guarantee"}],concentration_risk:"Within MAS 33-3 limit — 0.42% of capital",country_risk:"Singapore — Low risk"},
+  4:{company_name:"Borrower Shipping Pte Ltd",legal_entity_type:"Private Limited Company",registration_number:"202012345A",incorporation_date:"2010-03-15",incorporation_country:"Singapore",registered_address:"1 Marina Boulevard, #28-00, Singapore 018989",group_structure:"Wholly owned subsidiary of Parent Holding Co Ltd (BVI)",ultimate_beneficial_owner:"John Smith (100% indirect via Parent Holding Co Ltd)",shareholders:[{name:"Parent Holding Co Ltd (BVI)",stake_percent:100,country:"British Virgin Islands"}],board_of_directors:[{name:"John Smith",role:"Executive Director & CEO"},{name:"Jane Doe",role:"Non-Executive Director"}],key_management:[{name:"John Smith",title:"CEO",years_experience:20,background:"20 years in dry bulk shipping; ex-BHP Billiton Maritime"},{name:"Jane Doe",title:"CFO",years_experience:15,background:"Ex-DBS Bank shipping finance; CFA charterholder"}],business_description:"Dry bulk shipping operator focusing on Supramax and Panamax segments in Pacific-Atlantic trade routes",primary_business:"Dry bulk shipping — Supramax/Panamax",years_in_operation:14,fleet_owned:[{vessel:"MV Pacific Star",type:"Supramax Bulk Carrier",dwt:57000,year_built:2015,flag:"Singapore",class:"Bureau Veritas",charter:"Spot market / COA with major miners"},{vessel:"MV Atlantic Breeze",type:"Panamax Bulk Carrier",dwt:76000,year_built:2017,flag:"Singapore",class:"Lloyd's Register",charter:"3yr TC @ USD 14,500/day to ABC Commodities"}],total_fleet_dwt:133000,major_customers:[{name:"ABC Commodities Pte Ltd",contract_type:"Time Charter",duration_years:3,rate_usd_day:14500},{name:"XYZ Mining Corp",contract_type:"COA",duration_years:2,volume_mt_pa:500000}],annual_revenue_usd_m:150,ebitda_usd_m:50,net_income_usd_m:32,market_position:"Top 30 Singapore dry bulk operator by DWT",competitive_advantages:["Young, fuel-efficient fleet","Long-standing customer relationships with major miners"],group_auditor:"Deloitte & Touche LLP Singapore",banking_relationships:[{bank:"DBS Bank",product:"Working capital OD SGD 10m"},{bank:"OCBC",product:"Revolving credit SGD 20m"}]},
+  5:{collateral_type:"First priority ship mortgage + Refund guarantee + Corporate guarantee",vessel_valuations:[{vessel:"MV Newbuild 1",dwt:64000,year_built_expected:2026,flag:"Singapore",class:"Lloyd's Register",market_value_usd_m:32.0,distressed_value_usd_m:25.6,valuation_date:"2024-12-01",valuer:"Clarkson Research Services",valuation_basis:"Fair market value — desktop assessment"}],contract_price_usd_m:32,loan_amount_usd_m:20.8,ltc_percent:65,acr_at_delivery_percent:154,ltv_at_maturity_percent:0,refund_guarantee:{issuer:"Korea Development Bank (KDB)",issuer_rating:"Aa2 / AA",amount_usd_m:20.8,expiry:"2027-06-30",covers:"All pre-delivery instalments plus interest"},insurance:{h_and_m:"Full insured value USD 32m — Lloyd's of London syndicate",p_and_i:"Skuld P&I Club — unlimited liability",war_risk:"Covered — Institute War Clauses"},additional_security:["Corporate guarantee from Parent Holding Co Ltd","Share pledge over Borrower Shipping Pte Ltd"],ltv_schedule:[{period:"Delivery 2026",outstanding_usd_m:20.8,market_value_usd_m:32,ltv_pct:65,acr_pct:154},{period:"Year 3 2029",outstanding_usd_m:8.4,market_value_usd_m:28,ltv_pct:30,acr_pct:333}],collateral_adequacy_conclusion:"Adequate — LTC 65% at delivery; ACR 154% provides 54% buffer above loan; refund guarantee eliminates pre-delivery credit risk"},
+  6:{project_type:"New Build Pre-Delivery Financing",vessel_name:"MV Newbuild 1",hull_number:"H-2024-001",vessel_type:"Bulk Carrier",vessel_class:"Supramax",dwt:64000,grt:38000,loa_m:199.9,beam_m:32.0,draft_m:13.0,main_engine:"MAN B&W 6S50MC-C8.6 — 9,480 kW",speed_knots:14.0,fuel_consumption_mt_day:28.5,eco_design:true,imo_tier:"Tier III",cii_rating_expected:"A",shipyard:"Qingdao Shipyard Co Ltd",shipyard_country:"China",shipyard_rating:"Approved Class A — Lloyd's Register",shipyard_deliveries_last_5yr:85,class_society:"Lloyd's Register",flag_state:"Singapore",contract_date:"2024-06-01",contract_price_usd_m:32,payment_milestones:[{milestone:"Contract signing",date:"2024-06-01",pct:10,amount_usd_m:3.2,bank_funded:false},{milestone:"Keel laying",date:"2025-Q1",pct:20,amount_usd_m:6.4,bank_funded:true},{milestone:"Launch",date:"2026-Q1",pct:30,amount_usd_m:9.6,bank_funded:true},{milestone:"Delivery",date:"2026-Q2",pct:40,amount_usd_m:12.8,bank_funded:true}],delivery_date:"2026-Q2",construction_supervisor:"Technicus Marine Services Ltd",construction_risk_assessment:"Low — fixed-price turnkey contract; refund guarantee from KDB eliminates pre-delivery credit risk",employment_post_delivery:"3-year time charter to Grain Co Ltd at USD 12,000/day",charterer:"Grain Co Ltd",charterer_credit_rating:"BBB (S&P)",charter_rate_usd_day:12000,charter_duration_years:3,charter_type:"Time Charter Party (NYPE 1993 form)",charter_governing_law:"English law — LMAA arbitration"},
+  7:{reporting_currency:"USD",unit:"millions",auditor:"Deloitte & Touche LLP Singapore",audit_opinion:"Unqualified (clean)",accounting_standard:"IFRS",fiscal_year_end:"December 31",income_statement:{FY2022:{revenue:120,opex:78,gross_profit:42,ebitda:42,depreciation:8,ebit:34,interest_expense:8,pbt:26,tax:3.9,net_income:22.1},FY2023:{revenue:135,opex:85,gross_profit:50,ebitda:50,depreciation:9,ebit:41,interest_expense:8.5,pbt:32.5,tax:4.9,net_income:27.6},FY2024:{revenue:150,opex:94,gross_profit:56,ebitda:56,depreciation:9.5,ebit:46.5,interest_expense:9,pbt:37.5,tax:5.6,net_income:31.9}},balance_sheet:{FY2022:{cash:15,trade_receivables:12,current_assets:30,pp_e:200,total_assets:240,short_term_debt:20,current_liabilities:35,long_term_debt:100,total_debt:120,equity:85},FY2023:{cash:18,trade_receivables:14,current_assets:35,pp_e:210,total_assets:260,short_term_debt:22,current_liabilities:38,long_term_debt:108,total_debt:130,equity:95},FY2024:{cash:20,trade_receivables:15,current_assets:38,pp_e:220,total_assets:280,short_term_debt:24,current_liabilities:40,long_term_debt:116,total_debt:140,equity:105}},cash_flow:{FY2022:{cfo:35,capex:-15,cfi:-15,cff:-12,net_change:8},FY2023:{cfo:42,capex:-18,cfi:-18,cff:-14,net_change:10},FY2024:{cfo:48,capex:-20,cfi:-20,cff:-16,net_change:12}},key_ratios:{FY2022:{dscr:1.32,debt_ebitda:2.86,debt_equity:1.41,current_ratio:0.86,net_margin_pct:18.4,roa_pct:9.2,roe_pct:26.0,interest_cover:5.25},FY2023:{dscr:1.38,debt_ebitda:2.60,debt_equity:1.37,current_ratio:0.92,net_margin_pct:20.4,roa_pct:10.6,roe_pct:29.1,interest_cover:5.88},FY2024:{dscr:1.45,debt_ebitda:2.50,debt_equity:1.33,current_ratio:0.95,net_margin_pct:21.3,roa_pct:11.4,roe_pct:30.4,interest_cover:6.17}},facility_dscr_projection:{FY2026:{revenue:17,opex:7,ebitda:10,debt_service:7,dscr:1.43,outstanding_usd_m:16.6},FY2027:{revenue:17.5,opex:7.2,ebitda:10.3,debt_service:7,dscr:1.47,outstanding_usd_m:12.4},FY2028:{revenue:18,opex:7.5,ebitda:10.5,debt_service:7,dscr:1.50,outstanding_usd_m:8.2}},fx_exposure:"Revenue 100% USD; SGD costs hedged quarterly via forward contracts",off_balance_sheet:"IFRS 16 operating leases USD 8m; no SPE or structured entities",accounting_notes:"No restatements FY2022-2024; IFRS 16 adopted FY2019"},
+  8:{facility_agreement:{type:"Syndicated Loan Agreement",date:"2024-06-15",parties:["Borrower Shipping Pte Ltd","Parent Holding Co Ltd (Guarantor)","Bank ABC (Agent & Lender)","Bank XYZ (Lender)"],amount_usd_m:50},security_documents:[{doc:"First Priority Ship Mortgage",vessel:"MV Newbuild 1",status:"To be executed within 5 business days of delivery"},{doc:"Assignment of Shipbuilding Contract",status:"Executed 2024-06-15"},{doc:"Assignment of Earnings and Insurances",status:"Executed 2024-06-15"},{doc:"Refund Guarantee — Korea Development Bank",amount_usd_m:20.8,expiry:"2027-06-30",status:"Issued 2024-07-01"},{doc:"Corporate Guarantee — Parent Holding Co Ltd",amount_usd_m:50,status:"Executed 2024-06-15"},{doc:"Share Pledge — 100% shares of Borrower Shipping Pte Ltd",status:"Executed 2024-06-15 — ACRA registered"}],existing_charges:[{charge:"Ship mortgage — MV Pacific Star",beneficiary:"DBS Bank",amount_usd_m:8,maturity:"2025-12-31"},{charge:"Assignment of earnings — MV Atlantic Breeze",beneficiary:"OCBC Bank",amount_usd_m:15,maturity:"2026-06-30"}],cross_default_threshold_usd_m:5,pari_passu_clause:true,negative_pledge:true,legal_opinions:[{jurisdiction:"Singapore",law_firm:"Allen & Gledhill LLP",date:"2024-06-10"},{jurisdiction:"British Virgin Islands",law_firm:"Harneys Westwood & Riegels",date:"2024-06-12"}],legal_counsel_borrower:"Rajah & Tann Singapore LLP",legal_counsel_bank:"Allen & Gledhill LLP",governing_law:"Singapore",dispute_resolution:"Singapore High Court; SIAC Arbitration",registration_requirements:"ACRA charge registration within 30 days; ship registry mortgage within 5 days of delivery",conditions_precedent:["Executed facility agreement and security documents","Receipt of satisfactory legal opinions","KYC/AML completion","Receipt of refund guarantee from KDB"],conditions_subsequent:["Ship mortgage registration within 5 business days of vessel delivery"]},
+  9:{customer_acceptance_date:"2024-01-15",kyc:{completed:true,completion_date:"2024-01-15",next_review_date:"2025-01-15",kyc_tier:"High Risk",cdd_level:"Enhanced Due Diligence (EDD)",refresh_cycle_months:12,documents_received:["Certificate of Incorporation","Memorandum & Articles of Association","Audited financial statements FY2021-2023","Passport copies — all directors and UBO","UBO declaration form","Board resolution"]},aml:{cleared:true,screening_date:"2024-01-15",adverse_media:"None found"},sanctions:{ofac:"Clear",eu:"Clear",mas:"Clear",un:"Clear",hm_treasury:"Clear",ofsi:"Clear",screening_date:"2024-01-15",screening_system:"World-Check One / Accuity"},pep:{status:"Not PEP",related_pep:false,close_associate_pep:false,pep_declaration_received:true},tax_compliance:{country:"Singapore",fatca_classification:"Active Non-Financial Foreign Entity (Active NFFE)",crs_status:"Reportable — Singapore"},environmental:{eexi:"B",cii:"B",cii_year:2024,poseidon_principles:"Aligned",imo_2030_readiness:"Compliant — dual fuel capable vessel design"},mas_regulations:{banking_act_s33_3:"Within single borrower limit",total_group_exposure_usd_m:50,capital_funds_usd_m:5000,concentration_pct:1.0,single_borrower_limit_pct:15},internal_approvals_required:["Credit Committee — facilities > USD 10m","Board Risk Committee — shipping finance > USD 20m","Compliance sign-off on EDD"],regulatory_approvals:"None required",watch_list:"Not on internal watch list",country_risk_approval:"Singapore — Tier 1; no additional approval required"},
+  10:{dscr_projections:[{year:1,period:"FY2026",revenue_usd_m:17.0,opex_usd_m:7.0,ebitda_usd_m:10.0,depreciation_usd_m:2.5,interest_usd_m:1.8,principal_usd_m:4.2,debt_service_usd_m:6.0,dscr:1.43,outstanding_balance_usd_m:16.6},{year:2,period:"FY2027",revenue_usd_m:17.5,opex_usd_m:7.2,ebitda_usd_m:10.3,depreciation_usd_m:2.5,interest_usd_m:1.5,principal_usd_m:4.2,debt_service_usd_m:5.7,dscr:1.51,outstanding_balance_usd_m:12.4},{year:3,period:"FY2028",revenue_usd_m:18.0,opex_usd_m:7.5,ebitda_usd_m:10.5,depreciation_usd_m:2.5,interest_usd_m:1.1,principal_usd_m:4.2,debt_service_usd_m:5.3,dscr:1.58,outstanding_balance_usd_m:8.2},{year:4,period:"FY2029",revenue_usd_m:17.5,opex_usd_m:7.7,ebitda_usd_m:9.8,depreciation_usd_m:2.5,interest_usd_m:0.7,principal_usd_m:4.2,debt_service_usd_m:4.9,dscr:1.53,outstanding_balance_usd_m:4.0},{year:5,period:"FY2030",revenue_usd_m:17.0,opex_usd_m:8.0,ebitda_usd_m:9.0,depreciation_usd_m:2.5,interest_usd_m:0.3,principal_usd_m:3.7,debt_service_usd_m:4.0,dscr:1.60,outstanding_balance_usd_m:0.0}],fleet_schedule:[{vessel:"MV Pacific Star",type:"Supramax Bulk Carrier",dwt:57000,year_built:2015,flag:"Singapore",class:"Bureau Veritas",current_charter:"Spot / COA",market_value_usd_m:18.5,existing_mortgage:"DBS Bank — USD 8m to Dec 2025"},{vessel:"MV Newbuild 1",type:"Supramax Bulk Carrier",dwt:64000,year_built_expected:2026,flag:"Singapore",class:"Lloyd's Register",current_charter:"3yr TC USD 12,000/day — Grain Co Ltd",market_value_usd_m:32.0,existing_mortgage:"Bank ABC — USD 20.8m (this facility)"}],sensitivity_analysis:[{scenario:"Base Case",assumption:"Charter rate USD 12,000/day as contracted",min_dscr:1.43,conclusion:"Pass"},{scenario:"Stress -20%",assumption:"Charter rate drops to USD 9,600/day",min_dscr:1.05,conclusion:"Marginal Pass"},{scenario:"Severe Stress -35%",assumption:"Charter rate drops to USD 7,800/day",min_dscr:0.82,conclusion:"Fail — breaks covenant"}],loan_repayment_schedule:[{period:"Q1 2026",principal:1.04,interest:0.47,total:1.51,balance:19.76},{period:"Q2 2026",principal:1.04,interest:0.45,total:1.49,balance:18.72},{period:"Q3 2026",principal:1.04,interest:0.42,total:1.46,balance:17.68},{period:"Q4 2026",principal:1.04,interest:0.40,total:1.44,balance:16.64}],market_overview:"Dry bulk shipping market resilient in 2024 — BDI averaged 1,850 points, up 12% YoY. IMO 2030 targets accelerating fleet renewal.",glossary:{DSCR:"Debt Service Coverage Ratio = EBITDA / (Principal + Interest)",LTC:"Loan to Cost = Loan Amount / Contract Price",ACR:"Asset Coverage Ratio = Market Value / Outstanding Loan",LTV:"Loan to Value = Outstanding Loan / Market Value"},references:["Clarkson Research Shipping Intelligence Weekly","VesselsValue vessel appraisal","MAS Annual Report 2024"]}
+};
+
+// ── Required fields per section (for completeness check) ─────────────────────
+const REQUIRED_FIELDS={
+  1:[{p:'borrower',l:'Borrower Name'},{p:'guarantors',l:'Guarantors'},{p:'all_facilities',l:'All Facilities Table (multi-item)'},{p:'facility_type',l:'Facility Type (primary)'},{p:'facility_amount_usd_m',l:'Facility Amount (USD M)'},{p:'ltc_percent',l:'LTC (%) / Advance Rate'},{p:'tenor_years',l:'Tenor (years)'},{p:'tenor_structure',l:'Tenor Structure (e.g. 4+7)'},{p:'purpose',l:'Purpose of Facility'},{p:'repayment_schedule',l:'Repayment Schedule'},{p:'balloon_percent',l:'Balloon at Maturity (%)'},{p:'interest_rate_basis',l:'Interest Rate Basis'},{p:'margin_bps',l:'Margin (bps)'},{p:'security_pre_delivery',l:'Pre-Delivery Security'},{p:'security_post_delivery',l:'Post-Delivery Security'},{p:'value_maintenance_clause',l:'Value Maintenance / ACR-LTV Covenant'},{p:'sustainability_linked_kpi',l:'Sustainability-Linked KPI (SLL)'},{p:'regulatory_compliance',l:'Regulatory Compliance (Banking Act s33-3)'},{p:'group_limit',l:'Group Limit Assessment'},{p:'drawdown_conditions',l:'Drawdown Conditions'},{p:'conditions_precedent',l:'Conditions Precedent'},{p:'deal_comparison',l:'Deal Comparison (vs. previous deal)'},{p:'account_strategy',l:'Account Strategy (Wallet/Relationship/Opportunities)'}],
+  2:[{p:'2A_credit_overview',l:'Credit Overview Bullets (T1) + Tariff Impact Narrative'},{p:'2B_solvency',l:'Solvency — EMA Repayment Sources + Metrics in Billions (T2)'},{p:'2C_guarantor',l:'Guarantor — EMC Metrics + Support History (T3)'},{p:'2D_collateral',l:'Collateral Summary — Pre/Post Delivery (T4)'},{p:'2E_risk_and_mitigants',l:'Risk and Mitigants with Levels + Bullets (T5)'}],
+  3:[{p:'3A_external_ratings',l:'External Ratings (or NIL)'},{p:'3B_internal_ratings',l:'MSR Table — 6-Column with Sub-Header Row'},{p:'3C_mas_612',l:'MAS 612 Loan Grading — Grade + Paragraphs'},{p:'3D_esg_rating',l:'ESG Rating Date + Image Reference'}],
+  4:[{p:'4A_borrower',l:'Corporate Identity (4A)'},{p:'4B_ownership',l:'Ownership & Group Structure (4B)'},{p:'4C_management',l:'Key Management Table (4C)'},{p:'4D_business',l:'Business Overview (4D)'},{p:'4E_financials',l:'Financial Highlights — revenue/EBITDA/net income (4E)'},{p:'4F_fleet',l:'Fleet Profile — breakdown table (4F)'},{p:'4J_peer_comparison',l:'Peer Comparison Table (4J)'}],
+  5:[{p:'5A_security_overview',l:'Security Package Overview — secured/unsecured (5A)'},{p:'5C_vessel_mortgage',l:'Vessel Mortgage — valuations, LTC, ACR, LTV (5C)'},{p:'5E_value_maintenance_clause',l:'Value Maintenance Clause with cure mechanism (5E)'}],
+  6:[{p:'6A_project',l:'Project Overview — vessel, LTC%, delivery, regulation (6A)'},{p:'6B_builder',l:'Builder Profile — track record verbatim, tech overlap, history (6B)'},{p:'6C_contract',l:'Contract Structure — full verbatim terms (6C)'},{p:'6D_milestones',l:'11-Column Payment Schedule + Footnotes (6D)'},{p:'6E_rg_mechanism',l:'RG Mechanism — issuer, trigger events, claim process (6E)'},{p:'6F_construction_progress',l:'Construction Progress + Risk Mitigant Bullets (6F)'}],
+  7:[{p:'7A_borrower_financials',l:'Borrower P&L + Balance Sheet + Cash Flow (7A)'},{p:'7B_key_ratios',l:'Key Ratios — 4 categories, ≥18 rows (7B)'},{p:'entities_to_analyze',l:'Entity Metadata — name, role, currency, guarantor_exists (entities)'}],
+  8:[{p:'8A_acra_banking_charges',l:'ACRA Banking Charges'}],
+  9:[{p:'9A_checklist',l:'23-Item Checklist'},{p:'9C_recommendation',l:'RECOMMENDATION Block'}],
+  10:[{p:'10A_group_exposure',l:'Appendix I — CUB Group Exposure'},{p:'10C_projections',l:'Appendix III — EMA Detailed Financial Projections'}],
+};
+
+function isFieldFilled(data,path){
+  const v=data[path];
+  if(v===null||v===undefined)return false;
+  if(typeof v==='string'){const t=v.trim();return t!==''&&!t.startsWith('To be generated from')&&t!=='APPROVE/DECLINE';}
+  if(Array.isArray(v))return v.length>0;
+  if(typeof v==='object')return Object.keys(v).length>0;
+  return true;
+}
+
+function getCompleteness(secNo,data){
+  const fields=REQUIRED_FIELDS[secNo]||[];
+  if(!fields.length)return{filled:0,total:0,pct:100,missing:[]};
+  const missing=[];let filled=0;
+  for(const f of fields){if(isFieldFilled(data,f.p))filled++;else missing.push(f);}
+  return{filled,total:fields.length,pct:Math.round(filled/fields.length*100),missing};
+}
+
+function renderCompleteness(secNo,data){
+  const panel=document.getElementById('completenessPanel');if(!panel)return;
+  if(!data||typeof data!=='object'||Object.keys(data).length===0){panel.style.display='none';return;}
+  const{filled,total,pct,missing}=getCompleteness(secNo,data);
+  const allFields=REQUIRED_FIELDS[secNo]||[];if(!allFields.length){panel.style.display='none';return;}
+  const barColor=pct>=90?'#00703C':pct>=70?'#f59e0b':'#dc2626';
+  const badgeCls=pct>=90?'bg-success':pct>=70?'bg-warning text-dark':'bg-danger';
+  panel.style.display='block';
+  panel.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-1">
+    <strong style="font-size:12px">欄位完整度 Field Completeness: ${filled}/${total} (${pct}%)</strong>
+    <span class="badge ${badgeCls}">${pct>=90?'✓ Ready to Generate':pct+'% — Need ≥90%'}</span>
+  </div>
+  <div class="completeness-bar"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width .3s;"></div></div>
+  <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(data,f.p);
+    return`<div class="${ok?'field-filled':'field-missing'}">${ok?'✓':'✗'} ${f.l}${!ok?' <span class="text-muted fst-italic small"> — 資料源缺漏，待補 (Data source missing, pending upload)</span>':''}</div>`;
+  }).join('')}</div>`;
+}
+
+// ── Structured form field definitions per section ─────────────────────────────
+const FIELD_DEFS={
+  1:[{p:'borrower',l:'Borrower Name',t:'text'},{p:'guarantors',l:'Guarantors (one per line)',t:'lines'},{p:'all_facilities',l:'All Facilities (JSON array)',t:'json',h:'[{"item":1,"borrower":"EMA","booking_office":"SG","current_facility_usd_m":null,"proposed_facility_usd_m":178.5,"is_new":true,"outstanding_usd_m":0,"ccy":"USD","tenor":"11 years","facility_type":"Term Loan (SLL)","collateral":"Refund Guarantee (pre); Mortgage (post)","guarantor":"EMC"}]'},{p:'credit_limit_total_proposed_usd_m',l:'Proposed Credit Limit Total (USD M)',t:'number'},{p:'borrower_proposed_exposure_total_usd_m',l:'Borrower-level Proposed Exposure (USD M)',t:'number'},{p:'facility_type',l:'Facility Type (primary)',t:'text',h:'e.g. Committed Bilateral Term Loan (SLL)'},{p:'facility_amount_usd_m',l:'Facility Amount (USD M)',t:'number'},{p:'facility_amount_formula',l:'Facility Amount Formula',t:'text',h:'e.g. Lesser of USD178.5m and 80% of Initial Market Value'},{p:'ltc_percent',l:'LTC / Advance Rate (%)',t:'number'},{p:'tenor_years',l:'Tenor (years)',t:'number'},{p:'tenor_structure',l:'Tenor Structure',t:'text',h:'e.g. 4+7 (pre+post delivery)'},{p:'purpose',l:'Purpose of Report',t:'textarea'},{p:'repayment_schedule',l:'Repayment Schedule',t:'textarea',h:'e.g. First 5% repayment 6 months from delivery; 12 semi-annual 5% instalments; 35% balloon'},{p:'balloon_percent',l:'Balloon at Maturity (%)',t:'number'},{p:'interest_rate_basis',l:'Interest Rate Basis',t:'text',h:'e.g. Term SOFR'},{p:'margin_bps',l:'Margin (bps)',t:'number'},{p:'interest_period',l:'Interest Period',t:'text',h:'e.g. 3 months or 1 month'},{p:'upfront_fee_pct',l:'Upfront Fee (%)',t:'number'},{p:'upfront_fee_usd',l:'Upfront Fee (USD amount)',t:'number'},{p:'annual_renewal_fee_usd',l:'Annual Renewal Fee (USD)',t:'number'},{p:'security_pre_delivery',l:'Pre-Delivery Security',t:'textarea'},{p:'security_post_delivery',l:'Post-Delivery Security',t:'textarea'},{p:'value_maintenance_clause',l:'Value Maintenance Clause (JSON)',t:'json',h:'{"acr_minimum_pct":120,"ltv_maximum_pct":83,"testing_frequency":"Every 2 years","cure_period_days":21}'},{p:'sustainability_linked_kpi',l:'Sustainability-Linked KPI (JSON)',t:'json',h:'{"description":"CO2 intensity / MSCI ESG / DJSI","max_margin_ratchet_bps":5}'},{p:'financial_covenants',l:'Financial Covenants',t:'text',h:'e.g. NIL or DSCR >= 1.15x'},{p:'regulatory_compliance',l:'Regulatory Compliance (JSON)',t:'json',h:'{"bank_net_worth_twd_bn":275,"single_borrower_limit_twd_bn":13.75,"usd_equivalent_usd_m":436,"compliance_status":"Compliant","unsecured_drawdown_cap_usd_m":71.40}'},{p:'group_limit',l:'Group Limit (JSON)',t:'json',h:'{"approved_group_limit_usd_m":750,"total_proposed_group_utilization_usd_m":673.13,"within_limit":true}'},{p:'drawdown_conditions',l:'Drawdown Conditions (JSON)',t:'json',h:'{"max_drawdowns":5,"pre_delivery_cap_usd_m":71.40,"aggregate_cap_usd_m":178.50}'},{p:'conditions_precedent',l:'Conditions Precedent (one per line)',t:'lines'},{p:'deal_comparison',l:'Deal Comparison (JSON array)',t:'json',h:'[{"term":"Amount","proposed":"USD178.5m","previous":"USD128.75m"}]'},{p:'governing_law',l:'Governing Law',t:'text'},{p:'report_type',l:'Report Type',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']},{p:'appendix_ref',l:'Appendix Reference (verbatim)',t:'text',h:'e.g. Please refer to Appendix I for total CUB exposure to Evergreen Group'},{p:'item_footnotes',l:'Table Footnotes (JSON array with symbol+text)',t:'json',h:'[{"symbol":"*","text_verbatim":"PSR limit is advised to client. ISDA not signed yet..."},{"symbol":"**","text_verbatim":"..."}]'},{p:'valuation_details',l:'Valuation Details (JSON)',t:'json',h:'{"valuer":"Clarkson","gongwen_ref":"GW-2024-001","valuation_date":"2024-01-15","amount_exact_verbatim":"USD98,500,000"}'},{p:'pam_sam_text',l:'PAM/SAM Disbursement Cap (verbatim)',t:'textarea',h:'e.g. Unsecured drawdown capped at 32% of contract price (USD71.40m) for PAM/SAM purposes'},{p:'account_strategy',l:'Account Strategy (JSON)',t:'json',h:'{"wallet_overview":"Bank wallet USD Xm / Capital Markets USD Xm / Treasury USD Xm","current_relationship":"NII USD7.5m p.a.; deposits EMA USD1.9bn / EMC NTD198bn; utilization 55%","opportunities":"Cross-sell FX hedging; capital markets USD100m bond","nii_usd_m":7.5,"tmu_pct":0.3,"deposits_verbatim":"EMA USD1.9bn; EMC NTD198bn","capital_market_verbatim":"...","upfront_fee_verbatim":"0.10% = USD178,500","treasury_hedging_verbatim":"..."}'}],
+  2:[
+    {p:'2A_credit_overview',l:'Credit Overview Bullets + Tariff Impact (JSON)',t:'json',h:'{"bullets":[{"order":1,"text_verbatim":"EMC is the 7th largest container line globally with 1.97m TEU capacity and 5.8% market share"},{"order":2,"text_verbatim":"New USD178.5m SLL facility to finance one 20,000 TEU LNG dual fuel vessel"},{"order":3,"text_verbatim":"EMA net cash USD0.9bn; D/E 0.38x as at FY2024"},{"order":4,"text_verbatim":"Pre-delivery: IBK Refund Guarantee (A+/Aa2) fully covering each installment assigned to CUB"},{"order":5,"text_verbatim":"9M2025 CCFI average 1,220, -28% YoY; EMC revenue TWD198bn"},{"order":6,"text_verbatim":"EMC: #14 ranked globally, SCC/OCEAN Alliance member, 50-year track record"}],"tariff_impact_paragraphs":["EMC has minimal direct exposure to US tariff risk. Cross-trade lanes account for approximately 15% of revenue...","Historical leverage benchmarks show EMC maintained net cash position even in the worst-year 2016..."]}'},
+    {p:'2B_solvency',l:'Solvency — EMA Repayment Sources + Metrics (JSON)',t:'json',h:'{"primary_repayment_source_verbatim":"Primary source of repayment will be from operating cash flow generated by the EMA vessel fleet.","secondary_repayment_source_verbatim":"Secondary source of repayment include the corporate guarantee provided by EMC and the value of the vessel collateral.","ema":{"period":"FY2024","cash_bn_usd":2.20,"total_debt_bn_usd":1.95,"op_ebitda_bn_usd":3.05,"debt_ebitda_ratio":0.64,"interest_coverage":36.5,"prior_year_coverage":42.1}}'},
+    {p:'2C_guarantor',l:'Guarantor — EMC Metrics + Support History (JSON)',t:'json',h:'{"guarantor_name_abbrev":"EMC","period":"3Q2025","cash_twd_bn":198.3,"cash_usd_bn":6.3,"total_debt_twd_bn":87.2,"total_debt_usd_bn":2.8,"interest_coverage":31.2,"prior_year_coverage":35.8,"support_history_verbatim":"EMC has consistently supported EMA through providing corporate guarantees across all CUB facilities since 2019. No events of default or drawdown on guarantees to date."}'},
+    {p:'2D_collateral',l:'Collateral Summary — Pre/Post Delivery (JSON)',t:'json',h:'{"pre_delivery":{"issuer_full_name":"Industrial Bank of Korea","rating":"A+","rating_agencies":["S&P","Moody\'s"],"coverage_verbatim":"fully covering each pre-delivery installment","assigned_to_cub":true,"satisfactory_to_bank":true},"post_delivery":{"security_type":"First priority vessel mortgage","vessel_spec":"one 20,000 TEU LNG dual fuel containership (Hull No. 2891)","ltc_pct":80,"acr_pct":120,"ltv_pct":83,"ltc_pct_bold":"80%","acr_pct_bold":"120%"}}'},
+    {p:'2E_risk_and_mitigants',l:'Risk and Mitigants (JSON array)',t:'json',h:'[{"risk_no":1,"level":"High","title":"Container freight rate volatility","risk_bullets":["CCFI averaged 1,220 in 9M2025, down 28% YoY","Revenue highly correlated with spot and contract rates"],"mitigant_bullets":["Long-term TC contract with EMC covering >80% of vessel revenue for 12 years","EMC balance sheet: net cash USD3.5bn, D/E 0.31x"]},{"risk_no":2,"level":"Medium","title":"Construction/delivery risk","risk_bullets":["Delivery expected Jun 2028; delay risk given complex LNG dual fuel systems"],"mitigant_bullets":["SHI: 94% on-time delivery rate; 210-day grace period in facility","IBK Refund Guarantee fully covers each milestone installment"]}]'},
+    {p:'report_type',l:'Report Type (new_deal / annual_review)',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']}
+  ],
+  3:[
+    {p:'3A_external_ratings',l:'External Ratings (JSON)',t:'json',h:'{"all_nil":true,"ratings":[]}',note:'If all_nil=true, output is one sentence only. If rated: include S&P/Moody\'s/Fitch/outlook.'},
+    {p:'3B_internal_ratings',l:'Internal MSR Ratings Table (JSON)',t:'json',h:'{"rows":[{"entity_full_name":"Evergreen Marine (Asia) Pte. Ltd.","entity_abbrev":"EMA","role":"Borrower","fy2022_23":"6-","fy2023_24":"6-","fy2024":"6","interim":null,"current":"6","remarks":"Proposed MSR6","override_flag":false},{"entity_full_name":"Evergreen Marine Corporation (Taiwan) Ltd.","entity_abbrev":"EMC","role":"Guarantor","fy2022_23":"5","fy2023_24":"5","fy2024":"5","interim":"5","current":"5","remarks":"","override_flag":false}],"period_display_labels":{"fy2022_23":"2022/23","fy2023_24":"2023/24","fy2024":"2024","interim":"Interim","current":"Current"}}'},
+    {p:'3C_mas_612',l:'MAS 612 Loan Grading (JSON)',t:'json',h:'{"grade":"PASS","primary_paragraph_verbatim":"Borrower is internally rated as MSR 6, mapped to PASS under the MSR – MAS 612 Loan Classification Mapping matrix. We recommend the MAS Notice 612 loan grading for the Borrower to be PASS, in view that the Borrower does not exhibit potential weakness in repayment capability.","supporting_paragraphs":["EMA has maintained consistent MSR 6- to MSR 6 ratings over the review period. (See Section 7: Financial Analysis) EMA demonstrates sound debt and lease liability obligations servicing capacity with interest coverage of 36.5x in FY2024.","The Guarantor EMC is internally rated MSR 5, reflecting its status as a listed investment-grade shipping group with a satisfactory balance sheet."]}'},
+    {p:'3D_esg_rating',l:'ESG Rating Reference (JSON)',t:'json',h:'{"entity_abbrev":"EMA","rating_date":"2025-01-15","image_ref":"[System-generated ESG rating image]"}'}
+  ],
+  4:[{p:'4A_borrower',l:'Borrower Corporate Identity (JSON)',t:'json',h:'{"company_name_en":"Evergreen Marine (Asia) Pte. Ltd.","company_name_zh":"長榮海運（亞洲）","legal_entity_type":"Private Limited Company","registration_number":"202100001Z","ubn":"202100001Z","incorporation_country":"Singapore","incorporation_date":"2021-01-01","listing_exchange":null,"listing_date":null,"reporting_entity":"Consolidated","group_auditor":"Deloitte","fiscal_year_end":"Dec-31","principal_office":"Singapore"}'},{p:'4B_ownership',l:'Ownership & Group Structure (JSON)',t:'json',h:'{"shareholders":[{"name":"Evergreen Marine Corporation","stake_percent":100,"country":"Taiwan","notes":"Listed TSE"}],"ultimate_beneficial_owner":"Chang Yung-fa Foundation","ubo_stake_pct":25.4,"ubo_holding_entity":"EMC","group_structure_narrative":"EMA is a wholly owned subsidiary of EMC (TSE:2603), which operates as the group holding entity."}'},{p:'4C_management',l:'Key Management (JSON array)',t:'json',h:'[{"name":"Anchor Chang","title":"General Manager","years_experience":25,"background":"25 years in container shipping; joined EMC 1999; stationed Singapore 2015"},{"name":"Lily Chen","title":"Finance Director","years_experience":18,"background":"ACCA qualified; 18 years in shipping finance"}]'},{p:'4D_business',l:'Business Overview (JSON)',t:'json',h:'{"primary_business":"Container liner shipping","trade_routes":"Asia-Europe, Trans-Pacific, Intra-Asia","operational_model":"Owner-operator with time-chartered capacity","years_in_operation":52,"global_ranking":7,"market_share_pct":5.3}'},{p:'4E_financials',l:'Financial Highlights (JSON)',t:'json',h:'{"currency":"NTD","unit":"billions","fiscal_year":"FY2024","revenue":381.2,"ebitda":89.6,"ebitda_margin_pct":23.5,"net_income":52.1,"net_cash_debt":-45.3,"net_debt_ebitda":0.5,"fx_rate_to_usd":32.5,"revenue_breakdown":[{"segment":"Container Freight","amount":340.0,"pct_of_total":89.2}]}'},{p:'4F_fleet',l:'Fleet Profile (JSON)',t:'json',h:'{"total_owned_teu":350000,"total_fleet_teu":1650000,"fleet_breakdown":[{"category":"Owned","vessel_count":105,"total_teu":350000,"total_dwt":3500000,"notes":""},{"category":"Chartered-in","vessel_count":95,"total_teu":800000,"total_dwt":8000000,"notes":"Average 3-yr TC"},{"category":"On Order","vessel_count":24,"total_teu":500000,"total_dwt":5000000,"notes":"Delivery 2026-2028"}],"fleet_detail":[]}'},{p:'4G_debt_profile',l:'Debt Profile (JSON array)',t:'json',h:'[{"lender_bond":"Syndicated TL","facility_type":"Term Loan","ccy":"USD","amount":500,"maturity":"2031-06","secured_unsecured":"Secured"},{"lender_bond":"Green Bond","facility_type":"Unsecured Bond","ccy":"USD","amount":300,"maturity":"2028-04","secured_unsecured":"Unsecured"}]'},{p:'4H_banking_relationships',l:'Banking Relationships (JSON array)',t:'json',h:'[{"bank":"Cathay United Bank SG","product":"Term Loan (SLL)","limit_usd_m":178.5,"since":2019},{"bank":"DBS Bank","product":"Revolving Credit","limit_usd_m":100,"since":2018}]'},{p:'4I_market_data',l:'Market & Industry Data (JSON)',t:'json',h:'{"ccfi_level":1012,"scfi_level":2345,"ccfi_yoy_pct":-18.5,"order_book_pct_of_fleet":21.3,"alliance_membership":"OCEAN Alliance","imo_regulatory_notes":"CII-B rated fleet average; EEXI compliant","tariff_risk_notes":"US tariff impact limited — majority cargo is non-US origin"}'},{p:'4J_peer_comparison',l:'Peer Comparison (JSON array)',t:'json',h:'[{"company":"MSC","fleet_teu":5900000,"market_share_pct":17.8,"alliance":"None","listed_yn":"N"},{"company":"Maersk","fleet_teu":4300000,"market_share_pct":13.2,"alliance":"Gemini","listed_yn":"Y"},{"company":"Evergreen Marine (EMC)","fleet_teu":1650000,"market_share_pct":5.3,"alliance":"OCEAN Alliance","listed_yn":"Y"}]'},{p:'4K_major_customers',l:'Major Customers (JSON array)',t:'json',h:'[{"name":"Amazon Logistics","contract_type":"Long-term service contract","duration_years":3},{"name":"IKEA","contract_type":"Volume agreement","duration_years":2}]'}],
+  5:[{p:'5A_security_overview',l:'Security Package Overview (JSON)',t:'json',h:'{"is_secured":true,"unsecured_reason":null,"security_instruments":[{"rank":1,"instrument":"Refund Guarantee","description":"Issued by First Commercial Bank, covers pre-delivery phase"},{"rank":2,"instrument":"First Priority Mortgage","description":"Over vessel upon delivery, assigned to CUB"}]}'},{p:'5B_refund_guarantee',l:'Refund Guarantee — 8-Column Milestone Table (JSON)',t:'json',h:'{"applicable":true,"issuer_full_name":"First Commercial Bank","issuer_rating":"BBB+","rating_agency":"S&P","legal_structure":"Demand guarantee","governing_law":"English law","assigned_to_cub":true,"expiry_condition":"Upon delivery or full repayment","milestones":[{"milestone":"Steel Cutting","sched_date":"2024-09-01","rg_amount_usd_m":178.50,"max_loan_os_usd_m":35.70,"coverage_pct":500.0,"drawdown_usd_m":35.70,"cum_drawdown_usd_m":35.70,"status":"Completed"},{"milestone":"Keel Laying","sched_date":"2025-01-01","rg_amount_usd_m":178.50,"max_loan_os_usd_m":71.40,"coverage_pct":250.0,"drawdown_usd_m":35.70,"cum_drawdown_usd_m":71.40,"status":"Completed"},{"milestone":"Launch","sched_date":"2025-09-01","rg_amount_usd_m":178.50,"max_loan_os_usd_m":142.80,"coverage_pct":125.0,"drawdown_usd_m":71.40,"cum_drawdown_usd_m":142.80,"status":"Pending"},{"milestone":"Delivery","sched_date":"2026-06-01","rg_amount_usd_m":178.50,"max_loan_os_usd_m":178.50,"coverage_pct":100.0,"drawdown_usd_m":35.70,"cum_drawdown_usd_m":178.50,"status":"Pending"}],"footnotes":"RG = Refund Guarantee; O/S = Outstanding"}'},{p:'5C_vessel_mortgage',l:'Vessel Mortgage, LTC/ACR/LTV & Amortisation (JSON)',t:'json',h:'{"applicable":true,"vessel_valuations":[{"vessel":"EMA STAR","teu":15000,"dwt":180000,"year_built":2026,"valuer":"Clarkson","valuation_date":"2025-10-01","market_value_usd_m":180.00,"distressed_value_usd_m":144.00}],"gongwen_ref":"CUB-2025-VAL-001","valuation_compliant":true,"contract_price_usd_m":178.50,"loan_amount_usd_m":178.50,"ltc_pct":100.0,"ltc_limit_pct":60.0,"acr_at_delivery_pct":100.8,"acr_floor_pct":100.0,"balloon_usd_m":89.25,"ltv_at_maturity_pct":61.98,"ltv_cap_pct":75.0,"amortisation_schedule":[{"period":"H1 2029","date":"2029-06-30","principal_usd_m":5.0,"interest_usd_m":2.1,"total_debt_service_usd_m":7.1,"outstanding_balance_usd_m":173.5,"ltv_pct":120.5}]}'},{p:'5D_insurance',l:'Insurance Coverage (JSON array)',t:'json',h:'[{"type":"Hull & Machinery","insurer_or_club":"China P&I Club","insured_value_usd_m":180.0,"notes":"CUB named co-insured and loss payee"},{"type":"Protection & Indemnity","insurer_or_club":"The Standard Club","insured_value_usd_m":null,"notes":"Full P&I cover; unlimited liability"},{"type":"War Risk","insurer_or_club":"Lloyd'\''s Market","insured_value_usd_m":180.0,"notes":"Covers war, piracy, SRCC"}]'},{p:'5E_value_maintenance_clause',l:'Value Maintenance Clause with Cure Mechanism (JSON)',t:'json',h:'{"acr_covenant_pct":100.0,"ltv_covenant_pct":75.0,"test_frequency_verbatim":"Every 2 years or upon each drawdown (whichever is earlier)","cure_period_banking_days":21,"remedy_options":["Prepay portion of loan to restore compliance","Provide additional security satisfactory to the Bank","Combination of (i) and (ii)"],"cure_mechanism_verbatim":"Upon breach of the value maintenance clause, the Borrower shall within 21 Banking Days of receipt of written notice from the Bank either (i) prepay such portion of the Loan as will restore compliance, or (ii) provide additional security satisfactory to the Bank, or (iii) a combination of (i) and (ii)."}'},{p:'5F_corporate_guarantee',l:'Corporate Guarantee & Guarantor Dual-Currency Financials (JSON)',t:'json',h:'{"applicable":true,"guarantor_full_name":"Evergreen Marine Corporation","guarantor_listed_exchange":"Taiwan Stock Exchange (TSE:2603)","relationship_to_borrower":"Parent company (100% ownership)","guarantee_scope":"Full guarantee covering principal, interest and all obligations","guarantee_phases":["Pre-delivery","Post-delivery"],"fx_rate_to_usd":32.5,"guarantor_financials":[{"metric":"Cash & Equivalents","fy_prior_twd_bn":120.5,"fy_prior_usd_bn":3.71,"fy_current_twd_bn":135.2,"fy_current_usd_bn":4.16},{"metric":"Total Debt","fy_prior_twd_bn":280.0,"fy_prior_usd_bn":8.62,"fy_current_twd_bn":310.0,"fy_current_usd_bn":9.54},{"metric":"EBITDA","fy_prior_twd_bn":95.0,"fy_prior_usd_bn":2.92,"fy_current_twd_bn":89.6,"fy_current_usd_bn":2.76},{"metric":"Interest Coverage","fy_prior_twd_bn":null,"fy_prior_usd_bn":18.5,"fy_current_twd_bn":null,"fy_current_usd_bn":15.2}],"support_capacity_assessment":"EMC demonstrates strong financial capacity to support EMA.","historical_support_record":"No defaults on any guaranteed obligations since 2010.","guarantee_language":"Keep/pay guarantee; cross-default with EMC parent facilities"}'},{p:'5G_responsible_person',l:'Responsible Person Guarantee (JSON)',t:'json',h:'{"provided":false,"name":null,"title":null,"scope":null}'}],
+  6:[{p:'6A_project',l:'Project Overview (JSON)',t:'json',h:'{"hull_number":"H-2891","vessel_type":"Container","teu":20000,"fuel_type":"LNG Dual Fuel","imo_tier":"IMO Tier III","eco_design":true,"dwt":180000,"grt":195000,"loa_m":400,"beam_m":61,"main_engine":"MAN 12G95ME-C","speed_knots":22.5,"class_society":"DNV","flag_state":"Singapore","contract_price_usd_m":267.30,"loan_amount_usd_m":213.84,"ltc_pct":80.0,"delivery_date":"2026-06-30","grace_period_days":210,"latest_delivery_date":"2026-12-31","deployment_purpose":"Asia-Europe trade route; time chartered to EMC for 12 years","eu_ets_applicable":true,"regulatory_positioning":"Compliant with EU ETS from 2024; IMO GHG Strategy 2030 target 40% reduction; CII rated A at delivery"}'},{p:'6B_builder',l:'Builder Profile — Track Record verbatim (JSON)',t:'json',h:'{"name":"Samsung Heavy Industries Co. Ltd.","formerly":null,"founded":"1974","hq":"Seoul, South Korea","listed":"Korea Stock Exchange (KRX: 010140)","market_position":"Top 3 global shipbuilder","market_position_source":"Clarkson Research","market_position_date":"2025-01","contracts_for_large_vessels":["5 x 24,000 TEU for MSC (2023)","3 x 23,000 TEU for CMA CGM (2022)"],"track_record_verbatim":"SHI has delivered 23,000 TEU vessels in 2020 and 24,000 TEU vessels in 2022. SHI achieved 94% on-time delivery rate over the past 5 years across 180 vessels.","technology_overlap_verbatim":"LNG carrier builder since 1994 — technology overlap with LNG dual fuel containership systems; SHI holds 15 LNG fuel system patents.","historical_note_verbatim":"SHI underwent financial restructuring in 2020-2021 following Korea Development Bank intervention. The restructuring was resolved in 2023 with full repayment of KDB facilities and return to profitability.","ontime_delivery_pct":94,"shipyard_docks":7,"shipyard_berth_m":5500,"shipyard_capacity_dwt":3200000,"shipyard_annual_cgt":2800000}'},{p:'6C_contract',l:'Contract Structure — Full Verbatim Terms (JSON)',t:'json',h:'{"contract_type":"Fixed-price shipbuilding contract","buyer":"Evergreen Marine (Asia) Pte. Ltd.","builder":"Samsung Heavy Industries Co. Ltd.","price_verbatim":"USD267,300,000","currency":"USD","contract_date":"2023-11-15","expected_delivery":"2026-06-30","grace_period":"210 days","latest_delivery_date":"2026-12-31","late_delivery_penalty_verbatim":"USD67,325 for each day of delay (standard Korean shipbuilding contract terms)","buyer_termination_verbatim":"Buyer may terminate if delay exceeds 270 days; refund guarantee backed by Refund Guarantee issued by IBK","builder_termination_verbatim":"Builder may terminate if Buyer fails to make installment payment within 5 banking days; Builder retains vessel and installments paid","change_order_verbatim":"Any change order requires written agreement and results in price adjustment and delivery date extension","rows":[{"term":"Contract Type","detail_verbatim":"Fixed-price shipbuilding contract"},{"term":"Late Delivery Penalty","detail_verbatim":"USD67,325 for each day of delay (standard Korean shipbuilding contract terms)"}]}'},{p:'6D_milestones',l:'11-Column Payment & Delivery Schedule + Footnotes (JSON)',t:'json',h:'{"milestones":[{"no":1,"milestone":"Steel Cutting","expected_date":"2024-09-01","actual_date":"2024-09-01","status":"✅ Completed","pct_of_contract":10,"amount_usd_m":26.73,"cum_paid_usd_m":26.73,"cub_drawdown":"≤ USD71.40m*","rg_in_force":"✅","rg_amount_usd_m":267.30},{"no":2,"milestone":"Keel Laying","expected_date":"2025-01-15","actual_date":"2025-01-15","status":"✅ Completed","pct_of_contract":20,"amount_usd_m":53.46,"cum_paid_usd_m":80.19,"cub_drawdown":"≤ USD71.40m*","rg_in_force":"✅","rg_amount_usd_m":267.30},{"no":3,"milestone":"Launch","expected_date":"2025-10-01","actual_date":null,"status":"⏳ Pending","pct_of_contract":30,"amount_usd_m":80.19,"cum_paid_usd_m":160.38,"cub_drawdown":"≤ USD71.40m*","rg_in_force":"✅","rg_amount_usd_m":267.30},{"no":4,"milestone":"Delivery","expected_date":"2026-06-30","actual_date":null,"status":"⏳ Pending","pct_of_contract":40,"amount_usd_m":106.92,"cum_paid_usd_m":267.30,"cub_drawdown":"USD213.84m","rg_in_force":"❌**","rg_amount_usd_m":0}],"footnotes":[{"symbol":"*","text_verbatim":"Pre-delivery drawdown capped at USD71.40m (20% of contract price) as agreed with HQ Risk. PAM and SAM will jointly control each pre-delivery drawdown on reimbursement basis."},{"symbol":"**","text_verbatim":"Refund Guarantee expires upon delivery of vessel; vessel mortgage to be registered within 5 banking days of delivery as replacement security. (See Section 5 for lag time analysis.)"}],"commentary_first_drawdown":"First drawdown expected Q3 2025, reimbursement basis, ~USD53.46m at Keel Laying milestone.","commentary_banking_act_33_3":"Pre-delivery unsecured drawdown capped at USD71.40m per Banking Act s33-3 requirements.","commentary_pam_sam":"PAM and SAM approval required for each pre-delivery drawdown tranche."}'},{p:'6E_rg_mechanism',l:'RG Mechanism — Issuer, Trigger Events, Claim Process (JSON)',t:'json',h:'{"applicable":true,"issuer_full_name":"Industrial Bank of Korea","issuer_rating_verbatim":"AA (S&P) / AA- (Fitch)","beneficiary":"Evergreen Marine (Asia) Pte. Ltd., assigned to CUB SG","format_verbatim":"Unconditional and irrevocable demand guarantee","governing_law":"English law","trigger_events":["1. Builder fails to complete vessel by Latest Delivery Date","2. Builder becomes insolvent or subject to insolvency proceedings","3. Buyer exercises termination right under shipbuilding contract","4. Builder fails to comply with refund obligation within 5 banking days of demand"],"claim_process_verbatim":"Written demand to IBK specifying amount claimed; IBK to pay within 5 banking days of demand without set-off or counterclaim","payout_timeline":"5 banking days from demand","coverage_summary_min_pct":100.0,"coverage_summary_max_pct":500.0}'},{p:'6F_construction_progress',l:'Construction Progress + Risk Assessment with Mitigant Bullets (JSON)',t:'json',h:'{"status_date":"2025-05-01","milestones_completed":2,"milestones_total":4,"completion_pct":30,"on_schedule":true,"next_milestone":"Launch (Oct 2025)","risks":[{"title":"Construction Delay Risk","likelihood":"Medium","description":"Complex LNG dual fuel systems increase outfitting time. Historical precedent shows 2-4 month delays for first-of-class vessels.","mitigant_bullets":["SHI has 94% on-time delivery rate over 5 years and 180 vessels","210-day contractual grace period (delivery by Dec 2026); CUB facility incorporates this buffer","IBK Refund Guarantee (AA/AA-) fully covers each pre-delivery installment","SHI dedicated project team of 85 engineers for this hull; monthly CUB site inspection","Contractual liquidated damages of USD67,325/day provide financial incentive for timely delivery"]},{"title":"Builder Insolvency Risk","likelihood":"Low","description":"SHI emerged from KDB restructuring in 2023 and returned to profitability.","mitigant_bullets":["SHI rated BBB+ (S&P) as of Jan 2025; order book of USD12.3bn provides revenue visibility through 2028","IBK RG is unconditional and irrevocable — survives builder insolvency","KDB remains major shareholder (25%) providing implicit government support","SHI net cash position of KRW 1.2tn as of Q1 2025"]}]}'}],
+  7:[{p:'entities_to_analyze',l:'Entity Metadata — name, role, currency, guarantor_exists (JSON array)',t:'json',h:'[{"name":"Evergreen Marine (Asia) Pte. Ltd.","role":"Borrower","basis":"Consolidated","auditor":"Deloitte","opinion":"Unqualified","currency":"USD","unit":"millions","guarantor_exists":true,"depth":"FULL"},{"name":"Evergreen Marine Corporation","role":"Guarantor","basis":"Consolidated","auditor":"Deloitte","opinion":"Unqualified","currency":"NTD","unit":"billions","guarantor_exists":false,"depth":"FULL"}]'},{p:'7A_borrower_financials',l:'Borrower P&L + Balance Sheet + Cash Flow (JSON)',t:'json',h:'{"reporting_currency":"USD","unit":"millions","reporting_entity":"EMA Consolidated","auditor":"Deloitte","audit_opinion":"Unqualified","accounting_standard":"IFRS","fiscal_year_end":"Dec-31","income_statement":{"FY2022":{"revenue":2850,"cogs":1980,"gross_profit":870,"other_op_income":15,"op_profit":720,"finance_income":12,"finance_cost":-85,"other_non_op":-5,"pbt":642,"tax":-96,"net_income":546,"ebitda":920,"depreciation":200},"FY2023":{"revenue":1920,"cogs":1450,"gross_profit":470,"other_op_income":10,"op_profit":380,"finance_income":18,"finance_cost":-78,"other_non_op":-8,"pbt":312,"tax":-47,"net_income":265,"ebitda":580,"depreciation":200},"FY2024":{"revenue":2200,"cogs":1580,"gross_profit":620,"other_op_income":12,"op_profit":510,"finance_income":22,"finance_cost":-60,"other_non_op":-3,"pbt":469,"tax":-70,"net_income":399,"ebitda":710,"depreciation":200}},"balance_sheet":{"FY2024":{"cash":2200,"trade_receivables":320,"inventories":85,"other_ca":120,"total_ca":2725,"vessels_ppe":3800,"right_of_use_assets":1200,"other_nca":250,"total_nca":5250,"total_assets":7975,"trade_payables":480,"st_borrowings":350,"current_lease_liabilities":180,"other_cl":220,"total_cl":1230,"lt_borrowings":1600,"nc_lease_liabilities":980,"other_ncl":95,"total_ncl":2675,"total_liabilities":3905,"share_capital":800,"retained_earnings":3270,"total_equity":4070}},"cash_flow":{"FY2024":{"ocf":780,"icf":-420,"fcf":360,"net_change":85,"opening_cash":2115,"fx_effect":0,"closing_cash":2200}}}'},{p:'7B_key_ratios',l:'Key Ratios — 4 categories, ≥18 rows (JSON)',t:'json',h:'{"FY2022":{"gross_margin_pct":30.5,"op_margin_pct":25.3,"ni_margin_pct":19.2,"ebitda_margin_pct":32.3,"roa_pct":8.1,"roe_pct":18.5,"total_debt":1850,"net_debt":-350,"debt_equity":0.45,"net_debt_equity":"Net Cash","debt_ebitda":2.01,"ebitda_interest":10.8,"ocf_total_debt":0.52,"ocf_interest":11.2,"ar_days":45,"ap_days":38,"inventory_days":22,"dscr":2.15,"tangible_leverage":0.45,"current_ratio":1.8},"FY2024":{"gross_margin_pct":28.2,"op_margin_pct":23.2,"ni_margin_pct":18.1,"ebitda_margin_pct":32.3,"roa_pct":5.8,"roe_pct":10.8,"total_debt":1950,"net_debt":-250,"debt_equity":0.48,"net_debt_equity":"Net Cash","debt_ebitda":2.75,"ebitda_interest":11.8,"ocf_total_debt":0.40,"ocf_interest":13.0,"ar_days":53,"ap_days":44,"inventory_days":20,"dscr":1.85,"tangible_leverage":0.48,"current_ratio":2.2}}'},{p:'7C_guarantor_financials',l:'Guarantor P&L + BS + CF (conditional — if guarantor_exists) (JSON)',t:'json',h:'{"applicable":true,"depth":"FULL","guarantor_name":"Evergreen Marine Corporation","reporting_currency":"NTD","unit":"billions","income_statement":{"FY2024":{"revenue":381.2,"cogs":280.5,"gross_profit":100.7,"op_profit":89.6,"finance_income":3.2,"finance_cost":-5.9,"pbt":86.9,"tax":-13.0,"net_income":73.9,"ebitda":105.2,"depreciation":15.6}},"balance_sheet":{"FY2024":{"cash":198.3,"total_assets":850.0,"total_liabilities":410.0,"total_equity":440.0}},"cash_flow":{"FY2024":{"ocf":95.0,"icf":-45.0,"fcf":50.0,"net_change":12.0,"opening_cash":186.3,"closing_cash":198.3}}}'},{p:'7E_base_case',l:'Base Case Projections — 3 tables required (JSON)',t:'json',h:'{"applicable":true,"key_assumptions":[{"assumption":"Charter rate (USD/day)","value":"USD28,000","source":"EMA/EMC TC agreement"},{"assumption":"OPEX (USD/day)","value":"USD8,500","source":"EMA management estimate"},{"assumption":"Interest rate","value":"Term SOFR + 175bps (~7.0% all-in)","source":"CUB term sheet"},{"assumption":"Principal repayment","value":"5% semi-annual + 35% balloon","source":"CUB term sheet"}],"projected_financials":{"FY2029":{"revenue":10.2,"gross_profit":6.6,"op_profit":6.1,"net_income":4.5,"cash":8.2,"debt":173.5,"equity":25.0,"ocf":6.5,"capex":0,"debt_service":7.1,"fcf":-0.6}},"dscr_table":[{"period":"H1 2029","ocf":6.5,"debt_service":7.1,"dscr":1.31},{"period":"H2 2029","ocf":6.5,"debt_service":7.1,"dscr":1.31}],"conclusion":"Under the base case, the facility achieves minimum DSCR of 1.31x in Year 1, improving to 1.45x by Year 5 as principal reduces. Cash generation remains positive throughout the facility tenor."}'},{p:'7F_worse_case',l:'Worse Case Projections — triggered when base case exists (JSON)',t:'json',h:'{"applicable":true,"stress_assumptions":[{"assumption":"Charter rate","base":"USD28,000/day","worse":"USD22,400/day","stress_magnitude":"-20%"},{"assumption":"OPEX","base":"USD8,500/day","worse":"USD9,350/day","stress_magnitude":"+10%"}],"stressed_summary":{"FY2029":{"revenue":8.2,"op_profit":4.0,"net_income":2.8,"ocf":4.2,"cash":5.5,"dscr":0.86}},"conclusion":"Under the worse case (-20% charter rate), DSCR falls to 0.86x in Year 1, below 1.0x threshold. EMC guarantor support would be required. EMC net cash of USD6.1bn (FY2024) provides adequate coverage. This scenario has not materialized historically (lowest CCFI was 842 in 2016)."}'},{p:'7H_sensitivity',l:'Sensitivity Analysis — 6-column table (JSON)',t:'json',h:'{"applicable":true,"rows":[{"variable":"Freight Rate -10%","base_case":"USD28,000/day","stress":"USD25,200/day","dscr_min_impact":1.15,"cash_trough_impact":"USD6.8m","conclusion":"Adequate; within covenant"},{"variable":"Freight Rate -20%","base_case":"USD28,000/day","stress":"USD22,400/day","dscr_min_impact":0.86,"cash_trough_impact":"USD5.5m","conclusion":"Below 1.0x; guarantor support needed"},{"variable":"Freight Rate -30%","base_case":"USD28,000/day","stress":"USD19,600/day","dscr_min_impact":0.56,"cash_trough_impact":"USD2.1m","conclusion":"Severe stress; full EMC guarantee activation"},{"variable":"Interest Rate +100bps","base_case":"7.0%","stress":"8.0%","dscr_min_impact":1.22,"cash_trough_impact":"USD6.2m","conclusion":"Manageable; within covenant"},{"variable":"CAPEX +20%","base_case":"USD267.3m","stress":"USD320.8m","dscr_min_impact":1.28,"cash_trough_impact":"USD7.5m","conclusion":"Immaterial post-delivery"},{"variable":"Delay +6M","base_case":"Jun 2026","stress":"Dec 2026","dscr_min_impact":1.31,"cash_trough_impact":"USD8.5m","conclusion":"Within grace period; no covenant breach"}]}'}],
+  8:[{p:'8A_acra_banking_charges',l:'ACRA Charges — Full Data (JSON)',t:'json',h:'{"section_applicability":"internal_only","acra_data_available":true,"jurisdiction":"Singapore","search_date":"01 Dec 2025","entity_name":"Evergreen Marine (Asia) Pte. Ltd.","uen":"202100000Z","charges":[{"no":1,"chargee":"DBS Bank Ltd","date_of_registration":"15 Mar 2021","date_of_charge":"10 Mar 2021","amount_usd_m":128.75,"currency":"USD","property_charged":"First priority ship mortgage over MV Pacific Star","status":"Registered","is_cub_charge":false,"cub_facility_ref":null},{"no":2,"chargee":"Cathay United Bank Singapore Branch","date_of_registration":"01 Jul 2024","date_of_charge":"15 Jun 2024","amount_usd_m":213.84,"currency":"USD","property_charged":"Vessel — Hull No. H-2891 — CUB facility (Item 1, §1)","status":"Registered","is_cub_charge":true,"cub_facility_ref":"Item 1, §1"}],"summary":{"total_charges":7,"active_charges":5,"satisfied_charges":2,"total_active_usd_m":420.5,"cub_charge_count":1,"cub_total_usd_m":213.84,"unique_chargees":["DBS Bank Ltd","OCBC Bank","Cathay United Bank Singapore Branch"],"distinct_banking_groups":3}}'}],
+  9:[{p:'9A_checklist',l:'23-Item Checklist (JSON array)',t:'json',h:'[{"no":1,"category":"KYC & Compliance","item":"CDD completed — Tier classification stated","response":"Yes","remarks":"Tier 1 KYC; reviewed 01 Dec 2025"},{"no":15,"category":"Legal & Documentation","item":"Banking Act s.33-3 compliance confirmed — state USD amount","response":"Yes","remarks":"Pre-delivery unsecured USD71.4m within s.33-3 limit; item (d) exemption; approved GM Credit"},{"no":16,"category":"Legal & Documentation","item":"ACRA charges registered — state count","response":"Yes","remarks":"7 total charges; 1 CUB charge (Item 1, §1) — search 01 Dec 2025"},{"no":23,"category":"Regulatory (MAS)","item":"MAS 612 risk classification confirmed","response":"Yes","remarks":"Pass Grade; no adverse MAS risk indicators"}]'},{p:'9B_conditions_covenants',l:'Conditions Precedent & Ongoing Covenants (JSON)',t:'json',h:'{"conditions_precedent":[{"no":1,"description":"Execution of facility agreement and all security documents","testing":"Before first drawdown"},{"no":2,"description":"Receipt of satisfactory legal opinions (Singapore and BVI)","testing":"Before first drawdown"},{"no":3,"description":"Registration of ship mortgage at Singapore Ship Registry","testing":"Within 5 Banking Days of vessel delivery"}],"ongoing_covenants":[{"description":"ACR covenant: ACR >= 100% at all times","threshold":"100%","testing":"Every 2 years or upon each drawdown"},{"description":"Insurance covenant: maintain H&M, P&I, and War Risk","threshold":"Insured value >= market value","testing":"Annual renewal"},{"description":"Negative pledge: no additional security without CUB prior written consent","threshold":"N/A","testing":"Ongoing"},{"description":"EMC to remain listed on Taiwan Stock Exchange","threshold":"N/A","testing":"Ongoing"}],"financial_covenants":"NIL"}'},{p:'9C_recommendation',l:'RECOMMENDATION — Decision + Key Conditions (JSON)',t:'json',h:'{"decision":"APPROVE","facility_amount_usd_m":213.84,"tenor_years":12,"security_structure":"Pre-delivery: Refund Guarantee (IBK, AA/AA-) + Assignment of Shipbuilding Contract. Post-delivery: First Priority Ship Mortgage + Assignment of Earnings & Insurances + EMC Corporate Guarantee.","key_conditions":["Execution of all security documents before first drawdown","Ship mortgage registration within 5 Banking Days of delivery","KYC/AML completion","EMC corporate guarantee (pre- and post-delivery)"],"balloon_ltv_pct":61.98,"balloon_ltv_cap_pct":75.0,"risk_level_changes_from_prior":"No change from prior review (MSR3 maintained)"}'},{p:'9D_signoff',l:'Sign-Off Block (JSON)',t:'json',h:'{"date":"15 Jan 2026","prepared_by":"[Name], Associate, Credit Management Department, CUB SG Branch","reviewed_by":"[Name], Vice President, Credit Management Department, CUB SG Branch","department":"Credit Management Department, Cathay United Bank Singapore Branch"}'}],
+  10:[{p:'10A_group_exposure',l:'Appendix I — CUB Group Exposure (JSON)',t:'json',h:'{"entity_group":"EMC/EMA/EVA Group","group_limit_usd_m":500.0,"currency":"USD","unit":"millions","as_of_date":"Dec 2025","rows":[{"entity":"Evergreen Marine (Asia) Pte. Ltd.","branch":"SG","facility_type":"Term Loan (SLL) [NEW]","current_approved_usd_m":0,"proposed_usd_m":213.84,"outstanding_usd_m":0,"collateral":"RG + Vessel Mortgage","guarantor":"EMC","maturity_str":"Jun 2038E","msr":"MSR3","is_new_facility":true,"subtotal_type":null},{"entity":"EMA Subtotal","branch":"","facility_type":"","current_approved_usd_m":0,"proposed_usd_m":213.84,"outstanding_usd_m":0,"collateral":"","guarantor":"","maturity_str":"","msr":"","is_new_facility":false,"subtotal_type":"EMA Subtotal"},{"entity":"Evergreen Marine Corporation","branch":"TW","facility_type":"Revolving Credit","current_approved_usd_m":150.0,"proposed_usd_m":150.0,"outstanding_usd_m":50.0,"collateral":"Clean","guarantor":"N/A","maturity_str":"Dec 2027E","msr":"—","is_new_facility":false,"subtotal_type":null},{"entity":"Group Total","branch":"","facility_type":"","current_approved_usd_m":150.0,"proposed_usd_m":363.84,"outstanding_usd_m":50.0,"collateral":"","guarantor":"","maturity_str":"","msr":"","is_new_facility":false,"subtotal_type":"Group Total"}],"group_limit_sub_table":{"approved_group_limit_usd_m":500.0,"proposed_total_exposure_usd_m":363.84,"utilization_pct":72.8,"headroom_usd_m":136.16},"eva_note":"Note: EVA Marine is a sister company of EMC within the Evergreen Group. EVA facilities are covered under a separate CA report and are included here for Group Limit purposes only."}'},{p:'10B_fleet_growth',l:'Appendix II — EMC Fleet Growth Targets (JSON)',t:'json',h:'{"group_name":"EMC","year_range":"2023-2028E","rows":[{"year_label":"2023","owned_fleet_teu_m":1.21,"total_fleet_teu_m":1.92,"total_vessels":195,"owned_pct":63.0},{"year_label":"2024","owned_fleet_teu_m":1.35,"total_fleet_teu_m":2.02,"total_vessels":205,"owned_pct":66.8},{"year_label":"2025E","owned_fleet_teu_m":1.52,"total_fleet_teu_m":2.15,"total_vessels":218,"owned_pct":70.7},{"year_label":"2026E","owned_fleet_teu_m":1.68,"total_fleet_teu_m":2.28,"total_vessels":230,"owned_pct":73.7},{"year_label":"2027E","owned_fleet_teu_m":1.85,"total_fleet_teu_m":2.40,"total_vessels":242,"owned_pct":77.1},{"year_label":"2028E","owned_fleet_teu_m":2.10,"total_fleet_teu_m":2.55,"total_vessels":258,"owned_pct":82.4}],"cagr_pct":5.8,"chart_reference":"EMC Fleet Capacity Growth Chart — Source: EMC Annual Report 2024 / EMC Investor Presentation Q4 2024","key_notes":["Target capacity: 2.55m TEU by end-2028E (vs. 1.92m TEU in 2023)","Owned fleet transition: 63% (2023) → 82% (2028E) — strategic reduction of charter reliance to lower cost base","Newbuild delivery concentration: 63 vessels on order (2025-2028E); orderbook 18% of existing fleet (Source: Clarkson, Jan 2025)","CUB-financed vessel: 20,000 TEU LNG dual-fuel, Hull No. H-2891, delivery Jun 2026E","EMC CAPEX plan: USD4.2bn (2025-2028E); EMA capital commitment: USD213.84m for Hull H-2891 (contracted Nov 2023)"]}'},{p:'10C_projections',l:'Appendix III — EMA Detailed Financial Projections (JSON)',t:'json',h:'{"entity_name":"Evergreen Marine (Asia) Pte. Ltd.","basis":"Standalone","currency":"USD","unit":"USD\'000","key_assumptions":[{"assumption":"Charter rate (USD/day)","FY2026E":28000,"FY2027E":28500,"FY2028E":29000},{"assumption":"OPEX (USD/day)","FY2026E":8500,"FY2027E":8750,"FY2028E":9000},{"assumption":"Interest rate (all-in)","FY2026E":"7.00%","FY2027E":"6.75%","FY2028E":"6.50%"},{"assumption":"Principal repayment","FY2026E":"5% semi-annual","FY2027E":"5% semi-annual","FY2028E":"5% semi-annual + 35% balloon"}],"assumptions_narrative":"Revenue growth assumes charter rate improvement per container shipping cycle recovery. COGS reflects vessel OPEX escalation at 3% p.a. CAPEX per contracted vessel price USD267.3m (fixed-price SBC).","base_case_pl":[{"item":"Revenue","FY2026E":10206,"FY2027E":10408,"FY2028E":10616,"is_subtotal":false},{"item":"Cost of Goods Sold","FY2026E":-3103,"FY2027E":-3194,"FY2028E":-3288,"is_subtotal":false},{"item":"Gross Profit","FY2026E":7103,"FY2027E":7214,"FY2028E":7328,"is_subtotal":true},{"item":"Other Operating Income","FY2026E":120,"FY2027E":125,"FY2028E":130,"is_subtotal":false},{"item":"Operating Expenses","FY2026E":-980,"FY2027E":-1010,"FY2028E":-1040,"is_subtotal":false},{"item":"Operating Profit","FY2026E":6243,"FY2027E":6329,"FY2028E":6418,"is_subtotal":true},{"item":"Finance Income","FY2026E":85,"FY2027E":92,"FY2028E":99,"is_subtotal":false},{"item":"Finance Cost","FY2026E":-1498,"FY2027E":-1387,"FY2028E":-1268,"is_subtotal":false},{"item":"Other Non-Operating","FY2026E":-12,"FY2027E":-12,"FY2028E":-12,"is_subtotal":false},{"item":"Profit Before Tax","FY2026E":4818,"FY2027E":5022,"FY2028E":5237,"is_subtotal":true},{"item":"Income Tax","FY2026E":-722,"FY2027E":-753,"FY2028E":-786,"is_subtotal":false},{"item":"Net Income","FY2026E":4096,"FY2027E":4269,"FY2028E":4451,"is_subtotal":true}],"base_case_bs":[{"item":"Cash & Equivalents","FY2026E":8200,"FY2027E":9100,"FY2028E":10200,"is_subtotal":false},{"item":"Trade Receivables","FY2026E":850,"FY2027E":870,"FY2028E":890,"is_subtotal":false},{"item":"Other Current Assets","FY2026E":320,"FY2027E":330,"FY2028E":340,"is_subtotal":false},{"item":"Total Current Assets","FY2026E":9370,"FY2027E":10300,"FY2028E":11430,"is_subtotal":true},{"item":"Vessels & Equipment","FY2026E":195000,"FY2027E":183000,"FY2028E":171000,"is_subtotal":false},{"item":"Right-of-Use Assets","FY2026E":12000,"FY2027E":10500,"FY2028E":9000,"is_subtotal":false},{"item":"Other Non-Current Assets","FY2026E":850,"FY2027E":870,"FY2028E":890,"is_subtotal":false},{"item":"Total Non-Current Assets","FY2026E":207850,"FY2027E":194370,"FY2028E":180890,"is_subtotal":true},{"item":"Total Assets","FY2026E":217220,"FY2027E":204670,"FY2028E":192320,"is_subtotal":true},{"item":"Total Current Liabilities","FY2026E":12500,"FY2027E":12800,"FY2028E":13100,"is_subtotal":true},{"item":"Long-term Borrowings","FY2026E":163500,"FY2027E":152500,"FY2028E":141500,"is_subtotal":false},{"item":"Non-Current Lease Liabilities","FY2026E":10200,"FY2027E":8900,"FY2028E":7600,"is_subtotal":false},{"item":"Other Non-Current Liabilities","FY2026E":450,"FY2027E":460,"FY2028E":470,"is_subtotal":false},{"item":"Total Non-Current Liabilities","FY2026E":174150,"FY2027E":161860,"FY2028E":149570,"is_subtotal":true},{"item":"Total Liabilities","FY2026E":186650,"FY2027E":174660,"FY2028E":162670,"is_subtotal":true},{"item":"Total Equity","FY2026E":30570,"FY2027E":30010,"FY2028E":29650,"is_subtotal":true}],"base_case_cf":[{"item":"Operating Cash Flow","FY2026E":6520,"FY2027E":6780,"FY2028E":7050,"is_subtotal":false},{"item":"Investing Cash Flow","FY2026E":-213840,"FY2027E":-200,"FY2028E":-200,"is_subtotal":false},{"item":"Financing Cash Flow","FY2026E":215320,"FY2027E":-10700,"FY2028E":-6000,"is_subtotal":false},{"item":"Net Change in Cash","FY2026E":8000,"FY2027E":-4120,"FY2028E":850,"is_subtotal":true},{"item":"Opening Cash","FY2026E":200,"FY2027E":8200,"FY2028E":4080,"is_subtotal":false},{"item":"Closing Cash","FY2026E":8200,"FY2027E":4080,"FY2028E":4930,"is_subtotal":true}],"base_case_dscr":[{"year_label":"FY2026E","ocf":6520,"debt_service":7100,"dscr":0.92},{"year_label":"FY2027E","ocf":6780,"debt_service":6960,"dscr":0.97},{"year_label":"FY2028E","ocf":7050,"debt_service":6820,"dscr":1.03}],"dscr_commentary":"DSCR improves from 0.92x (FY2026E) to 1.03x (FY2028E) as debt amortises and charter rate recovers. Minimum DSCR of 0.92x occurs in FY2026E (first full year post-delivery); EMC guarantee provides backstop below 1.0x threshold.","stress_assumptions":[{"assumption":"Revenue","base_case":"USD28,000/day","worse_case":"USD22,400/day","stress_magnitude":"-20%"},{"assumption":"COGS%","base_case":"30.4%","worse_case":"33.4%","stress_magnitude":"+10% OPEX"},{"assumption":"SOFR","base_case":"5.25%","worse_case":"6.25%","stress_magnitude":"+100bps"},{"assumption":"Dividend","base_case":"100% of NI","worse_case":"100% of NI","stress_magnitude":"No change"}],"worse_case_summary":[{"item":"Revenue","value":8165,"is_dscr":false},{"item":"Operating Profit","value":4230,"is_dscr":false},{"item":"Net Income","value":2890,"is_dscr":false},{"item":"OCF","value":4100,"is_dscr":false},{"item":"Cash Balance","value":5500,"is_dscr":false},{"item":"DSCR","value":0.58,"is_dscr":true}],"worse_case_commentary":"Under Worse Case (-20% charter rate), DSCR declines to minimum 0.58x in FY2026E but is covered by EMC guarantee (net cash USD6.1bn, FY2024). Cash trough of USD5.5m in FY2026E. Net income remains positive in all years at USD2.9m minimum."}'}],
+};
+
+function _fid(sec,p){return`ff_${sec}_${p}`;}
+
+function renderFieldForm(secNo){
+  const defs=FIELD_DEFS[secNo]||[];
+  if(!defs.length)return'<p class="text-muted small col-12">No structured form defined for this section — use the Raw JSON tab.</p>';
+  return defs.map(f=>{
+    const id=_fid(secNo,f.p);let inp='';
+    if(f.t==='text')inp=`<input id="${id}" class="form-control form-control-sm" type="text" placeholder="${esc(f.h||'')}">`;
+    else if(f.t==='number')inp=`<input id="${id}" class="form-control form-control-sm" type="number" step="any">`;
+    else if(f.t==='textarea')inp=`<textarea id="${id}" class="form-control form-control-sm" rows="3" placeholder="${esc(f.h||'')}"></textarea>`;
+    else if(f.t==='lines')inp=`<textarea id="${id}" class="form-control form-control-sm" rows="3" placeholder="Enter one item per line"></textarea>`;
+    else if(f.t==='json')inp=`<textarea id="${id}" class="form-control form-control-sm json-ed" rows="4" placeholder="${esc(f.h||'JSON format')}"></textarea>`;
+    else if(f.t==='bool')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">—</option><option value="true">Yes / True</option><option value="false">No / False</option></select>`;
+    else if(f.t==='select')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">— Select —</option>${(f.opts||[]).map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
+    const req=REQUIRED_FIELDS[secNo]?.some(r=>r.p===f.p);
+    return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${f.l}${req?'<span class="text-danger ms-1" title="Required for 90%">*</span>':''}</label>${inp}</div>`;
+  }).join('');
+}
+
+function populateForm(secNo,data){
+  const defs=FIELD_DEFS[secNo]||[];
+  for(const f of defs){
+    const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
+    const v=data[f.p];if(v===null||v===undefined){el.value='';continue;}
+    if(f.t==='lines')el.value=Array.isArray(v)?v.join('\n'):String(v);
+    else if(f.t==='json')el.value=typeof v==='object'?JSON.stringify(v,null,2):String(v);
+    else if(f.t==='bool')el.value=String(v);
+    else el.value=String(v);
+  }
+}
+
+function collectFormData(secNo){
+  const defs=FIELD_DEFS[secNo]||[];const result={};
+  for(const f of defs){
+    const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
+    const raw=el.value.trim();if(!raw)continue;
+    if(f.t==='number'){const n=parseFloat(raw);if(!isNaN(n))result[f.p]=n;}
+    else if(f.t==='lines')result[f.p]=raw.split('\n').map(l=>l.trim()).filter(Boolean);
+    else if(f.t==='json'){try{result[f.p]=JSON.parse(raw);}catch(e){result[f.p]=raw;}}
+    else if(f.t==='bool')result[f.p]=raw==='true';
+    else result[f.p]=raw;
+  }
+  return result;
+}
+
+async function openStructuredForm(){
+  const sec=currentPanelSec;if(!sec)return;
+  const container=document.getElementById('formFields');if(!container)return;
+  container.innerHTML=renderFieldForm(sec);
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{headers:H()});
+    if(res.ok){const d=await res.json();populateForm(sec,d.input_json);}
+  }catch(e){}
+}
+
+async function saveFormInput(){
+  const sec=currentPanelSec;if(!sec)return;
+  const data=collectFormData(sec);
+  if(!Object.keys(data).length){toast('No data entered','warning');return;}
+  const{pct,missing}=getCompleteness(sec,data);
+  if(pct<90){
+    toast(`Form is ${pct}% complete — need ≥90%. Missing: ${missing.slice(0,3).map(f=>f.l).join(', ')}${missing.length>3?'…':''}`, 'warning');
+    return;
+  }
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:data})});
+    const d=await res.json();if(!res.ok)throw new Error(d.detail||'Save failed');
+    sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
+    sectionInputDataMap[sec]=data;
+    document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
+    renderSectionsTable();toast(`§${sec} saved via form ✓ (${pct}% complete)`,'success');
+  }catch(e){toast(e.message,'danger');}
+}
+
+function syncFormToJson(){
+  const sec=currentPanelSec;if(!sec)return;
+  const data=collectFormData(sec);
+  document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
+  renderCompleteness(sec,data);
+  toast('Form synced to JSON editor','info');
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function H(){return{'Authorization':'Bearer '+token};}
+function HJ(){return{'Authorization':'Bearer '+token,'Content-Type':'application/json'};}
+
+async function doLogin(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const pw=document.getElementById('loginPw').value;
+  const err=document.getElementById('loginErr');
+  const sp=document.getElementById('loginSpin');
+  err.classList.add('d-none');sp.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/auth/login',{method:'POST',body:new URLSearchParams({username:email,password:pw})});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Login failed');
+    token=d.access_token;currentRole=d.role;currentEmail=email;
+    localStorage.setItem('token',token);localStorage.setItem('role',currentRole);localStorage.setItem('email',currentEmail);
+    showDashboard();
+  }catch(e){err.textContent=e.message;err.classList.remove('d-none');}
+  finally{sp.classList.add('d-none');}
+}
+function logout(){localStorage.clear();token=null;currentRole=null;currentEmail=null;currentRid=null;showView('viewLogin');document.getElementById('navUser').classList.add('d-none');}
+
+// ── Views ─────────────────────────────────────────────────────────────────────
+function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');}
+
+async function showDashboard(){
+  showView('viewDashboard');
+  document.getElementById('navUser').classList.remove('d-none');
+  document.getElementById('navRole').textContent=currentRole;
+  document.getElementById('navEmail').textContent=currentEmail;
+  await loadReports();
+}
+
+// ── Reports list ──────────────────────────────────────────────────────────────
+async function loadReports(){
+  const tb=document.getElementById('rptBody');
+  tb.innerHTML='<tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr>';
+  try{
+    const res=await fetch(API+'/reports?limit=50',{headers:H()});
+    if(res.status===401){logout();return;}
+    const data=await res.json();
+    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="text-center text-muted py-4">No reports yet.</td></tr>';return;}
+    tb.innerHTML=data.map(r=>`<tr class="report-row" onclick="loadReportDetail('${r.id}')">
+      <td class="ps-3 fw-semibold">${esc(r.borrower_name||'—')}</td>
+      <td>${esc(r.report_type||'—')}</td><td>${esc(r.booking_branch||'—')}</td>
+      <td>${sbadge(r.status)}</td><td class="text-muted small">${fd(r.created_at)}</td>
+    </tr>`).join('');
+  }catch(e){tb.innerHTML=`<tr><td colspan="5" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;}
+}
+
+async function createReport(){
+  const p={borrower_name:document.getElementById('nBorrower').value.trim()||null,industry:document.getElementById('nIndustry').value,report_type:document.getElementById('nType').value.trim()||null,booking_branch:document.getElementById('nBranch').value.trim()||null};
+  try{
+    const res=await fetch(API+'/reports',{method:'POST',headers:HJ(),body:JSON.stringify(p)});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Failed');
+    bootstrap.Modal.getInstance(document.getElementById('createModal')).hide();
+    toast('Report created','success');await loadReportDetail(d.id);
+  }catch(e){toast(e.message,'danger');}
+}
+
+// ── Report detail ─────────────────────────────────────────────────────────────
+async function loadReportDetail(rid){
+  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};allOutputs=[];uploadedDocs=[];closePanel();
+  showView('viewReport');
+  document.getElementById('rptMeta').innerHTML='<span class="text-muted">Loading…</span>';
+  document.getElementById('secTable').innerHTML='<tr><td colspan="7" class="text-center py-3 text-muted">Loading…</td></tr>';
+  try{
+    const [rRes,outRes,docRes,inpRes]=await Promise.all([
+      fetch(API+'/reports/'+rid,{headers:H()}),
+      fetch(API+'/reports/'+rid+'/outputs',{headers:H()}),
+      fetch(API+'/reports/'+rid+'/documents',{headers:H()}),
+      fetch(API+'/reports/'+rid+'/inputs',{headers:H()}),
+    ]);
+    const rpt=await rRes.json();
+    const outputs=outRes.ok?await outRes.json():[];
+    const docs=docRes.ok?await docRes.json():[];
+    const inputs=inpRes.ok?await inpRes.json():[];
+
+    allOutputs=outputs;
+    uploadedDocs=docs;
+    outputs.forEach(o=>sectionOutputMap[o.section_no]=o);
+    inputs.forEach(i=>sectionInputMap[i.section_no]={has_data:true,saved_at:i.saved_at});
+
+    document.getElementById('rptTitle').textContent=rpt.borrower_name?`${rpt.borrower_name} — ${rpt.report_type||rpt.industry}`:rpt.id;
+    document.getElementById('rptMeta').innerHTML=`<div class="row g-1">
+      <div class="col-6"><small class="text-muted">Borrower</small><div class="fw-semibold">${esc(rpt.borrower_name||'—')}</div></div>
+      <div class="col-6"><small class="text-muted">Industry</small><div>${esc(rpt.industry)}</div></div>
+      <div class="col-6"><small class="text-muted">Type</small><div>${esc(rpt.report_type||'—')}</div></div>
+      <div class="col-6"><small class="text-muted">Branch</small><div>${esc(rpt.booking_branch||'—')}</div></div>
+      <div class="col-6"><small class="text-muted">Status</small><div>${sbadge(rpt.status)}</div></div>
+      <div class="col-6"><small class="text-muted">Created</small><div class="small text-muted">${fd(rpt.created_at)}</div></div>
+    </div>`;
+
+    const dl=document.getElementById('docList');
+    dl.innerHTML=docs.length?docs.map(d=>{
+      const fmt=(d.file_format||'').toUpperCase()||'?';
+      const fmtColor={PDF:'danger',DOCX:'primary',PPTX:'warning',TXT:'secondary',JPG:'success',PNG:'success',IMG:'success'}[fmt]||'secondary';
+      const typeLabel=DOC_TYPE_LABELS[d.document_type]||d.document_type||'Other';
+      const etlBadge=d.etl_status==='done'?'<span class="badge bg-success ms-1" style="font-size:9px">ETL✓</span>':d.etl_status==='error'?'<span class="badge bg-danger ms-1" style="font-size:9px">ETL!</span>':'';
+      return`<div class="border rounded p-1 mb-1" style="font-size:11px;">
+        <div class="d-flex align-items-center gap-1 flex-wrap">
+          <span class="badge bg-${fmtColor}" style="font-size:9px">${esc(fmt)}</span>
+          <span class="fw-semibold text-truncate" style="max-width:140px" title="${esc(d.original_filename)}">${esc(d.original_filename)}</span>
+          <span class="text-muted">${fb(d.file_size_bytes)}</span>${etlBadge}
+        </div>
+        <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
+        <div class="d-flex gap-1 mt-1">
+          <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>
+          <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:10px" onclick="deleteDocument('${d.id}')">🗑 Delete</button>
+        </div>
+      </div>`;
+    }).join('')
+      :'<span class="text-muted">No documents uploaded yet.</span>';
+
+    renderSectionsTable();
+  }catch(e){toast(e.message,'danger');}
+}
+
+function renderSectionsTable(){
+  const tb=document.getElementById('secTable');
+  tb.innerHTML=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const o=sectionOutputMap[n];const inp=sectionInputMap[n];
+    const sc=o?(o.status==='done'?'done':o.status==='generating'?'generating':o.status==='error'?'error':'pending'):'pending';
+    const sl=o?o.status:'—';
+    const tok=o?.tokens_used?(o.tokens_used).toLocaleString():'—';
+    const gen=o?.generated_at?fd(o.generated_at):'—';
+    const inpIcon=inp?.has_data?'<span class="input-ok">✓</span>':'<span class="input-miss">✗</span>';
+    return `<tr style="cursor:pointer" onclick="openPanel(${n},'input')">
+      <td class="ps-2"><span class="sec-badge s-${sc}">${n}</span></td>
+      <td>${snm(n)}</td>
+      <td class="text-center">${inpIcon}</td>
+      <td><span class="badge bg-${sc==='done'?'success':sc==='generating'?'warning text-dark':sc==='error'?'danger':'secondary'} small">${sl}</span></td>
+      <td class="text-muted small">${tok}</td>
+      <td class="text-muted small">${gen}</td>
+      <td><button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="event.stopPropagation();openPanel(${n},'output')" title="View/Generate output">▶</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Section panel ─────────────────────────────────────────────────────────────
+function openPanel(secNo,tab){
+  currentPanelSec=secNo;
+  document.getElementById('secPanelTitle').textContent=`§${secNo} — ${SNAMES[secNo]}`;
+  document.getElementById('secPanel').style.display='block';
+  document.getElementById('secPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+  // Show §2 regeneration hint in output tab
+  const notice=document.getElementById('sec2Notice');
+  if(secNo===2&&notice){const s=checkSection2Stale();notice.classList.toggle('d-none',!s);}
+  switchTab(tab);
+}
+function closePanel(){document.getElementById('secPanel').style.display='none';currentPanelSec=null;}
+
+function switchTab(tab){
+  const order=['input','form','output'];
+  document.querySelectorAll('#panelTabs .nav-link').forEach((el,i)=>el.classList.toggle('active',i===order.indexOf(tab)));
+  document.getElementById('tabInput').style.display=tab==='input'?'block':'none';
+  document.getElementById('tabForm').style.display=tab==='form'?'block':'none';
+  document.getElementById('tabOutput').style.display=tab==='output'?'block':'none';
+  if(tab==='input')loadInputEditor();
+  else if(tab==='form')openStructuredForm();
+  else loadSectionOutput(currentPanelSec);
+}
+
+async function loadInputEditor(){
+  const sec=currentPanelSec;if(!sec)return;
+  const ed=document.getElementById('jsonEd');
+  ed.value='';document.getElementById('savedAt').textContent='';
+  document.getElementById('completenessPanel').style.display='none';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{headers:H()});
+    if(!res.ok){renderCompleteness(sec,{});return;}
+    const d=await res.json();
+    ed.value=JSON.stringify(d.input_json,null,2);
+    document.getElementById('savedAt').textContent='Last saved: '+fd(d.saved_at);
+    sectionInputDataMap[sec]=d.input_json;
+    renderCompleteness(sec,d.input_json);
+  }catch(e){}
+}
+function loadTemplate(){
+  const sec=currentPanelSec;if(!sec)return;
+  const tpl=TEMPLATES[sec]||{};
+  document.getElementById('jsonEd').value=JSON.stringify(tpl,null,2);
+  renderCompleteness(sec,tpl);
+  toast(`Template loaded for §${sec}. Replace placeholder values with actual data, then Save.`,'info');
+}
+async function saveSectionInput(){
+  const sec=currentPanelSec;
+  const raw=document.getElementById('jsonEd').value.trim();
+  if(!raw){toast('Input is empty','warning');return;}
+  let parsed;
+  try{parsed=JSON.parse(raw);}catch(e){toast('Invalid JSON: '+e.message,'danger');return;}
+  if(typeof parsed!=='object'||Array.isArray(parsed)){toast('Input must be a JSON object {}','warning');return;}
+  const{pct}=getCompleteness(sec,parsed);
+  if(pct<90){
+    renderCompleteness(sec,parsed);
+    toast(`§${sec} is only ${pct}% complete. Fill in missing fields (marked ✗) before saving.`,'warning');
+    return;
+  }
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:parsed})});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Save failed');
+    sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
+    sectionInputDataMap[sec]=parsed;
+    document.getElementById('savedAt').textContent='Saved: '+fd(d.saved_at);
+    renderCompleteness(sec,parsed);
+    renderSectionsTable();toast(`§${sec} input saved ✓ (${pct}% complete)`,'success');
+  }catch(e){toast(e.message,'danger');}
+}
+
+async function loadSectionOutput(sec){
+  const el=document.getElementById('outputContent');
+  el.innerHTML='<span class="text-muted small">Loading…</span>';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/sections/'+sec+'/output',{headers:H()});
+    if(!res.ok){el.innerHTML='<p class="text-muted fst-italic">Not yet generated.<br>Fill in input data (✏ Input Data tab) then click Generate.</p>';return;}
+    const d=await res.json();
+    el.innerHTML=d.markdown?marked.parse(d.markdown):'<p class="text-muted fst-italic">No content yet.</p>';
+  }catch(e){el.innerHTML=`<p class="text-danger">${esc(e.message)}</p>`;}
+}
+
+async function generateCurrentSection(){
+  const sec=currentPanelSec;if(!sec)return;
+  // Enforce 90% completeness gate before generation
+  const raw=document.getElementById('jsonEd').value.trim();
+  if(raw){
+    let parsed={};try{parsed=JSON.parse(raw);}catch(e){}
+    const{pct,missing}=getCompleteness(sec,parsed);
+    if(pct<90){
+      renderCompleteness(sec,parsed);
+      toast(`§${sec} is ${pct}% complete — need ≥90% before generating. Fill in missing fields.`,'warning');
+      switchTab('input');return;
+    }
+  }
+  const sp=document.getElementById('secGenSpin');sp.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec,{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    toast(`§${sec} generated — ${(d.tokens_used||0).toLocaleString()} tokens`,'success');
+    const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
+    if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
+    renderSectionsTable();await loadSectionOutput(sec);
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+// ── Generate All ──────────────────────────────────────────────────────────────
+async function preflight(){
+  const missingData=[];
+  const lowComp=[];
+  for(let n=1;n<=10;n++){
+    if(!sectionInputMap[n]?.has_data){missingData.push(n);continue;}
+    // Check 90% completeness using cached data (or fetch if not yet cached)
+    let data=sectionInputDataMap[n];
+    if(!data){
+      try{const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+n,{headers:H()});
+        if(r.ok){const d=await r.json();data=d.input_json;sectionInputDataMap[n]=data;}
+      }catch(e){}
+    }
+    if(data){const{pct}=getCompleteness(n,data);if(pct<90)lowComp.push({n,pct});}
+  }
+  const al=document.getElementById('preflightAlert');
+  if(missingData.length||lowComp.length){
+    let msg='';
+    if(missingData.length)msg+=`Missing input data: <strong>§${missingData.join(', §')}</strong>. `;
+    if(lowComp.length)msg+=`Below 90% completeness: <strong>${lowComp.map(x=>`§${x.n} (${x.pct}%)`).join(', ')}</strong>.`;
+    msg+='<br>Click each section row → 📋 Raw JSON or 📝 Structured Form → fill in missing fields → Save.';
+    document.getElementById('preflightMsg').innerHTML=msg;
+    al.classList.remove('d-none');al.scrollIntoView({behavior:'smooth',block:'nearest'});return;
+  }
+  al.classList.add('d-none');
+  await generateAll();
+}
+async function generateAll(){
+  const sp=document.getElementById('genAllSpin');sp.classList.remove('d-none');
+  toast('Generating full report — this may take several minutes…','info');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate',{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    const ss=Object.entries(d.sections).map(([k,v])=>`§${k}:${v.split(':')[0]}`).join(' ');
+    toast('Generation complete. '+ss,'success');
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+// ── Full Report Review ────────────────────────────────────────────────────────
+function checkSection2Stale(){
+  const s2=sectionOutputMap[2];
+  if(!s2||s2.status!=='done'||!s2.generated_at)return false;
+  const t2=new Date(s2.generated_at).getTime();
+  return Object.values(sectionOutputMap).some(o=>
+    o.section_no!==2&&o.status==='done'&&o.generated_at&&new Date(o.generated_at).getTime()>t2
+  );
+}
+
+async function openReview(){
+  // Pre-fetch all 10 section inputs in parallel so quality check has real data
+  await Promise.all(Array.from({length:10},(_,i)=>i+1).map(async n=>{
+    if(sectionInputDataMap[n])return; // already cached
+    try{
+      const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+n,{headers:H()});
+      if(res.ok){const d=await res.json();sectionInputDataMap[n]=d.input_json;}
+    }catch(e){}
+  }));
+  renderReview();renderQualityReport();showView('viewReview');
+}
+
+function renderReview(){
+  // Nav pills
+  const nav=document.getElementById('reviewNav');
+  nav.innerHTML=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const o=sectionOutputMap[n];
+    const cls=o?.status==='done'?'success':o?.status==='error'?'danger':'secondary';
+    return `<a href="#rsec-${n}" class="badge bg-${cls} text-decoration-none" style="font-size:12px">§${n}</a>`;
+  }).join('');
+
+  // §2 stale warning
+  document.getElementById('sec2StaleWarn').classList.toggle('d-none',!checkSection2Stale());
+
+  // Sections content
+  const rc=document.getElementById('reviewContent');
+  rc.innerHTML=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const o=sectionOutputMap[n];
+    const inp=sectionInputMap[n];
+    if(o?.status==='done'&&o.markdown){
+      return `<div id="rsec-${n}" class="card review-section-card">
+        <div class="card-header">§${n} — ${snm(n)}</div>
+        <div class="card-body markdown-body">${marked.parse(o.markdown)}</div>
+      </div>`;
+    }
+    return `<div id="rsec-${n}" class="card review-section-card border-warning">
+      <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <span>§${n} — ${snm(n)}</span>
+        <span class="badge bg-${o?.status==='error'?'danger':'secondary'}">${o?.status||'not generated'}</span>
+      </div>
+      <div class="card-body text-center py-4">
+        ${!inp?.has_data?'<p class="text-danger mb-2">⚠ No analyst input data saved. Go back and fill in the Input Data tab.</p>':'<p class="text-muted mb-2">Input data ready. Section not yet generated.</p>'}
+        <button class="btn btn-sm btn-primary" onclick="generateFromReview(${n})">
+          <span id="revSpin${n}" class="spinner-border spinner-sm d-none me-1"></span>Generate §${n}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function generateFromReview(secNo){
+  const sp=document.getElementById('revSpin'+secNo);if(sp)sp.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+secNo,{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    toast(`§${secNo} generated ✓`,'success');
+    const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
+    if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
+    renderSectionsTable();renderReview();
+  }catch(e){toast(e.message,'danger');}
+  finally{if(sp)sp.classList.add('d-none');}
+}
+
+// ── Red-team helpers ──────────────────────────────────────────────────────────
+function _extractFacts(obj,nums=[],strs=[]){
+  if(!obj||typeof obj!=='object')return{nums,strs};
+  for(const[k,v]of Object.entries(obj)){
+    if(typeof v==='number'&&v!==0&&isFinite(v))nums.push(v);
+    else if(typeof v==='string'&&v.trim().length>1&&v.length<120){
+      const t=v.trim();
+      if(!t.startsWith('To be generated')&&t!=='APPROVE/DECLINE'&&t!=='—')strs.push(t);
+    }else if(Array.isArray(v))v.forEach(item=>{if(typeof item==='object'&&item)_extractFacts(item,nums,strs);else if(typeof item==='string'&&item.length>1)strs.push(item);});
+    else if(typeof v==='object'&&v)_extractFacts(v,nums,strs);
+  }
+  return{nums,strs};
+}
+
+function redTeamCheck(secNo,inputData,markdown){
+  const issues=[];
+  if(!markdown)return issues;
+
+  // 1. Unfilled placeholders
+  if(/\[TBD\]|\[INSERT\]|\[PLACEHOLDER\]|\[FILL\]/i.test(markdown))
+    issues.push({sev:'danger',msg:'Unfilled placeholders detected in output — AI failed to generate content'});
+
+  // 2. Lorem ipsum
+  if(/lorem ipsum/i.test(markdown))
+    issues.push({sev:'danger',msg:'Lorem ipsum text found — output is placeholder, not real content'});
+
+  // 3. Very short output
+  if(markdown.length<200)
+    issues.push({sev:'danger',msg:`Output very short (${markdown.length} chars) — likely incomplete or generation failed`});
+
+  // 4. §2 staleness
+  if(secNo===2&&checkSection2Stale())
+    issues.push({sev:'warning',msg:'§2 Overall Comments is stale — regenerate after all other sections are finalised'});
+
+  if(!inputData)return issues;
+  const{nums,strs}=_extractFacts(inputData);
+
+  // 5. Key numeric grounding check
+  const critNums=nums.filter(n=>Math.abs(n)>=0.1);
+  if(critNums.length){
+    let ungrounded=0;
+    for(const n of critNums){
+      const fmts=[String(n),n.toFixed(1),n.toFixed(2),n.toLocaleString()];
+      if(!fmts.some(f=>markdown.includes(f)))ungrounded++;
+    }
+    const ungroundedPct=Math.round(ungrounded/critNums.length*100);
+    if(ungroundedPct>50)
+      issues.push({sev:'danger',msg:`${ungrounded}/${critNums.length} key numbers from input not found in output — high hallucination risk`});
+    else if(ungroundedPct>25)
+      issues.push({sev:'warning',msg:`${ungrounded}/${critNums.length} key numbers from input not referenced in output — verify content`});
+  }
+
+  // 6. Key named entity grounding (company/vessel names, legal terms)
+  const keyNames=strs.filter(s=>/^[A-Z]/.test(s)&&s.length>3&&!/^(USD|SGD|EUR|GBP|JPY|Clear|Passed|N\/A|Yes|No|True|False)$/.test(s));
+  if(keyNames.length>=2){
+    const missing=keyNames.slice(0,6).filter(name=>!markdown.includes(name));
+    if(missing.length>=3)
+      issues.push({sev:'warning',msg:`Key entities from input not found in output: "${missing.slice(0,3).join('", "')}" — possible hallucination or incorrect names`});
+  }
+
+  return issues;
+}
+
+function renderQualityReport(){
+  const container=document.getElementById('qualityReport');
+  const content=document.getElementById('qualityReportContent');
+  if(!container||!content)return;
+
+  let totalIssues=0;
+  const rows=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const inp=sectionInputMap[n];
+    const out=sectionOutputMap[n];
+    const hasInput=inp?.has_data;
+    const hasOutput=out?.status==='done'&&out.markdown;
+    const inputData=sectionInputDataMap[n]||null;
+
+    // Completeness check on cached input data
+    const{pct:compPct=null}=inputData?getCompleteness(n,inputData):{};
+
+    const issues=[];
+    if(!hasInput)issues.push({sev:'danger',msg:'No analyst input data — section output will contain hallucinations'});
+    if(hasInput&&compPct!==null&&compPct<90)issues.push({sev:'danger',msg:`Input only ${compPct}% complete (need ≥90%) — re-save with all fields filled`});
+    if(hasInput&&!hasOutput)issues.push({sev:'warning',msg:'Input ready but section not yet generated'});
+    if(hasOutput)issues.push(...redTeamCheck(n,inputData,out.markdown));
+    totalIssues+=issues.length;
+
+    const hasDanger=issues.some(i=>i.sev==='danger');
+    const statusCls=hasDanger?'danger':issues.length?'warning':'success';
+    const statusLabel=hasDanger?'⚠ Issues':issues.length?'⚡ Review':'✓ OK';
+    const compBadge=compPct===null?'<span class="text-muted small">—</span>'
+      :`<span class="badge ${compPct>=90?'bg-success':compPct>=70?'bg-warning text-dark':'bg-danger'}">${compPct}%</span>`;
+    return `<tr>
+      <td class="ps-2"><strong>§${n}</strong></td>
+      <td class="small">${esc(snm(n))}</td>
+      <td class="text-center">${hasInput?'<span class="text-success fw-bold">✓</span>':'<span class="text-danger fw-bold">✗</span>'}</td>
+      <td class="text-center">${compBadge}</td>
+      <td class="text-center">${hasOutput?'<span class="text-success fw-bold">✓</span>':'<span class="text-muted">—</span>'}</td>
+      <td><span class="badge bg-${statusCls}">${statusLabel}</span>
+        ${issues.map(i=>`<div class="small text-${i.sev==='danger'?'danger':'warning'} mt-1">⚠ ${i.msg}</div>`).join('')}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const totalSections=10;
+  const inputReady=Object.values(sectionInputMap).filter(v=>v.has_data).length;
+  const outputDone=Object.values(sectionOutputMap).filter(v=>v.status==='done').length;
+  const missingInputRate=Math.round((totalSections-inputReady)/totalSections*100);
+  const missingOutputRate=Math.round((totalSections-outputDone)/totalSections*100);
+  const dangerCount=totalIssues; // already accumulated above
+
+  content.innerHTML=`
+    <div class="row g-3 mb-3">
+      <div class="col-sm-4 text-center">
+        <div class="fw-bold" style="font-size:2rem;color:${inputReady===10?'#00703C':'#dc2626'}">${inputReady}/10</div>
+        <div class="small text-muted">Sections with Input Data</div>
+        <div class="small ${inputReady===10?'text-success':'text-danger'}">欄位缺漏率 Field Missing Rate: ${missingInputRate}%</div>
+      </div>
+      <div class="col-sm-4 text-center">
+        <div class="fw-bold" style="font-size:2rem;color:${outputDone===10?'#00703C':'#f59e0b'}">${outputDone}/10</div>
+        <div class="small text-muted">Sections Generated</div>
+        <div class="small ${outputDone===10?'text-success':'text-warning'}">Output Missing Rate: ${missingOutputRate}%</div>
+      </div>
+      <div class="col-sm-4 text-center">
+        <div class="fw-bold" style="font-size:2rem;color:${dangerCount===0?'#00703C':'#dc2626'}">${dangerCount}</div>
+        <div class="small text-muted">Red Team Issues Found</div>
+        <div class="small ${dangerCount===0?'text-success':'text-danger'}">${dangerCount===0?'No hallucinations detected':'Requires correction before export'}</div>
+      </div>
+    </div>
+    <table class="table table-sm table-bordered mb-0">
+      <thead class="table-light"><tr>
+        <th class="ps-2" style="width:36px">§</th><th>Section</th>
+        <th class="text-center" style="width:52px">Input</th>
+        <th class="text-center" style="width:60px">Complete</th>
+        <th class="text-center" style="width:60px">Output</th>
+        <th>Red Team Check</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${dangerCount>0
+      ?`<div class="alert alert-danger mt-3 mb-0 small"><strong>⚠ Red Team Review — Action Required:</strong> ${dangerCount} issue(s) found. Fix all <strong>danger</strong> items before export: correct input data, regenerate affected sections, and verify numbers/names in generated output match the input JSON.</div>`
+      :'<div class="alert alert-success mt-3 mb-0 small"><strong>✓ Red Team Review Passed</strong> — No hallucinations, placeholder text, or grounding errors detected. Report is ready for export.</div>'}
+  `;
+  container.style.display='block';
+}
+
+async function regenSec2(){
+  const sp=document.getElementById('regenSpin');sp.classList.remove('d-none');
+  toast('Regenerating §2 Overall Comments with full report context…','info');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/2',{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    toast(`§2 regenerated — ${(d.tokens_used||0).toLocaleString()} tokens`,'success');
+    const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
+    if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
+    renderReview();
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+// ── Upload PDF ────────────────────────────────────────────────────────────────
+async function uploadPDF(){
+  const inp=document.getElementById('pdfInput');
+  if(!inp.files.length){toast('Select a file','warning');return;}
+  const file=inp.files[0];
+  const docType=document.getElementById('docType').value||'other';
+  // Duplicate detection — warn if same filename already uploaded
+  const dup=uploadedDocs.find(d=>d.original_filename===file.name);
+  if(dup){if(!confirm(`"${file.name}" is already uploaded to this report.\nUpload again as a separate copy?`))return;}
+  const form=new FormData();
+  form.append('file',file);
+  form.append('document_type',docType);
+  toast(`Uploading ${file.name}…`,'info');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/documents',{method:'POST',headers:H(),body:form});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Upload failed');
+    toast(`✓ Uploaded: ${file.name}`,'success');inp.value='';
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
+}
+
+async function deleteDocument(docId){
+  if(!confirm('Delete this document from the report? This cannot be undone.'))return;
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId,{method:'DELETE',headers:H()});
+    if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||'Delete failed');}
+    toast('Document deleted','success');
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
+}
+
+async function etlDocument(docId,filename){
+  const modal=new bootstrap.Modal(document.getElementById('etlModal'));
+  const body=document.getElementById('etlModalBody');
+  const st=document.getElementById('etlModalStatus');
+  body.innerHTML=`<div class="text-center py-5"><div class="spinner-border text-success" style="width:3rem;height:3rem;"></div><div class="mt-3 text-muted fw-semibold">Running AI extraction on: <strong>${esc(filename)}</strong><br><small>This may take 20-60 seconds…</small></div></div>`;
+  st.textContent='';
+  modal.show();
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/etl',{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'ETL failed');
+    if(!d.sections_extracted||!d.sections_extracted.length){
+      body.innerHTML='<div class="alert alert-warning m-3">No structured data could be extracted from this document. The document may be an image-only scan or have no recognisable credit report data.</div>';
+      st.textContent='No data extracted';
+      return;
+    }
+    const rows=d.sections_extracted.map(n=>{
+      const sec=parseInt(n)||n;
+      const data=d.data[String(sec)]||{};
+      const fcount=Object.keys(data).length;
+      const preview=JSON.stringify(data,null,2).slice(0,800);
+      return`<div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:#e8f5ee;">
+          <span class="fw-bold">§${sec} — ${esc(snm(sec))}</span>
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-success">${fcount} field${fcount!==1?'s':''} extracted</span>
+            <button class="btn btn-sm btn-primary" onclick="saveExtractedToSection(${sec},${JSON.stringify(JSON.stringify(data))})">
+              Apply to §${sec}</button>
+          </div>
+        </div>
+        <div class="card-body p-2">
+          <details><summary class="text-muted small" style="cursor:pointer">Show extracted JSON</summary>
+          <pre class="mt-2" style="font-size:11px;max-height:250px;overflow-y:auto;background:#f8f9fa;padding:8px;border-radius:4px;">${esc(preview)}${preview.length===800?'\n…(truncated)':''}</pre>
+          </details>
+        </div>
+      </div>`;
+    }).join('');
+    body.innerHTML=`<div class="alert alert-success m-3 py-2"><strong>✓ AI ETL Complete</strong> — ${d.sections_extracted.length} section(s) extracted from <em>${esc(filename)}</em><br><small class="text-muted">Review extracted data below. Click "Apply to §N" to save fields as section input (merges with existing data).</small></div>${rows}`;
+    st.textContent=`${d.sections_extracted.length} sections extracted`;
+    await loadReportDetail(currentRid); // refresh etl_status badge
+  }catch(e){
+    body.innerHTML=`<div class="alert alert-danger m-3"><strong>ETL Failed:</strong> ${esc(e.message)}</div>`;
+    st.textContent='Error';
+  }
+}
+
+async function saveExtractedToSection(secNo,dataJson){
+  let newData;
+  try{newData=JSON.parse(dataJson);}catch(e){toast('Invalid extraction data','danger');return;}
+  // Merge with existing section input if any
+  let merged=newData;
+  try{
+    const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{headers:H()});
+    if(r.ok){const ex=await r.json();merged=Object.assign({},ex.input_json||{},newData);}
+  }catch(e){}
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:secNo,input_json:merged})});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Save failed');
+    sectionInputMap[secNo]={has_data:true,saved_at:d.saved_at};
+    sectionInputDataMap[secNo]=merged;
+    renderSectionsTable();
+    toast(`§${secNo} updated with ${Object.keys(newData).length} extracted fields ✓`,'success');
+  }catch(e){toast(e.message,'danger');}
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportReport(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections to export','warning');return;}
+  const body=outs.map(o=>`<h1>Section ${o.section_no} — ${SNAMES[o.section_no]}</h1>${marked.parse(o.markdown)}`).join('<hr>');
+  dlBlob(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Report</title>
+<style>body{font-family:Georgia,serif;max-width:900px;margin:40px auto;padding:0 20px;line-height:1.75;}
+table{border-collapse:collapse;width:100%;margin:1rem 0;}th,td{border:1px solid #ccc;padding:6px 10px;}th{background:#f0f0f0;}
+h1{font-size:1.4rem;border-bottom:2px solid #00703C;padding-bottom:6px;margin-top:2.5rem;}
+h2{font-size:1.2rem;}h3{font-size:1.05rem;color:#00703C;}</style></head>
+<body>${body}</body></html>`,'credit_report.html','text/html');
+}
+function exportMarkdown(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections to export','warning');return;}
+  dlBlob(outs.map(o=>`# Section ${o.section_no} — ${SNAMES[o.section_no]}\n\n${o.markdown}`).join('\n\n---\n\n'),'credit_report.md','text/markdown');
+}
+// ── DOCX export — backend primary, html-docx-js CDN fallback ─────────────────
+async function exportDocx(){
+  if(!currentRid){toast('No report loaded','warning');return;}
+  const sp=document.getElementById('docxSpin');sp.classList.remove('d-none');
+  toast('Generating DOCX…','info');
+  try{
+    // ── Primary: backend python-docx endpoint ─────────────────────────────
+    const res=await fetch(API+'/reports/'+currentRid+'/export/docx',{headers:H()});
+    if(res.ok){
+      const blob=await res.blob();
+      const cd=res.headers.get('Content-Disposition')||'';
+      const fname=(cd.match(/filename="([^"]+)"/)||[])[1]||'credit_report.docx';
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);a.download=fname;
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);URL.revokeObjectURL(a.href);
+      toast('DOCX downloaded ✓ (server-generated)','success');
+      return;
+    }
+    // 503 = python-docx not on server → use client-side fallback
+    if(res.status===503){
+      console.warn('Backend DOCX unavailable (503) — using client-side fallback');
+    } else {
+      const errBody=await res.json().catch(()=>({}));
+      throw new Error(errBody.detail||`Server error ${res.status}`);
+    }
+  }catch(err){
+    if(!(err instanceof TypeError)&&!String(err.message).startsWith('Server error 503')){
+      // Real error (not network failure or 503) — stop here
+      toast('DOCX export failed: '+err.message,'danger');sp.classList.add('d-none');return;
+    }
+    console.warn('Backend unreachable — trying client-side DOCX fallback');
+  }
+
+  // ── Fallback: html-docx-js (loaded via CDN script tag) ───────────────────
+  try{
+    if(typeof htmlDocx==='undefined'){
+      toast('Client-side DOCX library not loaded yet — try again in a moment','warning');
+      sp.classList.add('d-none');return;
+    }
+    const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+    if(!outs.length){toast('No generated sections to export','warning');sp.classList.add('d-none');return;}
+
+    const body=outs.map(o=>`
+      <h1 style="color:#00703C;border-bottom:2px solid #00703C;padding-bottom:6px;">
+        §${o.section_no} — ${esc(SNAMES[o.section_no])}
+      </h1>
+      ${marked.parse(o.markdown)}
+    `).join('<hr style="border-top:1px dashed #ccc;margin:24px 0;">');
+
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+      <style>
+        body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.6;color:#1a1a1a;}
+        table{border-collapse:collapse;width:100%;margin:8pt 0;font-size:10pt;}
+        th,td{border:1px solid #999;padding:4pt 8pt;}
+        th{background:#e8f5ee;font-weight:bold;}
+        h1{font-size:14pt;color:#00703C;}
+        h2{font-size:12pt;border-bottom:1px solid #b2dfce;padding-bottom:3pt;}
+        h3{font-size:11pt;color:#00703C;}
+        ul{margin:4pt 0;}li{margin:2pt 0;}
+      </style>
+    </head><body>${body}</body></html>`;
+
+    const blob=htmlDocx.asBlob(html,{orientation:'portrait',margins:{top:720,right:720,bottom:720,left:1080}});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);a.download='credit_report.docx';
+    document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(a.href);
+    toast('DOCX downloaded ✓ (client-side fallback)','success');
+  }catch(e){toast('DOCX fallback failed: '+e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+function stripMarkdown(md){
+  return md
+    .replace(/#{1,6}\s+/g,'')
+    .replace(/\*\*(.*?)\*\*/g,'$1')
+    .replace(/\*(.*?)\*/g,'$1')
+    .replace(/`([^`]+)`/g,'$1')
+    .replace(/^\|.+\|$/gm,l=>l.replace(/\|/g,' ').replace(/\s+/g,' ').trim())
+    .replace(/^\s*[-*]\s+/gm,'• ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g,'$1')
+    .replace(/\n{3,}/g,'\n\n').trim();
+}
+function exportTxt(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections','warning');return;}
+  dlBlob(outs.map(o=>`\n${'='.repeat(60)}\nSECTION ${o.section_no} — ${SNAMES[o.section_no]}\n${'='.repeat(60)}\n\n${stripMarkdown(o.markdown)}`).join('\n\n'),'credit_report.txt','text/plain');
+}
+function exportPdf(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections','warning');return;}
+  const body=outs.map(o=>`<h1>§${o.section_no} — ${esc(SNAMES[o.section_no])}</h1>${marked.parse(o.markdown)}`).join('<hr>');
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Report</title>
+<style>body{font-family:Georgia,serif;max-width:920px;margin:40px auto;padding:0 24px;line-height:1.75;color:#1a1a1a;}
+table{border-collapse:collapse;width:100%;margin:1rem 0;}th,td{border:1px solid #ccc;padding:6px 10px;}th{background:#e8f5ee;}
+h1{font-size:1.4rem;border-bottom:3px solid #00703C;padding-bottom:6px;margin-top:2.5rem;}
+h2{font-size:1.2rem;border-bottom:1px solid #b2dfce;padding-bottom:4px;}h3{color:#00703C;}
+hr{border:none;border-top:1px dashed #ccc;margin:2rem 0;}
+@media print{.noprint{display:none!important;}}
+</style></head><body>
+<div class="noprint" style="padding:12px;background:#e8f5ee;border-radius:6px;margin-bottom:20px;display:flex;gap:12px;align-items:center;">
+  <strong style="color:#00703C">📄 Credit Analysis Report</strong>
+  <button onclick="window.print()" style="margin-left:auto;padding:7px 18px;background:#00703C;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">🖨 Print / Save as PDF</button>
+</div>
+${body}</body></html>`);
+  win.document.close();
+}
+function dlBlob(content,filename,mime){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type:mime}));
+  a.download=filename;document.body.appendChild(a);a.click();
+  document.body.removeChild(a);URL.revokeObjectURL(a.href);
+  toast(`Downloaded ${filename}`,'success');
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function sbadge(s){const m={draft:'secondary',validated:'info',review_in_progress:'warning',approved:'success'};return`<span class="badge bg-${m[s]||'secondary'}">${s}</span>`;}
+function fd(iso){if(!iso)return'—';return new Date(iso).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function toast(msg,type='info'){
+  const el=document.createElement('div');
+  el.className=`alert alert-${type} py-2 px-3 shadow-sm mb-2`;
+  el.style.cssText='min-width:260px;max-width:420px;font-size:13px;';
+  el.textContent=msg;
+  document.getElementById('toast-cont').appendChild(el);
+  setTimeout(()=>el.remove(),6000);
+}
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&document.getElementById('viewLogin').classList.contains('active'))doLogin();});
+if(token){showDashboard();}else{showView('viewLogin');}
+</script>
+</body>
+</html>

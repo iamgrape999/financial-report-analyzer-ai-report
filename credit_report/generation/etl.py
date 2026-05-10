@@ -1,0 +1,713 @@
+"""AI-powered ETL: extract structured section data from uploaded documents.
+
+Flow:
+  1. Load document text from filesystem
+  2. Determine target sections based on document type
+  3. Call Gemini with a structured extraction prompt
+  4. Return {section_no: {field: value}} dict — callers decide what to save
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Which sections are relevant for each document type
+DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
+    "annual_report":         [4, 7, 3, 2, 10, 1],
+    "financial_statement":   [7, 4, 2, 10, 5],
+    "analyst_presentation":  [4, 7, 2, 3, 10, 1],
+    "interim_report":        [7, 4, 2, 3],
+    "valuation_report":      [5, 10, 6],
+    "charter_agreement":     [1, 6, 5],
+    "shipbuilding_contract": [6, 1, 5],
+    "kyc_document":          [9, 1, 4],
+    "legal_document":        [8, 1, 9],
+    "external_report":       [3, 4, 7, 2],
+    "other":                 [4, 7, 1],
+}
+
+ETL_SYSTEM_PROMPT = """\
+You are a specialized data extraction AI for maritime / corporate credit reports at an international commercial bank.
+
+Your task: read the provided document excerpt and extract structured JSON data for specific credit report sections.
+
+Rules:
+- Extract ONLY what is explicitly stated in the document — never fabricate or guess
+- Use null for any field not found in the document
+- Financial figures: use USD millions unless the document states otherwise
+- Dates: YYYY-MM-DD format or YYYY-QN (e.g. 2026-Q2)
+- Arrays: use [] when empty; include all items found
+- Return ONLY a valid JSON object. No markdown, no commentary, no code fences.
+- Structure the JSON with integer section numbers as keys (e.g. "4", "7")
+- Each section key maps to a flat or nested object matching the schema described
+"""
+
+# Extraction schema description per section (tells the model what fields to look for)
+SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
+    1: """Section 1 — Credit Facility & Case Details:
+{
+  metadata: {report_type (new_deal/annual_review/new_deal_and_annual_review), branch, industry,
+    report_date, as_at_date, group_name},
+  facility_summary: {
+    rows[{item_no, borrower, booking_office, current_facility, current_facility_mtm,
+      proposed_facility, proposed_facility_is_new (bool), lapsed_date,
+      outstanding, outstanding_as_at_date, ccy, tenor_full_verbatim,
+      facility_type_full, collateral_full, guarantor}],
+    totals: {total_credit_limit_usd_m, psr_spot_limit_usd_m, psr_mtm_usd_m},
+    footnotes[{symbol (*/^/**/#), text_verbatim}],
+    appendix_ref_verbatim
+  },
+  regulatory_compliance: {
+    banking_act_33_3: {requirement_verbatim, borrower_name, compliant_yn,
+      bank_nw_twd_bn, limit_5pct_twd_bn, limit_5pct_usd_m, fx_rate, fx_date, calculation_line},
+    unsecured_exposure_table[{label, credit_limit_usd_m, unsecured_usd_m, secured_usd_m,
+      parenthetical_note}],
+    ntd_exposure_twd_m, usd_ntd_sum_note,
+    valuation: {valuer, gongwen_ref, valuation_date, amount_exact_verbatim},
+    pam_sam_text_verbatim,
+    group_limit_verbatim
+  },
+  purpose_and_recommendation: {
+    purpose_text_verbatim, facility_amount_usd_m, facility_type_full, tenor_verbatim,
+    vessel_name, vessel_type, teu_capacity, dwt, fuel_type_full_verbatim,
+    builder, builder_country, contract_price_exact_verbatim, ltc_pct,
+    guarantor_full_legal_name,
+    pre_delivery_security_verbatim, post_delivery_security_verbatim,
+    acr_pct, ltv_pct, value_maintenance_verbatim,
+    psr_formula_verbatim, psr_purpose
+  },
+  terms_and_conditions: {
+    tc_rows[{field, content_verbatim}],
+    deal_comparison_rows[{term, proposed_deal, previous_deal}]
+  },
+  account_strategy: {
+    wallet_overview_verbatim,
+    current_relationship_verbatim,
+    opportunities_verbatim,
+    nii_usd_m, tmu_pct, deposits_verbatim, capital_market_verbatim,
+    upfront_fee_verbatim, treasury_hedging_verbatim
+  }
+}""",
+
+    2: """Section 2 — Overall Comments:
+{
+  2A_credit_overview: {
+    bullets[{order (1-6), text_verbatim}],
+    tariff_impact_paragraphs[]
+  },
+  2B_solvency: {
+    primary_repayment_source_verbatim,
+    secondary_repayment_source_verbatim,
+    ema: {period, cash_bn_usd, total_debt_bn_usd, op_ebitda_bn_usd,
+      debt_ebitda_ratio, interest_coverage, prior_year_coverage}
+  },
+  2C_guarantor: {
+    guarantor_name_abbrev, period,
+    cash_twd_bn, cash_usd_bn, total_debt_twd_bn, total_debt_usd_bn,
+    interest_coverage, prior_year_coverage,
+    support_history_verbatim
+  },
+  2D_collateral: {
+    pre_delivery: {issuer_full_name, rating, rating_agencies[], coverage_verbatim,
+      assigned_to_cub (bool), satisfactory_to_bank (bool)},
+    post_delivery: {security_type, vessel_spec, ltc_pct, acr_pct, ltv_pct,
+      ltc_pct_bold, acr_pct_bold}
+  },
+  2E_risk_and_mitigants: {
+    risks[{risk_no, level, title, risk_bullets[], mitigant_bullets[]}]
+  }
+}""",
+
+    3: """Section 3 — Credit Ratings:
+{
+  3A_external_ratings: {
+    all_nil (bool),
+    ratings[{entity_abbrev, sp, sp_outlook, moodys, moodys_outlook,
+      fitch, fitch_outlook, rating_actions[]}]
+  },
+  3B_internal_ratings: {
+    rows[{entity_full_name, entity_abbrev, role,
+      fy2022_23, fy2023_24, fy2024, interim, current,
+      remarks, override_flag (bool)}],
+    period_display_labels: {[json_key]: display_name}
+  },
+  3C_mas_612: {
+    grade (PASS/SPECIAL_MENTION/SUBSTANDARD/DOUBTFUL/LOSS),
+    primary_paragraph_verbatim,
+    supporting_paragraphs[]
+  },
+  3D_esg_rating: {
+    entity_abbrev, rating_date, image_ref
+  }
+}""",
+
+    4: """Section 4 — Corporate History and Overview:
+{
+  "4A_borrower": {
+    "company_name_en": null,
+    "company_name_zh": null,
+    "legal_entity_type": null,
+    "registration_number": null,
+    "ubn": null,
+    "incorporation_country": null,
+    "incorporation_date": null,
+    "listing_exchange": null,
+    "listing_date": null,
+    "reporting_entity": null,
+    "group_auditor": null,
+    "fiscal_year_end": null,
+    "principal_office": null
+  },
+  "4B_ownership": {
+    "shareholders": [{"name": null, "stake_percent": null, "country": null, "notes": null}],
+    "ultimate_beneficial_owner": null,
+    "ubo_stake_pct": null,
+    "ubo_holding_entity": null,
+    "group_structure_narrative": null
+  },
+  "4C_management": [
+    {"name": null, "title": null, "years_experience": null, "background": null}
+  ],
+  "4D_business": {
+    "primary_business": null,
+    "trade_routes": null,
+    "operational_model": null,
+    "years_in_operation": null,
+    "global_ranking": null,
+    "market_share_pct": null
+  },
+  "4E_financials": {
+    "currency": null,
+    "unit": null,
+    "fiscal_year": null,
+    "revenue": null,
+    "ebitda": null,
+    "ebitda_margin_pct": null,
+    "net_income": null,
+    "net_cash_debt": null,
+    "net_debt_ebitda": null,
+    "fx_rate_to_usd": null,
+    "revenue_breakdown": [{"segment": null, "amount": null, "pct_of_total": null}]
+  },
+  "4F_fleet": {
+    "total_owned_teu": null,
+    "total_fleet_teu": null,
+    "fleet_breakdown": [
+      {"category": null, "vessel_count": null, "total_teu": null, "total_dwt": null, "notes": null}
+    ],
+    "fleet_detail": [
+      {"vessel_name": null, "type": null, "teu": null, "dwt": null,
+       "year_built": null, "flag": null, "class_society": null, "employment": null}
+    ]
+  },
+  "4G_debt_profile": [
+    {"lender_bond": null, "facility_type": null, "ccy": null,
+     "amount": null, "maturity": null, "secured_unsecured": null}
+  ],
+  "4H_banking_relationships": [
+    {"bank": null, "product": null, "limit_usd_m": null, "since": null}
+  ],
+  "4I_market_data": {
+    "ccfi_level": null,
+    "scfi_level": null,
+    "ccfi_yoy_pct": null,
+    "order_book_pct_of_fleet": null,
+    "alliance_membership": null,
+    "imo_regulatory_notes": null,
+    "tariff_risk_notes": null
+  },
+  "4J_peer_comparison": [
+    {"company": null, "fleet_teu": null, "market_share_pct": null,
+     "alliance": null, "listed_yn": null}
+  ],
+  "4K_major_customers": [
+    {"name": null, "contract_type": null, "duration_years": null}
+  ]
+}""",
+
+    5: """Section 5 — Collateral / Responsible Person / Guarantor / Support:
+{
+  "5A_security_overview": {
+    "is_secured": null,
+    "unsecured_reason": null,
+    "security_instruments": [{"rank": null, "instrument": null, "description": null}]
+  },
+  "5B_refund_guarantee": {
+    "applicable": null,
+    "issuer_full_name": null,
+    "issuer_rating": null,
+    "rating_agency": null,
+    "legal_structure": null,
+    "governing_law": null,
+    "assigned_to_cub": null,
+    "expiry_condition": null,
+    "milestones": [
+      {"milestone": null, "sched_date": null, "rg_amount_usd_m": null,
+       "max_loan_os_usd_m": null, "coverage_pct": null,
+       "drawdown_usd_m": null, "cum_drawdown_usd_m": null, "status": null}
+    ],
+    "footnotes": null
+  },
+  "5C_vessel_mortgage": {
+    "applicable": null,
+    "vessel_valuations": [
+      {"vessel": null, "teu": null, "dwt": null, "year_built": null,
+       "valuer": null, "valuation_date": null,
+       "market_value_usd_m": null, "distressed_value_usd_m": null}
+    ],
+    "gongwen_ref": null,
+    "valuation_compliant": null,
+    "contract_price_usd_m": null,
+    "loan_amount_usd_m": null,
+    "ltc_pct": null,
+    "ltc_limit_pct": null,
+    "acr_at_delivery_pct": null,
+    "acr_floor_pct": null,
+    "balloon_usd_m": null,
+    "ltv_at_maturity_pct": null,
+    "ltv_cap_pct": null,
+    "amortisation_schedule": [
+      {"period": null, "date": null, "principal_usd_m": null, "interest_usd_m": null,
+       "total_debt_service_usd_m": null, "outstanding_balance_usd_m": null, "ltv_pct": null}
+    ]
+  },
+  "5D_insurance": [
+    {"type": null, "insurer_or_club": null, "insured_value_usd_m": null, "notes": null}
+  ],
+  "5E_value_maintenance_clause": {
+    "acr_covenant_pct": null,
+    "ltv_covenant_pct": null,
+    "test_frequency_verbatim": null,
+    "cure_period_banking_days": null,
+    "remedy_options": [],
+    "cure_mechanism_verbatim": null
+  },
+  "5F_corporate_guarantee": {
+    "applicable": null,
+    "guarantor_full_name": null,
+    "guarantor_listed_exchange": null,
+    "relationship_to_borrower": null,
+    "guarantee_scope": null,
+    "guarantee_phases": [],
+    "fx_rate_to_usd": null,
+    "guarantor_financials": [
+      {"metric": null, "fy_prior_twd_bn": null, "fy_prior_usd_bn": null,
+       "fy_current_twd_bn": null, "fy_current_usd_bn": null}
+    ],
+    "support_capacity_assessment": null,
+    "historical_support_record": null,
+    "guarantee_language": null
+  },
+  "5G_responsible_person": {
+    "provided": null,
+    "name": null,
+    "title": null,
+    "scope": null
+  }
+}""",
+
+    6: """Section 6 — Project Analysis:
+{
+  "6A_project": {
+    "hull_number": null, "vessel_type": null, "teu": null, "fuel_type": null,
+    "imo_tier": null, "eco_design": null, "dwt": null, "grt": null,
+    "loa_m": null, "beam_m": null, "main_engine": null, "speed_knots": null,
+    "class_society": null, "flag_state": null,
+    "contract_price_usd_m": null, "loan_amount_usd_m": null, "ltc_pct": null,
+    "delivery_date": null, "grace_period_days": null, "latest_delivery_date": null,
+    "deployment_purpose": null, "eu_ets_applicable": null,
+    "regulatory_positioning": null
+  },
+  "6B_builder": {
+    "name": null, "formerly": null, "founded": null, "hq": null, "listed": null,
+    "market_position": null, "market_position_source": null,
+    "market_position_date": null,
+    "contracts_for_large_vessels": [],
+    "track_record_verbatim": null,
+    "technology_overlap_verbatim": null,
+    "historical_note_verbatim": null,
+    "ontime_delivery_pct": null, "shipyard_docks": null,
+    "shipyard_berth_m": null, "shipyard_capacity_dwt": null,
+    "shipyard_annual_cgt": null
+  },
+  "6C_contract": {
+    "contract_type": null, "buyer": null, "builder": null,
+    "price_verbatim": null, "currency": null, "contract_date": null,
+    "expected_delivery": null, "grace_period": null, "latest_delivery_date": null,
+    "late_delivery_penalty_verbatim": null,
+    "buyer_termination_verbatim": null,
+    "builder_termination_verbatim": null,
+    "change_order_verbatim": null,
+    "rows": [{"term": null, "detail_verbatim": null}]
+  },
+  "6D_milestones": {
+    "milestones": [
+      {"no": null, "milestone": null, "expected_date": null, "actual_date": null,
+       "status": null, "pct_of_contract": null, "amount_usd_m": null,
+       "cum_paid_usd_m": null, "cub_drawdown": null,
+       "rg_in_force": null, "rg_amount_usd_m": null}
+    ],
+    "footnotes": [{"symbol": null, "text_verbatim": null}],
+    "commentary_first_drawdown": null,
+    "commentary_banking_act_33_3": null,
+    "commentary_pam_sam": null
+  },
+  "6E_rg_mechanism": {
+    "applicable": null, "issuer_full_name": null,
+    "issuer_rating_verbatim": null, "beneficiary": null,
+    "format_verbatim": null, "governing_law": null,
+    "trigger_events": [], "claim_process_verbatim": null,
+    "payout_timeline": null,
+    "coverage_summary_min_pct": null, "coverage_summary_max_pct": null
+  },
+  "6F_construction_progress": {
+    "status_date": null, "milestones_completed": null, "milestones_total": null,
+    "completion_pct": null, "on_schedule": null, "next_milestone": null,
+    "risks": [
+      {"title": null, "likelihood": null, "description": null,
+       "mitigant_bullets": []}
+    ]
+  },
+  "6G_force_majeure": {
+    "applicable": null, "covered_events": [],
+    "historical_context_verbatim": null,
+    "current_supply_chain_status": null
+  }
+}""",
+
+    7: """Section 7 — Financial Analysis:
+{
+  "entities_to_analyze": [
+    {"name": null, "role": null, "basis": null, "auditor": null, "opinion": null,
+     "currency": null, "unit": null, "guarantor_exists": null, "depth": null}
+  ],
+  "7A_borrower_financials": {
+    "reporting_currency": null, "unit": null, "reporting_entity": null,
+    "auditor": null, "audit_opinion": null,
+    "accounting_standard": null, "fiscal_year_end": null,
+    "income_statement": {"FY_YYYY": {
+      "revenue": null, "cogs": null, "gross_profit": null,
+      "other_op_income": null, "op_profit": null,
+      "finance_income": null, "finance_cost": null, "other_non_op": null,
+      "pbt": null, "tax": null, "net_income": null,
+      "ebitda": null, "depreciation": null}},
+    "balance_sheet": {"FY_YYYY": {
+      "cash": null, "trade_receivables": null, "inventories": null,
+      "other_ca": null, "total_ca": null,
+      "vessels_ppe": null, "right_of_use_assets": null,
+      "other_nca": null, "total_nca": null, "total_assets": null,
+      "trade_payables": null, "st_borrowings": null,
+      "current_lease_liabilities": null, "other_cl": null, "total_cl": null,
+      "lt_borrowings": null, "nc_lease_liabilities": null,
+      "other_ncl": null, "total_ncl": null, "total_liabilities": null,
+      "share_capital": null, "retained_earnings": null, "total_equity": null}},
+    "cash_flow": {"FY_YYYY": {
+      "ocf": null, "icf": null, "fcf": null, "net_change": null,
+      "opening_cash": null, "fx_effect": null, "closing_cash": null}}
+  },
+  "7B_key_ratios": {"FY_YYYY": {
+    "gross_margin_pct": null, "op_margin_pct": null,
+    "ni_margin_pct": null, "ebitda_margin_pct": null,
+    "roa_pct": null, "roe_pct": null,
+    "total_debt": null, "net_debt": null,
+    "debt_equity": null, "net_debt_equity": null, "debt_ebitda": null,
+    "ebitda_interest": null, "ocf_total_debt": null, "ocf_interest": null,
+    "ar_days": null, "ap_days": null, "inventory_days": null,
+    "dscr": null, "tangible_leverage": null, "current_ratio": null}},
+  "7C_guarantor_financials": {
+    "applicable": null, "depth": null,
+    "guarantor_name": null, "reporting_currency": null, "unit": null,
+    "income_statement": {}, "balance_sheet": {}, "cash_flow": {}
+  },
+  "7D_guarantor_ratios": {"applicable": null, "FY_YYYY": {}},
+  "7E_base_case": {
+    "applicable": null,
+    "key_assumptions": [{"assumption": null, "value": null, "source": null}],
+    "projected_financials": {"FY_YYYY": {
+      "revenue": null, "gross_profit": null, "op_profit": null, "net_income": null,
+      "cash": null, "debt": null, "equity": null,
+      "ocf": null, "capex": null, "debt_service": null, "fcf": null}},
+    "dscr_table": [{"period": null, "ocf": null, "debt_service": null, "dscr": null}],
+    "conclusion": null
+  },
+  "7F_worse_case": {
+    "applicable": null,
+    "stress_assumptions": [
+      {"assumption": null, "base": null, "worse": null, "stress_magnitude": null}
+    ],
+    "stressed_summary": {"FY_YYYY": {
+      "revenue": null, "op_profit": null, "net_income": null,
+      "ocf": null, "cash": null, "dscr": null}},
+    "conclusion": null
+  },
+  "7G_lessee_financials": {"applicable": null, "lessees": []},
+  "7H_sensitivity": {
+    "applicable": null,
+    "rows": [{"variable": null, "base_case": null, "stress": null,
+      "dscr_min_impact": null, "cash_trough_impact": null, "conclusion": null}]
+  },
+  "industry_index": {"ccfi_level": null, "scfi_level": null, "year": null},
+  "fx_exposure": null, "off_balance_sheet": null, "accounting_notes": null
+}""",
+
+    8: """Section 8 — ACRA Banking Charges:
+{
+  "8A_acra_banking_charges": {
+    "section_applicability": "internal_only | not_applicable",
+    "acra_data_available": true,
+    "jurisdiction": "Singapore",
+    "search_date": "DD MMM YYYY",
+    "entity_name": "Full legal entity name",
+    "uen": "ACRA UEN",
+    "charges": [
+      {
+        "no": 1,
+        "chargee": "Full bank/lender name",
+        "date_of_registration": "DD MMM YYYY",
+        "date_of_charge": "DD MMM YYYY",
+        "amount_usd_m": 0.0,
+        "currency": "USD | SGD | other",
+        "property_charged": "Description of charged property (include CUB annotation if is_cub_charge)",
+        "status": "Registered | Satisfied (DD MMM YYYY)",
+        "is_cub_charge": false,
+        "cub_facility_ref": null
+      }
+    ],
+    "summary": {
+      "total_charges": 0,
+      "active_charges": 0,
+      "satisfied_charges": 0,
+      "total_active_usd_m": 0.0,
+      "cub_charge_count": 0,
+      "cub_total_usd_m": 0.0,
+      "unique_chargees": [],
+      "distinct_banking_groups": 0
+    }
+  },
+  "8B_other_information": "RESERVED — skip entirely"
+}""",
+
+    9: """Section 9 — Credit Analysis Checklist & Recommendation:
+{
+  "9A_checklist": [
+    {
+      "no": 1,
+      "category": "KYC & Compliance | Sanctions & AML | Credit Risk | Financial | Collateral | Legal & Documentation | ESG & Environmental | Regulatory (MAS)",
+      "item": "Checklist item description",
+      "response": "Yes | No* | N/A",
+      "remarks": "Specific figures, names, dates required (e.g. MSR level, DSCR, valuer+date, §33-3 amount)"
+    }
+  ],
+  "9B_conditions_covenants": {
+    "conditions_precedent": [
+      {"no": 1, "description": "CP description", "testing": "Before first drawdown | Before vessel delivery"}
+    ],
+    "ongoing_covenants": [
+      {"description": "Covenant description", "threshold": "e.g. ACR >= 100%", "testing": "Every 2 years | Semi-annual | Annual | Ongoing"}
+    ],
+    "financial_covenants": "NIL | description if applicable"
+  },
+  "9C_recommendation": {
+    "decision": "APPROVE | APPROVE WITH CONDITIONS | DECLINE",
+    "facility_amount_usd_m": 0.0,
+    "tenor_years": 0,
+    "security_structure": "brief description",
+    "key_conditions": ["condition 1", "condition 2"],
+    "balloon_ltv_pct": null,
+    "balloon_ltv_cap_pct": null,
+    "risk_level_changes_from_prior": "None | Improved | Deteriorated — reason"
+  },
+  "9D_signoff": {
+    "date": "DD MMM YYYY",
+    "prepared_by": "Name, Title",
+    "reviewed_by": "Name, Title",
+    "department": "Credit Management Department, CUB SG Branch"
+  }
+}""",
+
+    10: """Section 10 — Appendix (3 input blocks):
+{
+  "10A_group_exposure": {
+    "entity_group": "Group name (e.g. EMC/EMA/EVA Group)",
+    "group_limit_usd_m": 0.0,
+    "currency": "USD",
+    "unit": "millions",
+    "as_of_date": "MMM YYYY",
+    "rows": [
+      {
+        "entity": "Legal entity name",
+        "branch": "SG | TW | HK | etc.",
+        "facility_type": "Term Loan (SLL) | RCF | etc.",
+        "current_approved_usd_m": 0.0,
+        "proposed_usd_m": 0.0,
+        "outstanding_usd_m": 0.0,
+        "collateral": "RG + Vessel Mortgage | Clean | etc.",
+        "guarantor": "EMC | None | etc.",
+        "maturity_str": "Dec 2034E",
+        "msr": "MSR3 | —",
+        "is_new_facility": false,
+        "subtotal_type": null
+      }
+    ],
+    "group_limit_sub_table": {
+      "approved_group_limit_usd_m": 0.0,
+      "proposed_total_exposure_usd_m": 0.0,
+      "utilization_pct": 0.0,
+      "headroom_usd_m": 0.0
+    },
+    "eva_note": null
+  },
+  "10B_fleet_growth": {
+    "group_name": "EMC",
+    "year_range": "2023-2028E",
+    "rows": [
+      {
+        "year_label": "2023",
+        "owned_fleet_teu_m": 0.0,
+        "total_fleet_teu_m": 0.0,
+        "total_vessels": 0,
+        "owned_pct": 0.0
+      }
+    ],
+    "cagr_pct": 0.0,
+    "chart_reference": "EMC Fleet Capacity Growth Chart — Source: [Source] [Date] / EMC Investor Presentation",
+    "key_notes": [
+      "Target capacity: [X] TEU by [year]",
+      "Owned fleet transition: X% → Y% — reducing charter reliance",
+      "Newbuild delivery: [X] vessels; orderbook [Y] vessels (Source: [Z])",
+      "CUB-financed vessel: [X] TEU, Hull No. [Y], delivery [date]",
+      "EMC CAPEX plan: USD[X]m; EMA capital commitment: USD[Y]m (as of [date])"
+    ]
+  },
+  "10C_projections": {
+    "entity_name": "EMA Standalone",
+    "basis": "Standalone",
+    "currency": "USD",
+    "unit": "USD'000",
+    "key_assumptions": [
+      {"assumption": "Charter rate (USD/day)", "FY2026E": 28000, "FY2027E": 28500}
+    ],
+    "assumptions_narrative": "Revenue growth assumes [basis]. COGS reflects [basis]. CAPEX per [basis].",
+    "base_case_pl": [
+      {"item": "Revenue", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Cost of Goods Sold", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Gross Profit", "FY2026E": 0, "FY2027E": 0, "is_subtotal": true}
+    ],
+    "base_case_bs": [
+      {"item": "Cash & Equivalents", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Total Current Assets", "FY2026E": 0, "FY2027E": 0, "is_subtotal": true}
+    ],
+    "base_case_cf": [
+      {"item": "Operating Cash Flow", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Closing Cash", "FY2026E": 0, "FY2027E": 0, "is_subtotal": true}
+    ],
+    "base_case_dscr": [
+      {"year_label": "FY2026E", "ocf": 0, "debt_service": 0, "dscr": 0.0}
+    ],
+    "dscr_commentary": "DSCR remains above [X]x throughout. Minimum DSCR of [X]x occurs in [years].",
+    "stress_assumptions": [
+      {"assumption": "Revenue", "base_case": "[X]", "worse_case": "[Y]", "stress_magnitude": "-20%"}
+    ],
+    "worse_case_summary": [
+      {"item": "Revenue", "value": 0, "is_dscr": false},
+      {"item": "DSCR", "value": 0.0, "is_dscr": true}
+    ],
+    "worse_case_commentary": "Under Worse Case, DSCR declines to minimum [X]x in [year] but remains above 1.0x..."
+  }
+}""",
+}
+
+
+def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> tuple[str, str]:
+    """Return (system_prompt, user_prompt) for Gemini ETL extraction."""
+    schema_parts = "\n\n".join(
+        SECTION_EXTRACTION_SCHEMA[n] for n in section_nos if n in SECTION_EXTRACTION_SCHEMA
+    )
+    doc_type_label = document_type.replace("_", " ").title()
+    user_prompt = (
+        f"Document type: {doc_type_label}\n\n"
+        f"Target sections to extract: {section_nos}\n\n"
+        f"Required JSON schema (extract these fields if present):\n{schema_parts}\n\n"
+        f"---DOCUMENT TEXT START---\n{text[:60000]}\n---DOCUMENT TEXT END---\n\n"
+        "Return ONLY valid JSON with section numbers (as strings) as keys. "
+        "Example: {\"4\": {\"company_name\": \"...\", ...}, \"7\": {\"income_statement\": {...}}}"
+    )
+    return ETL_SYSTEM_PROMPT, user_prompt
+
+
+async def etl_document(
+    text: str,
+    document_type: str,
+    section_nos: Optional[list[int]] = None,
+) -> dict[int, dict]:
+    """
+    Use Gemini to extract structured section data from document text.
+
+    Args:
+        text: Full extracted document text
+        document_type: One of the DOCUMENT_SECTION_MAP keys
+        section_nos: Override which sections to extract (default: from DOCUMENT_SECTION_MAP)
+
+    Returns:
+        {section_no: {field: value}} — only sections with non-empty extraction
+    """
+    target_sections = section_nos or DOCUMENT_SECTION_MAP.get(document_type, [4, 7])
+    if not target_sections:
+        return {}
+
+    text = text.strip()
+    if not text:
+        logger.warning("etl_document: empty document text, skipping")
+        return {}
+
+    from google import genai
+    from google.genai import types as genai_types
+    from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
+
+    system_prompt, user_prompt = _build_etl_prompt(document_type, text, target_sections)
+
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_prompt,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=8192,
+            ),
+        )
+        raw = (response.text or "").strip()
+
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1]
+            if raw.endswith("```"):
+                raw = raw[: raw.rfind("```")]
+
+        parsed = json.loads(raw)
+        result: dict[int, dict] = {}
+        for k, v in parsed.items():
+            try:
+                sec_no = int(k)
+                if isinstance(v, dict) and v:
+                    # Remove null-only sections
+                    non_null = {fk: fv for fk, fv in v.items() if fv is not None}
+                    if non_null:
+                        result[sec_no] = non_null
+            except (ValueError, TypeError):
+                continue
+
+        logger.info("etl_document: extracted sections=%s doc_type=%s fields=%s",
+                    list(result.keys()), document_type,
+                    {k: len(v) for k, v in result.items()})
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error("etl_document: JSON parse error: %s — raw=%r", e, raw[:500] if 'raw' in dir() else "")
+        return {}
+    except Exception as exc:
+        logger.exception("etl_document: extraction failed doc_type=%s: %s", document_type, exc)
+        return {}
