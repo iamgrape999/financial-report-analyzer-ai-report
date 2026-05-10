@@ -142,10 +142,10 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
             <option value="other">📁 其他 / Other</option>
           </select>
           <div class="d-flex gap-2">
-            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.jpg,.jpeg,.png,.gif" class="form-control form-control-sm">
+            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff" class="form-control form-control-sm">
             <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload</button>
           </div>
-          <small class="text-muted">PDF, DOCX, PPTX, TXT, JPG, PNG (max 50 MB)</small>
+          <small class="text-muted">PDF · DOCX · PPTX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
           <div id="docList"><span class="text-muted">No documents uploaded yet.</span></div>
         </div>
       </div>
@@ -336,6 +336,7 @@ let sectionInputMap={};     // {n: {has_data, saved_at}}
 let sectionInputDataMap={}; // {n: parsed input_json object} — cached for quality checks
 let sectionOutputMap={};    // {n: output_obj}
 let allOutputs=[];
+let uploadedDocs=[];        // cached document list for duplicate detection
 let lang=localStorage.getItem('lang')||'en';
 
 const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix'};
@@ -599,7 +600,7 @@ async function createReport(){
 
 // ── Report detail ─────────────────────────────────────────────────────────────
 async function loadReportDetail(rid){
-  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};allOutputs=[];closePanel();
+  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};allOutputs=[];uploadedDocs=[];closePanel();
   showView('viewReport');
   document.getElementById('rptMeta').innerHTML='<span class="text-muted">Loading…</span>';
   document.getElementById('secTable').innerHTML='<tr><td colspan="7" class="text-center py-3 text-muted">Loading…</td></tr>';
@@ -616,6 +617,7 @@ async function loadReportDetail(rid){
     const inputs=inpRes.ok?await inpRes.json():[];
 
     allOutputs=outputs;
+    uploadedDocs=docs;
     outputs.forEach(o=>sectionOutputMap[o.section_no]=o);
     inputs.forEach(i=>sectionInputMap[i.section_no]={has_data:true,saved_at:i.saved_at});
 
@@ -1063,6 +1065,9 @@ async function uploadPDF(){
   if(!inp.files.length){toast('Select a file','warning');return;}
   const file=inp.files[0];
   const docType=document.getElementById('docType').value||'other';
+  // Duplicate detection — warn if same filename already uploaded
+  const dup=uploadedDocs.find(d=>d.original_filename===file.name);
+  if(dup){if(!confirm(`"${file.name}" is already uploaded to this report.\nUpload again as a separate copy?`))return;}
   const form=new FormData();
   form.append('file',file);
   form.append('document_type',docType);

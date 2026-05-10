@@ -16,17 +16,17 @@ logger = logging.getLogger(__name__)
 
 # Which sections are relevant for each document type
 DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
-    "annual_report":         [4, 7, 3, 2, 10],
-    "financial_statement":   [7, 4, 2, 10],
-    "analyst_presentation":  [4, 7, 2, 3, 10],
-    "interim_report":        [7, 4, 2],
-    "valuation_report":      [5, 10],
-    "charter_agreement":     [1, 6],
-    "shipbuilding_contract": [6, 1],
-    "kyc_document":          [9],
-    "legal_document":        [8, 1],
-    "external_report":       [3, 4, 7],
-    "other":                 [4, 7],
+    "annual_report":         [4, 7, 3, 2, 10, 1],
+    "financial_statement":   [7, 4, 2, 10, 5],
+    "analyst_presentation":  [4, 7, 2, 3, 10, 1],
+    "interim_report":        [7, 4, 2, 3],
+    "valuation_report":      [5, 10, 6],
+    "charter_agreement":     [1, 6, 5],
+    "shipbuilding_contract": [6, 1, 5],
+    "kyc_document":          [9, 1, 4],
+    "legal_document":        [8, 1, 9],
+    "external_report":       [3, 4, 7, 2],
+    "other":                 [4, 7, 1],
 }
 
 ETL_SYSTEM_PROMPT = """\
@@ -631,7 +631,7 @@ def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> 
         f"Document type: {doc_type_label}\n\n"
         f"Target sections to extract: {section_nos}\n\n"
         f"Required JSON schema (extract these fields if present):\n{schema_parts}\n\n"
-        f"---DOCUMENT TEXT START---\n{text[:28000]}\n---DOCUMENT TEXT END---\n\n"
+        f"---DOCUMENT TEXT START---\n{text[:60000]}\n---DOCUMENT TEXT END---\n\n"
         "Return ONLY valid JSON with section numbers (as strings) as keys. "
         "Example: {\"4\": {\"company_name\": \"...\", ...}, \"7\": {\"income_statement\": {...}}}"
     )
@@ -663,20 +663,23 @@ async def etl_document(
         logger.warning("etl_document: empty document text, skipping")
         return {}
 
-    import anthropic
-    from credit_report.config import ANTHROPIC_API_KEY, CREDIT_REPORT_MODEL
+    from google import genai
+    from google.genai import types as genai_types
+    from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
 
     system_prompt, user_prompt = _build_etl_prompt(document_type, text, target_sections)
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-        response = await client.messages.create(
-            model=CREDIT_REPORT_MODEL,
-            max_tokens=8192,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_prompt,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=8192,
+            ),
         )
-        raw = (response.content[0].text or "").strip()
+        raw = (response.text or "").strip()
 
         # Strip markdown code fences if present
         if raw.startswith("```"):

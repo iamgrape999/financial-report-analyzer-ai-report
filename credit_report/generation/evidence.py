@@ -162,117 +162,76 @@ def extract_text_from_pptx(file_bytes: bytes) -> str:
 
 
 def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-    """Use Anthropic Claude Vision to OCR and extract text+tables from an image."""
+    """Use Gemini Vision to OCR and extract text+tables from an image."""
     try:
-        import anthropic
-        import base64
-        from credit_report.config import ANTHROPIC_API_KEY, CREDIT_REPORT_MODEL
+        from google import genai
+        from google.genai import types as genai_types
+        from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
 
-        if not ANTHROPIC_API_KEY:
-            logger.warning("extract_text_from_image: ANTHROPIC_API_KEY not set")
+        if not GEMINI_API_KEY:
+            logger.warning("extract_text_from_image: GEMINI_API_KEY not set")
             return ""
 
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        response = client.messages.create(
-            model=CREDIT_REPORT_MODEL,
-            max_tokens=4096,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": mime_type,
-                            "data": base64.b64encode(image_bytes).decode(),
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Extract ALL text, numbers, tables, and structured data from this image. "
-                            "For tables, preserve the structure using | separators between columns and "
-                            "new lines between rows. Include all financial figures, dates, company names, "
-                            "key metrics, percentages, and ratios exactly as shown. "
-                            "Output as plain text maintaining original layout structure."
-                        ),
-                    },
-                ],
-            }],
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                genai_types.Part.from_text(
+                    "Extract ALL text, numbers, tables, and structured data from this image. "
+                    "For tables, preserve the structure using | separators between columns and "
+                    "new lines between rows. Include all financial figures, dates, company names, "
+                    "key metrics, percentages, and ratios exactly as shown. "
+                    "Output as plain text maintaining original layout structure."
+                ),
+            ],
+            config=genai_types.GenerateContentConfig(max_output_tokens=4096),
         )
-        result = response.content[0].text or ""
+        result = response.text or ""
         logger.debug("extract_text_from_image: extracted chars=%d mime=%s", len(result), mime_type)
         return result
     except Exception as e:
-        logger.warning("extract_text_from_image: Claude Vision failed: %s", e)
+        logger.warning("extract_text_from_image: Gemini Vision failed: %s", e)
         return ""
 
 
 def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) -> str:
     """
     For scanned/image PDFs where text extraction yields nothing:
-    convert each page to an image and OCR with Claude Vision.
-    Requires Pillow.
+    send the PDF directly to Gemini Vision for OCR.
+    Gemini 2.5 Flash natively understands PDF inline data.
     """
     try:
-        import io
-        import base64
-        import anthropic
-        from credit_report.config import ANTHROPIC_API_KEY, CREDIT_REPORT_MODEL
+        from google import genai
+        from google.genai import types as genai_types
+        from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
 
-        if not ANTHROPIC_API_KEY:
+        if not GEMINI_API_KEY:
             return ""
 
-        # Try to get page images using pypdf + Pillow
-        import pypdf
-        from PIL import Image
+        # Limit PDF size to avoid token overruns (truncate at ~20 MB)
+        data = pdf_bytes[:20 * 1024 * 1024]
 
-        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-        page_count = min(len(reader.pages), max_pages)
-        if page_count == 0:
-            return ""
-
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        all_text: list[str] = []
-
-        for page_no in range(page_count):
-            try:
-                page = reader.pages[page_no]
-                # Extract images embedded in the PDF page
-                images = list(page.images)
-                if not images:
-                    continue
-                for img_obj in images[:3]:  # Up to 3 images per page
-                    img_bytes = img_obj.data
-                    response = client.messages.create(
-                        model=CREDIT_REPORT_MODEL,
-                        max_tokens=2048,
-                        messages=[{
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": "image/jpeg",
-                                        "data": base64.b64encode(img_bytes).decode(),
-                                    },
-                                },
-                                {
-                                    "type": "text",
-                                    "text": f"[Page {page_no + 1}] Extract all text and table data from this page image. Preserve table structure with | separators.",
-                                },
-                            ],
-                        }],
-                    )
-                    all_text.append(response.content[0].text or "")
-            except Exception as e:
-                logger.debug("extract_text_from_scanned_pdf_vision: page %d failed: %s", page_no + 1, e)
-                continue
-
-        return "\n\n".join(t for t in all_text if t.strip())
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
+                genai_types.Part.from_text(
+                    "Extract ALL text, numbers, tables, and structured data from this PDF document. "
+                    "For tables, preserve the structure using | separators between columns and "
+                    "new lines between rows. Include all financial figures, dates, company names, "
+                    "key metrics, percentages, ratios, and headers exactly as shown. "
+                    "Output as plain text maintaining the original layout and page structure."
+                ),
+            ],
+            config=genai_types.GenerateContentConfig(max_output_tokens=8192),
+        )
+        result = response.text or ""
+        logger.debug("extract_text_from_scanned_pdf_vision: extracted chars=%d", len(result))
+        return result
     except Exception as e:
-        logger.warning("extract_text_from_scanned_pdf_vision: failed: %s", e)
+        logger.warning("extract_text_from_scanned_pdf_vision: Gemini Vision failed: %s", e)
         return ""
 
 
@@ -310,6 +269,10 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
         return extract_text_from_image(file_bytes, "image/gif"), "gif"
     elif ext in ("webp",):
         return extract_text_from_image(file_bytes, "image/webp"), "webp"
+    elif ext in ("bmp",):
+        return extract_text_from_image(file_bytes, "image/bmp"), "bmp"
+    elif ext in ("tiff", "tif"):
+        return extract_text_from_image(file_bytes, "image/tiff"), "tiff"
     else:
         text = extract_text_from_pdf(file_bytes)
         if not text:

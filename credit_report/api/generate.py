@@ -40,7 +40,7 @@ _MAX_UPLOAD_BYTES = CREDIT_REPORT_MAX_UPLOAD_MB * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
     "pdf", "docx", "doc", "pptx", "ppt", "txt", "csv", "md",
-    "jpg", "jpeg", "png", "gif", "webp",
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif",
 }
 
 DOCUMENT_TYPES = [
