@@ -267,6 +267,10 @@ async def etl_document_endpoint(
 
     try:
         extracted = await etl_document(text=text, document_type=doc_type)
+    except ValueError as exc:
+        logger.warning("etl_document_endpoint: config error doc=%s: %s", doc_id, exc)
+        doc.etl_status = "error"
+        raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         logger.exception("etl_document_endpoint: ETL failed doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
@@ -434,6 +438,10 @@ async def generate_section(
             actor_role=current_user.role,
             preceding_outputs=preceding or None,
         )
+    except ValueError as exc:
+        logger.warning("generate_section: config error section=%d report=%s: %s", section_no, report_id, exc)
+        await db.commit()
+        raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         logger.exception("generate_section: generation failed section=%d report=%s: %s", section_no, report_id, exc)
         await db.commit()
