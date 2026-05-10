@@ -47,11 +47,50 @@ Rules:
 
 # Extraction schema description per section (tells the model what fields to look for)
 SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
-    1: """Section 1 — Facility Structure:
-{borrower, guarantors[], facility_type, facility_amount_usd_m, tenor_years, availability_period_months,
-purpose, repayment_schedule, bullet_at_maturity_usd_m, interest_rate_basis, margin_bps,
-commitment_fee_bps, arrangement_fee_bps, collateral[], financial_covenants[], governing_law,
-agent_bank, lenders[{bank, commitment_usd_m}]}""",
+    1: """Section 1 — Credit Facility & Case Details:
+{
+  metadata: {report_type (new_deal/annual_review/new_deal_and_annual_review), branch, industry,
+    report_date, as_at_date, group_name},
+  facility_summary: {
+    rows[{item_no, borrower, booking_office, current_facility, current_facility_mtm,
+      proposed_facility, proposed_facility_is_new (bool), lapsed_date,
+      outstanding, outstanding_as_at_date, ccy, tenor_full_verbatim,
+      facility_type_full, collateral_full, guarantor}],
+    totals: {total_credit_limit_usd_m, psr_spot_limit_usd_m, psr_mtm_usd_m},
+    footnotes[{symbol (*/^/**/#), text_verbatim}],
+    appendix_ref_verbatim
+  },
+  regulatory_compliance: {
+    banking_act_33_3: {requirement_verbatim, borrower_name, compliant_yn,
+      bank_nw_twd_bn, limit_5pct_twd_bn, limit_5pct_usd_m, fx_rate, fx_date, calculation_line},
+    unsecured_exposure_table[{label, credit_limit_usd_m, unsecured_usd_m, secured_usd_m,
+      parenthetical_note}],
+    ntd_exposure_twd_m, usd_ntd_sum_note,
+    valuation: {valuer, gongwen_ref, valuation_date, amount_exact_verbatim},
+    pam_sam_text_verbatim,
+    group_limit_verbatim
+  },
+  purpose_and_recommendation: {
+    purpose_text_verbatim, facility_amount_usd_m, facility_type_full, tenor_verbatim,
+    vessel_name, vessel_type, teu_capacity, dwt, fuel_type_full_verbatim,
+    builder, builder_country, contract_price_exact_verbatim, ltc_pct,
+    guarantor_full_legal_name,
+    pre_delivery_security_verbatim, post_delivery_security_verbatim,
+    acr_pct, ltv_pct, value_maintenance_verbatim,
+    psr_formula_verbatim, psr_purpose
+  },
+  terms_and_conditions: {
+    tc_rows[{field, content_verbatim}],
+    deal_comparison_rows[{term, proposed_deal, previous_deal}]
+  },
+  account_strategy: {
+    wallet_overview_verbatim,
+    current_relationship_verbatim,
+    opportunities_verbatim,
+    nii_usd_m, tmu_pct, deposits_verbatim, capital_market_verbatim,
+    upfront_fee_verbatim, treasury_hedging_verbatim
+  }
+}""",
 
     2: """Section 2 — Overall Comments:
 {credit_decision (APPROVE/DECLINE/CONDITIONAL), recommendation_rationale,
