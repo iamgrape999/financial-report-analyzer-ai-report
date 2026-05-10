@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import Form
 
-from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB
+from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, GEMINI_API_KEY
 from credit_report.database import get_db
 from credit_report.generation.evidence import extract_text_from_file, save_document_text
 from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
@@ -270,10 +270,12 @@ async def etl_document_endpoint(
     except ValueError as exc:
         logger.warning("etl_document_endpoint: config error doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
+        await db.flush()
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         logger.exception("etl_document_endpoint: ETL failed doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
+        await db.flush()
         raise HTTPException(status_code=500, detail=f"ETL extraction failed: {exc}")
 
     doc.etl_status = "done"
@@ -484,6 +486,12 @@ async def generate_full_report(
                 f"Cannot generate: sections {missing_inputs} have no analyst input data. "
                 "Save input JSON for every section before running the full report."
             ),
+        )
+
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured. Set it in Render environment variables to enable AI generation.",
         )
 
     logger.info("generate_full_report: starting full pipeline report=%s user=%s", report_id, current_user.id)

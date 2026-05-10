@@ -882,6 +882,18 @@ function renderReview(){
 }
 
 async function generateFromReview(secNo){
+  // Enforce 90% completeness gate before generation
+  const data=sectionInputDataMap[secNo];
+  if(data){
+    const{pct}=getCompleteness(secNo,data);
+    if(pct<90){
+      toast(`§${secNo} is ${pct}% complete — need ≥90% before generating. Fill in missing fields.`,'warning');
+      return;
+    }
+  } else if(!sectionInputMap[secNo]?.has_data){
+    toast(`§${secNo} has no saved input data. Go to the Input tab first.`,'warning');
+    return;
+  }
   const sp=document.getElementById('revSpin'+secNo);if(sp)sp.classList.remove('d-none');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/generate/'+secNo,{method:'POST',headers:H()});

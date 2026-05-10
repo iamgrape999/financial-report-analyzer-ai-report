@@ -16,8 +16,12 @@ from typing import Any
 
 import requests
 
-BASE = "http://127.0.0.1:8765"
+import os
+
+BASE = os.getenv("TEST_BASE_URL", "http://127.0.0.1:8765")
 API  = BASE + "/api/credit-report"
+_ADMIN_EMAIL    = os.getenv("ADMIN_EMAIL", "admin@example.com")
+_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 PASS = "✅"
 FAIL = "❌"
@@ -795,15 +799,16 @@ def run_tests():
         r = session.get(f"{BASE_URL}/health", timeout=5)
         check(r.status_code == 200 and r.json().get("ok"), "GET /health → 200 ok:true", f"status={r.status_code}")
     except Exception as e:
-        log("fail", "GET /health", str(e)); return
+        log("fail", "GET /health", str(e))
+        return sum(1 for x in results if x["status"] == "fail")
 
     # ── 2. Auth ────────────────────────────────────────────────────────────────
     print("\n[2] AUTHENTICATION")
     r = session.post(f"{API_URL}/auth/login",
-        data={"username": "admin@test.com", "password": "Admin1234!"},
+        data={"username": _ADMIN_EMAIL, "password": _ADMIN_PASSWORD},
         headers={"Content-Type": "application/x-www-form-urlencoded"})
     if not check(r.status_code == 200, "POST /auth/login → 200", f"status={r.status_code} body={r.text[:100]}"):
-        return
+        return sum(1 for x in results if x["status"] == "fail")
     token = r.json().get("access_token", "")
     check(bool(token), "access_token received", f"token={token[:20]}…")
     H = {"Authorization": f"Bearer {token}"}
@@ -811,7 +816,7 @@ def run_tests():
 
     # Bad password
     r2 = session.post(f"{API_URL}/auth/login",
-        data={"username": "admin@test.com", "password": "WRONG"},
+        data={"username": _ADMIN_EMAIL, "password": "WRONG"},
         headers={"Content-Type": "application/x-www-form-urlencoded"})
     check(r2.status_code == 401, "Bad password → 401", f"status={r2.status_code}")
 
@@ -822,7 +827,7 @@ def run_tests():
               "report_type": "New Deal — Ship Finance", "booking_branch": "Singapore"},
         headers=HJ)
     if not check(r.status_code == 201, "POST /reports → 201", f"status={r.status_code} body={r.text[:100]}"):
-        return
+        return sum(1 for x in results if x["status"] == "fail")
     rpt = r.json(); rid = rpt["id"]
     check(bool(rid), f"Report created id={rid[:8]}…")
 
@@ -1021,8 +1026,10 @@ def run_tests():
     print("\n[12] AUDIT TRAIL")
     r = session.get(f"{API_URL}/reports/{rid}/audit", headers=H)
     if r.status_code == 200:
-        events = r.json()
-        check(len(events) > 0, f"Audit trail has {len(events)} events")
+        body = r.json()
+        events = body.get("events", []) if isinstance(body, dict) else body
+        total = body.get("total", len(events)) if isinstance(body, dict) else len(events)
+        check(total > 0, f"Audit trail has events", f"total={total}")
     else:
         log("warn", f"Audit endpoint → {r.status_code}")
 
