@@ -9,5 +9,6 @@ data/memory/*
 !data/memory/.gitkeep
 data/*.db
 data/credit_reports/
+data/logs/
 *.log
 .DS_Store
