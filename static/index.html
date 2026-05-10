@@ -65,10 +65,13 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 
 <nav class="navbar navbar-dark px-3 py-2 d-flex justify-content-between" style="border-bottom:3px solid #005a30;">
   <span class="navbar-brand fw-bold" style="letter-spacing:.4px;">🏦 Financial Report Analyzer &nbsp;<small style="font-size:11px;opacity:.8;font-weight:400;">國泰金控</small></span>
-  <div id="navUser" class="d-none text-white small d-flex align-items-center gap-2">
-    <span id="navRole" class="badge bg-light text-dark"></span>
-    <span id="navEmail"></span>
-    <button class="btn btn-sm btn-outline-light" onclick="logout()">Logout</button>
+  <div class="d-flex align-items-center gap-2">
+    <button class="btn btn-sm btn-outline-light" onclick="toggleLang()" id="langBtn" title="Switch language / 切換語言">中文</button>
+    <div id="navUser" class="d-none text-white small d-flex align-items-center gap-2">
+      <span id="navRole" class="badge bg-light text-dark"></span>
+      <span id="navEmail"></span>
+      <button class="btn btn-sm btn-outline-light" onclick="logout()" id="btnLogout">Logout</button>
+    </div>
   </div>
 </nav>
 <div id="toast-cont"></div>
@@ -120,16 +123,30 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <div class="card-body small" id="rptMeta"></div>
       </div>
     </div>
-    <!-- PDF evidence -->
+    <!-- Evidence Documents -->
     <div class="col-lg-4">
       <div class="card h-100">
-        <div class="card-header py-2">📎 Evidence PDFs <small class="text-muted fw-normal">(optional — improves quality)</small></div>
+        <div class="card-header py-2">📎 Evidence Documents <small class="text-muted fw-normal">(optional — enables ETL & improves AI quality)</small></div>
         <div class="card-body small d-flex flex-column gap-2">
+          <select id="docType" class="form-select form-select-sm">
+            <option value="annual_report">📋 年報 / Annual Report</option>
+            <option value="financial_statement">💹 財務報告 / Financial Statement (Audited)</option>
+            <option value="analyst_presentation">🎤 法說會 / Analyst Presentation</option>
+            <option value="interim_report">📊 半年報 / Interim Report</option>
+            <option value="valuation_report">🚢 估值報告 / Vessel Valuation Report</option>
+            <option value="charter_agreement">📄 租船合約 / Charter Agreement</option>
+            <option value="shipbuilding_contract">⚓ 造船合約 / Shipbuilding Contract</option>
+            <option value="kyc_document">🔍 KYC文件 / KYC Document</option>
+            <option value="legal_document">⚖️ 法律文件 / Legal Document</option>
+            <option value="external_report">📰 外部報告 / External Report</option>
+            <option value="other">📁 其他 / Other</option>
+          </select>
           <div class="d-flex gap-2">
-            <input type="file" id="pdfInput" accept=".pdf" class="form-control form-control-sm">
+            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.jpg,.jpeg,.png,.gif" class="form-control form-control-sm">
             <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload</button>
           </div>
-          <div id="docList"><span class="text-muted">No PDFs yet.</span></div>
+          <small class="text-muted">PDF, DOCX, PPTX, TXT, JPG, PNG (max 50 MB)</small>
+          <div id="docList"><span class="text-muted">No documents uploaded yet.</span></div>
         </div>
       </div>
     </div>
@@ -285,6 +302,26 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
   </div></div>
 </div>
 
+<!-- ETL Modal -->
+<div class="modal fade" id="etlModal" tabindex="-1">
+  <div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header" style="background:#1a1a1a;color:#fff;">
+      <h5 class="modal-title fw-bold">🔍 AI Document ETL — Extracted Section Data</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body" id="etlModalBody">
+      <div class="text-center py-5">
+        <div class="spinner-border text-success" style="width:3rem;height:3rem;"></div>
+        <div class="mt-3 text-muted">Running AI extraction… this may take 20-40 seconds</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="text-muted small me-auto" id="etlModalStatus"></span>
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+  </div></div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <!-- html-docx-js: client-side DOCX fallback (~50 KB) -->
 <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
@@ -299,20 +336,47 @@ let sectionInputMap={};     // {n: {has_data, saved_at}}
 let sectionInputDataMap={}; // {n: parsed input_json object} — cached for quality checks
 let sectionOutputMap={};    // {n: output_obj}
 let allOutputs=[];
+let lang=localStorage.getItem('lang')||'en';
 
 const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix'};
+const SNAMES_ZH={1:'融資結構與主要條款',2:'綜合評述',3:'信用風險評估',4:'借款人背景',5:'擔保品評估',6:'船舶融資概覽',7:'財務分析',8:'法律文件與抵押',9:'法規遵循清單',10:'附錄'};
+function snm(n){return lang==='zh'?(SNAMES_ZH[n]||SNAMES[n]):SNAMES[n];}
+
+const DOC_TYPE_LABELS={
+  annual_report:'年報 / Annual Report',
+  financial_statement:'財務報告 / Financial Statement',
+  analyst_presentation:'法說會 / Analyst Presentation',
+  interim_report:'半年報 / Interim Report',
+  valuation_report:'估值報告 / Valuation Report',
+  charter_agreement:'租船合約 / Charter Agreement',
+  shipbuilding_contract:'造船合約 / Shipbuilding Contract',
+  kyc_document:'KYC文件 / KYC Document',
+  legal_document:'法律文件 / Legal Document',
+  external_report:'外部報告 / External Report',
+  other:'其他 / Other',
+};
+
+function toggleLang(){
+  lang=lang==='zh'?'en':'zh';
+  localStorage.setItem('lang',lang);
+  document.getElementById('langBtn').textContent=lang==='zh'?'EN':'中文';
+  document.getElementById('btnLogout').textContent=lang==='zh'?'登出':'Logout';
+  // Re-render active view
+  renderSectionsTable();
+  if(document.getElementById('viewReview').classList.contains('active'))renderReview();
+}
 
 const TEMPLATES={
-  1:{borrower:"Company Ltd",facility_type:"Pre-delivery Term Loan",facility_amount_usd_m:50,tenor_years:5,purpose:"Pre-delivery financing for 2 newbuild bulk carriers",repayment:"Equal quarterly principal",interest_rate:"SOFR + 2.50%",collateral:["First priority mortgage over vessels","Assignment of shipbuilding contracts","Refund guarantee from shipyard"],guarantors:["Parent Holding Co Ltd"],governing_law:"Singapore"},
-  2:{note:"Generate this section LAST — after all §1,3-10 are complete. The AI uses preceding sections as context to write a comprehensive executive summary.",executive_summary:"To be generated from full report context.",key_positives:["Experienced sponsor","Long-term charter coverage"],key_risks:["Construction risk","Market cyclicality"],recommendation:"APPROVE/DECLINE",dscr_minimum:1.25,ltc_percent:65},
-  3:{internal_rating:"BB+",pd_assessment:"Low-Medium",mas_612_applicable:true,esg_screening:"Passed",sanctions_ofac:"Clear",sanctions_eu:"Clear",sanctions_mas:"Clear",key_risks:["Tariff sensitivity"],mitigants:["Time charter income covers debt service"]},
-  4:{company_name:"Borrower Co. Ltd",incorporation_year:2005,country:"Singapore",shareholders:[{name:"Holding Co Ltd",stake_percent:100}],fleet:{owned_vessels:5,vessel_types:["Bulk Carrier"],total_dwt:320000},key_management:[{name:"John Smith",title:"CEO",years:20}],annual_revenue_usd_m:150},
-  5:{collateral_type:"First mortgage + Refund guarantee",vessel_valuations:[{vessel:"MV Newbuild 1",dwt:64000,market_value_usd_m:30,valuer:"Clarkson Research"}],ltc_percent:65,acr_percent:120,ltv_at_maturity_percent:85,refund_guarantee:{bank:"Bank ABC",amount_usd_m:50}},
-  6:{vessel_name:"MV Newbuild 1",vessel_type:"Bulk Carrier",dwt:64000,shipyard:"Shipyard Co Ltd",country:"China",contract_price_usd_m:32,delivery_date:"2026-Q2",milestones:[{name:"Keel laying",date:"2025-Q1",pct:20},{name:"Launch",date:"2026-Q1",pct:30},{name:"Delivery",date:"2026-Q2",pct:50}],employment:"3-year time charter at USD 12,000/day"},
-  7:{currency:"USD",unit:"millions",income_statement:{FY2022:{revenue:120,ebitda:40,net_income:20,interest_expense:8},FY2023:{revenue:135,ebitda:45,net_income:25,interest_expense:8},FY2024:{revenue:150,ebitda:50,net_income:30,interest_expense:9}},balance_sheet_fy2024:{total_assets:300,cash:20,total_debt:150,equity:100},key_ratios:{dscr_fy2024:1.45,debt_equity:1.5,current_ratio:1.2,net_margin_pct:20}},
-  8:{security_package:["First priority ship mortgage","Assignment of earnings and insurances","Corporate guarantee"],other_lenders:[{bank:"Existing Bank",amount_usd_m:20,maturity:"2025-12"}],legal_counsel:"XYZ Law LLC",governing_law:"Singapore"},
-  9:{kyc:{completed:true,date:"2024-01-15"},aml:{cleared:true},sanctions:{ofac:"Clear",eu:"Clear",mas:"Clear",un:"Clear"},pep:"Not PEP",environmental:{eexi:"B",cii:"B"},banking_act_s33_3:"Within limit — 15% of capital",kyc_docs:["Certificate of Incorporation","Audited accounts x3","Board resolution"]},
-  10:{dscr_projections:[{year:1,revenue_usd_m:15,opex_usd_m:6,ebitda_usd_m:9,debt_service_usd_m:7,dscr:1.29},{year:2,revenue_usd_m:16,opex_usd_m:6.2,ebitda_usd_m:9.8,debt_service_usd_m:7,dscr:1.40},{year:3,revenue_usd_m:16.5,opex_usd_m:6.5,ebitda_usd_m:10,debt_service_usd_m:7,dscr:1.43},{year:4,revenue_usd_m:17,opex_usd_m:6.8,ebitda_usd_m:10.2,debt_service_usd_m:7,dscr:1.46},{year:5,revenue_usd_m:17,opex_usd_m:7,ebitda_usd_m:10,debt_service_usd_m:7,dscr:1.43}],fleet_table:[{vessel:"MV Newbuild 1",type:"Bulk Carrier",dwt:64000}]}
+  1:{borrower:"Borrower Shipping Pte Ltd",guarantors:["Parent Holding Co Ltd (BVI)"],facility_type:"Pre-delivery Term Loan",facility_amount_usd_m:50,sub_facilities:[{name:"Tranche A — Pre-delivery",amount_usd_m:50,purpose:"Pre-delivery instalments"}],tenor_years:5,availability_period_months:24,purpose:"Pre-delivery financing for 2 x 64,000 DWT Supramax bulk carriers",repayment_schedule:"Equal quarterly principal instalments commencing 3 months post delivery",bullet_at_maturity_usd_m:0,interest_rate_basis:"SOFR (Term 3M)",margin_bps:250,commitment_fee_bps:50,arrangement_fee_bps:100,agency_fee_usd:20000,collateral:["First priority ship mortgage over vessels","Assignment of shipbuilding contracts","Assignment of earnings and insurances","Refund guarantee from KDB","Corporate guarantee from Parent Co Ltd","Share pledge over borrower SPV"],financial_covenants:["DSCR >= 1.15x (semi-annual testing)","Minimum free cash USD 2m","Total leverage <= 4.0x EBITDA"],information_covenants:["Quarterly management accounts within 60 days","Annual audited accounts within 180 days"],events_of_default:["Payment default (3-day grace)","Cross-default >= USD 5m","Change of control without lender consent"],governing_law:"Singapore",jurisdiction:"Singapore High Court / SIAC Arbitration",agent_bank:"Bank ABC Singapore",lenders:[{bank:"Bank ABC",commitment_usd_m:30},{bank:"Bank XYZ",commitment_usd_m:20}]},
+  2:{note:"Generate LAST — AI synthesizes all §1,3-10 content",credit_decision:"APPROVE",recommendation_rationale:"Strong sponsor with 14-year track record; long-term charter income provides predictable debt service; LTC 65% with adequate refund guarantee coverage during pre-delivery period.",key_strengths:["Experienced operator with established customer relationships","Long-term time charter provides income visibility","Conservative LTC 65%; ACR 144% at delivery"],key_concerns:["Construction completion risk — mitigated by reputable shipyard","Charter rate subject to market risk post-expiry"],conditions_precedent:["Execution of facility and security documents","Satisfactory legal opinions","KYC/AML completion"],dscr_avg:1.43,ltc_percent:65,acr_at_delivery:144},
+  3:{internal_rating:"BB+",rating_rationale:"Established operator with stable income, moderate leverage, conservative collateral structure",pd_basis_points:150,pd_assessment:"Low-Medium",lgd_percent:45,el_bps:68,mas_612_applicable:true,mas_612_classification:"Performing — Standard",industry_risk_level:"Medium",industry_risk_rationale:"Dry bulk shipping subject to cyclical rate volatility; partially offset by long-term charter income",esg_category:"B",esg_screening:"Passed",poseidon_principles_aligned:true,climate_risk:"Medium — IMO 2030 targets require CII Grade B or better",sanctions_ofac:"Clear",sanctions_eu:"Clear",sanctions_mas:"Clear",sanctions_un:"Clear",sanctions_hm_treasury:"Clear",ofac_screening_date:"2024-01-15",screening_system:"World-Check / Accuity",key_risks:["Construction delay risk — mitigated by turnkey contract","Charter rate volatility post-expiry","Tariff/trade war impact on dry bulk volumes"],mitigants:["Fixed-price turnkey contract with reputable shipyard","3-year time charter locks in income","Refund guarantee covers pre-delivery risk"],risk_matrix:[{risk:"Market risk",probability:"Medium",impact:"High",rating:"8",mitigation:"Charter income"},{risk:"Construction risk",probability:"Low",impact:"High",rating:"6",mitigation:"Refund guarantee"}],concentration_risk:"Within MAS 33-3 limit — 0.42% of capital",country_risk:"Singapore — Low risk"},
+  4:{company_name:"Borrower Shipping Pte Ltd",legal_entity_type:"Private Limited Company",registration_number:"202012345A",incorporation_date:"2010-03-15",incorporation_country:"Singapore",registered_address:"1 Marina Boulevard, #28-00, Singapore 018989",group_structure:"Wholly owned subsidiary of Parent Holding Co Ltd (BVI)",ultimate_beneficial_owner:"John Smith (100% indirect via Parent Holding Co Ltd)",shareholders:[{name:"Parent Holding Co Ltd (BVI)",stake_percent:100,country:"British Virgin Islands"}],board_of_directors:[{name:"John Smith",role:"Executive Director & CEO"},{name:"Jane Doe",role:"Non-Executive Director"}],key_management:[{name:"John Smith",title:"CEO",years_experience:20,background:"20 years in dry bulk shipping; ex-BHP Billiton Maritime"},{name:"Jane Doe",title:"CFO",years_experience:15,background:"Ex-DBS Bank shipping finance; CFA charterholder"}],business_description:"Dry bulk shipping operator focusing on Supramax and Panamax segments in Pacific-Atlantic trade routes",primary_business:"Dry bulk shipping — Supramax/Panamax",years_in_operation:14,fleet_owned:[{vessel:"MV Pacific Star",type:"Supramax Bulk Carrier",dwt:57000,year_built:2015,flag:"Singapore",class:"Bureau Veritas",charter:"Spot market / COA with major miners"},{vessel:"MV Atlantic Breeze",type:"Panamax Bulk Carrier",dwt:76000,year_built:2017,flag:"Singapore",class:"Lloyd's Register",charter:"3yr TC @ USD 14,500/day to ABC Commodities"}],total_fleet_dwt:133000,major_customers:[{name:"ABC Commodities Pte Ltd",contract_type:"Time Charter",duration_years:3,rate_usd_day:14500},{name:"XYZ Mining Corp",contract_type:"COA",duration_years:2,volume_mt_pa:500000}],annual_revenue_usd_m:150,ebitda_usd_m:50,net_income_usd_m:32,market_position:"Top 30 Singapore dry bulk operator by DWT",competitive_advantages:["Young, fuel-efficient fleet","Long-standing customer relationships with major miners"],group_auditor:"Deloitte & Touche LLP Singapore",banking_relationships:[{bank:"DBS Bank",product:"Working capital OD SGD 10m"},{bank:"OCBC",product:"Revolving credit SGD 20m"}]},
+  5:{collateral_type:"First priority ship mortgage + Refund guarantee + Corporate guarantee",vessel_valuations:[{vessel:"MV Newbuild 1",dwt:64000,year_built_expected:2026,flag:"Singapore",class:"Lloyd's Register",market_value_usd_m:32.0,distressed_value_usd_m:25.6,valuation_date:"2024-12-01",valuer:"Clarkson Research Services",valuation_basis:"Fair market value — desktop assessment"}],contract_price_usd_m:32,loan_amount_usd_m:20.8,ltc_percent:65,acr_at_delivery_percent:154,ltv_at_maturity_percent:0,refund_guarantee:{issuer:"Korea Development Bank (KDB)",issuer_rating:"Aa2 / AA",amount_usd_m:20.8,expiry:"2027-06-30",covers:"All pre-delivery instalments plus interest"},insurance:{h_and_m:"Full insured value USD 32m — Lloyd's of London syndicate",p_and_i:"Skuld P&I Club — unlimited liability",war_risk:"Covered — Institute War Clauses"},additional_security:["Corporate guarantee from Parent Holding Co Ltd","Share pledge over Borrower Shipping Pte Ltd"],ltv_schedule:[{period:"Delivery 2026",outstanding_usd_m:20.8,market_value_usd_m:32,ltv_pct:65,acr_pct:154},{period:"Year 3 2029",outstanding_usd_m:8.4,market_value_usd_m:28,ltv_pct:30,acr_pct:333}],collateral_adequacy_conclusion:"Adequate — LTC 65% at delivery; ACR 154% provides 54% buffer above loan; refund guarantee eliminates pre-delivery credit risk"},
+  6:{project_type:"New Build Pre-Delivery Financing",vessel_name:"MV Newbuild 1",hull_number:"H-2024-001",vessel_type:"Bulk Carrier",vessel_class:"Supramax",dwt:64000,grt:38000,loa_m:199.9,beam_m:32.0,draft_m:13.0,main_engine:"MAN B&W 6S50MC-C8.6 — 9,480 kW",speed_knots:14.0,fuel_consumption_mt_day:28.5,eco_design:true,imo_tier:"Tier III",cii_rating_expected:"A",shipyard:"Qingdao Shipyard Co Ltd",shipyard_country:"China",shipyard_rating:"Approved Class A — Lloyd's Register",shipyard_deliveries_last_5yr:85,class_society:"Lloyd's Register",flag_state:"Singapore",contract_date:"2024-06-01",contract_price_usd_m:32,payment_milestones:[{milestone:"Contract signing",date:"2024-06-01",pct:10,amount_usd_m:3.2,bank_funded:false},{milestone:"Keel laying",date:"2025-Q1",pct:20,amount_usd_m:6.4,bank_funded:true},{milestone:"Launch",date:"2026-Q1",pct:30,amount_usd_m:9.6,bank_funded:true},{milestone:"Delivery",date:"2026-Q2",pct:40,amount_usd_m:12.8,bank_funded:true}],delivery_date:"2026-Q2",construction_supervisor:"Technicus Marine Services Ltd",construction_risk_assessment:"Low — fixed-price turnkey contract; refund guarantee from KDB eliminates pre-delivery credit risk",employment_post_delivery:"3-year time charter to Grain Co Ltd at USD 12,000/day",charterer:"Grain Co Ltd",charterer_credit_rating:"BBB (S&P)",charter_rate_usd_day:12000,charter_duration_years:3,charter_type:"Time Charter Party (NYPE 1993 form)",charter_governing_law:"English law — LMAA arbitration"},
+  7:{reporting_currency:"USD",unit:"millions",auditor:"Deloitte & Touche LLP Singapore",audit_opinion:"Unqualified (clean)",accounting_standard:"IFRS",fiscal_year_end:"December 31",income_statement:{FY2022:{revenue:120,opex:78,gross_profit:42,ebitda:42,depreciation:8,ebit:34,interest_expense:8,pbt:26,tax:3.9,net_income:22.1},FY2023:{revenue:135,opex:85,gross_profit:50,ebitda:50,depreciation:9,ebit:41,interest_expense:8.5,pbt:32.5,tax:4.9,net_income:27.6},FY2024:{revenue:150,opex:94,gross_profit:56,ebitda:56,depreciation:9.5,ebit:46.5,interest_expense:9,pbt:37.5,tax:5.6,net_income:31.9}},balance_sheet:{FY2022:{cash:15,trade_receivables:12,current_assets:30,pp_e:200,total_assets:240,short_term_debt:20,current_liabilities:35,long_term_debt:100,total_debt:120,equity:85},FY2023:{cash:18,trade_receivables:14,current_assets:35,pp_e:210,total_assets:260,short_term_debt:22,current_liabilities:38,long_term_debt:108,total_debt:130,equity:95},FY2024:{cash:20,trade_receivables:15,current_assets:38,pp_e:220,total_assets:280,short_term_debt:24,current_liabilities:40,long_term_debt:116,total_debt:140,equity:105}},cash_flow:{FY2022:{cfo:35,capex:-15,cfi:-15,cff:-12,net_change:8},FY2023:{cfo:42,capex:-18,cfi:-18,cff:-14,net_change:10},FY2024:{cfo:48,capex:-20,cfi:-20,cff:-16,net_change:12}},key_ratios:{FY2022:{dscr:1.32,debt_ebitda:2.86,debt_equity:1.41,current_ratio:0.86,net_margin_pct:18.4,roa_pct:9.2,roe_pct:26.0,interest_cover:5.25},FY2023:{dscr:1.38,debt_ebitda:2.60,debt_equity:1.37,current_ratio:0.92,net_margin_pct:20.4,roa_pct:10.6,roe_pct:29.1,interest_cover:5.88},FY2024:{dscr:1.45,debt_ebitda:2.50,debt_equity:1.33,current_ratio:0.95,net_margin_pct:21.3,roa_pct:11.4,roe_pct:30.4,interest_cover:6.17}},facility_dscr_projection:{FY2026:{revenue:17,opex:7,ebitda:10,debt_service:7,dscr:1.43,outstanding_usd_m:16.6},FY2027:{revenue:17.5,opex:7.2,ebitda:10.3,debt_service:7,dscr:1.47,outstanding_usd_m:12.4},FY2028:{revenue:18,opex:7.5,ebitda:10.5,debt_service:7,dscr:1.50,outstanding_usd_m:8.2}},fx_exposure:"Revenue 100% USD; SGD costs hedged quarterly via forward contracts",off_balance_sheet:"IFRS 16 operating leases USD 8m; no SPE or structured entities",accounting_notes:"No restatements FY2022-2024; IFRS 16 adopted FY2019"},
+  8:{facility_agreement:{type:"Syndicated Loan Agreement",date:"2024-06-15",parties:["Borrower Shipping Pte Ltd","Parent Holding Co Ltd (Guarantor)","Bank ABC (Agent & Lender)","Bank XYZ (Lender)"],amount_usd_m:50},security_documents:[{doc:"First Priority Ship Mortgage",vessel:"MV Newbuild 1",status:"To be executed within 5 business days of delivery"},{doc:"Assignment of Shipbuilding Contract",status:"Executed 2024-06-15"},{doc:"Assignment of Earnings and Insurances",status:"Executed 2024-06-15"},{doc:"Refund Guarantee — Korea Development Bank",amount_usd_m:20.8,expiry:"2027-06-30",status:"Issued 2024-07-01"},{doc:"Corporate Guarantee — Parent Holding Co Ltd",amount_usd_m:50,status:"Executed 2024-06-15"},{doc:"Share Pledge — 100% shares of Borrower Shipping Pte Ltd",status:"Executed 2024-06-15 — ACRA registered"}],existing_charges:[{charge:"Ship mortgage — MV Pacific Star",beneficiary:"DBS Bank",amount_usd_m:8,maturity:"2025-12-31"},{charge:"Assignment of earnings — MV Atlantic Breeze",beneficiary:"OCBC Bank",amount_usd_m:15,maturity:"2026-06-30"}],cross_default_threshold_usd_m:5,pari_passu_clause:true,negative_pledge:true,legal_opinions:[{jurisdiction:"Singapore",law_firm:"Allen & Gledhill LLP",date:"2024-06-10"},{jurisdiction:"British Virgin Islands",law_firm:"Harneys Westwood & Riegels",date:"2024-06-12"}],legal_counsel_borrower:"Rajah & Tann Singapore LLP",legal_counsel_bank:"Allen & Gledhill LLP",governing_law:"Singapore",dispute_resolution:"Singapore High Court; SIAC Arbitration",registration_requirements:"ACRA charge registration within 30 days; ship registry mortgage within 5 days of delivery",conditions_precedent:["Executed facility agreement and security documents","Receipt of satisfactory legal opinions","KYC/AML completion","Receipt of refund guarantee from KDB"],conditions_subsequent:["Ship mortgage registration within 5 business days of vessel delivery"]},
+  9:{customer_acceptance_date:"2024-01-15",kyc:{completed:true,completion_date:"2024-01-15",next_review_date:"2025-01-15",kyc_tier:"High Risk",cdd_level:"Enhanced Due Diligence (EDD)",refresh_cycle_months:12,documents_received:["Certificate of Incorporation","Memorandum & Articles of Association","Audited financial statements FY2021-2023","Passport copies — all directors and UBO","UBO declaration form","Board resolution"]},aml:{cleared:true,screening_date:"2024-01-15",adverse_media:"None found"},sanctions:{ofac:"Clear",eu:"Clear",mas:"Clear",un:"Clear",hm_treasury:"Clear",ofsi:"Clear",screening_date:"2024-01-15",screening_system:"World-Check One / Accuity"},pep:{status:"Not PEP",related_pep:false,close_associate_pep:false,pep_declaration_received:true},tax_compliance:{country:"Singapore",fatca_classification:"Active Non-Financial Foreign Entity (Active NFFE)",crs_status:"Reportable — Singapore"},environmental:{eexi:"B",cii:"B",cii_year:2024,poseidon_principles:"Aligned",imo_2030_readiness:"Compliant — dual fuel capable vessel design"},mas_regulations:{banking_act_s33_3:"Within single borrower limit",total_group_exposure_usd_m:50,capital_funds_usd_m:5000,concentration_pct:1.0,single_borrower_limit_pct:15},internal_approvals_required:["Credit Committee — facilities > USD 10m","Board Risk Committee — shipping finance > USD 20m","Compliance sign-off on EDD"],regulatory_approvals:"None required",watch_list:"Not on internal watch list",country_risk_approval:"Singapore — Tier 1; no additional approval required"},
+  10:{dscr_projections:[{year:1,period:"FY2026",revenue_usd_m:17.0,opex_usd_m:7.0,ebitda_usd_m:10.0,depreciation_usd_m:2.5,interest_usd_m:1.8,principal_usd_m:4.2,debt_service_usd_m:6.0,dscr:1.43,outstanding_balance_usd_m:16.6},{year:2,period:"FY2027",revenue_usd_m:17.5,opex_usd_m:7.2,ebitda_usd_m:10.3,depreciation_usd_m:2.5,interest_usd_m:1.5,principal_usd_m:4.2,debt_service_usd_m:5.7,dscr:1.51,outstanding_balance_usd_m:12.4},{year:3,period:"FY2028",revenue_usd_m:18.0,opex_usd_m:7.5,ebitda_usd_m:10.5,depreciation_usd_m:2.5,interest_usd_m:1.1,principal_usd_m:4.2,debt_service_usd_m:5.3,dscr:1.58,outstanding_balance_usd_m:8.2},{year:4,period:"FY2029",revenue_usd_m:17.5,opex_usd_m:7.7,ebitda_usd_m:9.8,depreciation_usd_m:2.5,interest_usd_m:0.7,principal_usd_m:4.2,debt_service_usd_m:4.9,dscr:1.53,outstanding_balance_usd_m:4.0},{year:5,period:"FY2030",revenue_usd_m:17.0,opex_usd_m:8.0,ebitda_usd_m:9.0,depreciation_usd_m:2.5,interest_usd_m:0.3,principal_usd_m:3.7,debt_service_usd_m:4.0,dscr:1.60,outstanding_balance_usd_m:0.0}],fleet_schedule:[{vessel:"MV Pacific Star",type:"Supramax Bulk Carrier",dwt:57000,year_built:2015,flag:"Singapore",class:"Bureau Veritas",current_charter:"Spot / COA",market_value_usd_m:18.5,existing_mortgage:"DBS Bank — USD 8m to Dec 2025"},{vessel:"MV Newbuild 1",type:"Supramax Bulk Carrier",dwt:64000,year_built_expected:2026,flag:"Singapore",class:"Lloyd's Register",current_charter:"3yr TC USD 12,000/day — Grain Co Ltd",market_value_usd_m:32.0,existing_mortgage:"Bank ABC — USD 20.8m (this facility)"}],sensitivity_analysis:[{scenario:"Base Case",assumption:"Charter rate USD 12,000/day as contracted",min_dscr:1.43,conclusion:"Pass"},{scenario:"Stress -20%",assumption:"Charter rate drops to USD 9,600/day",min_dscr:1.05,conclusion:"Marginal Pass"},{scenario:"Severe Stress -35%",assumption:"Charter rate drops to USD 7,800/day",min_dscr:0.82,conclusion:"Fail — breaks covenant"}],loan_repayment_schedule:[{period:"Q1 2026",principal:1.04,interest:0.47,total:1.51,balance:19.76},{period:"Q2 2026",principal:1.04,interest:0.45,total:1.49,balance:18.72},{period:"Q3 2026",principal:1.04,interest:0.42,total:1.46,balance:17.68},{period:"Q4 2026",principal:1.04,interest:0.40,total:1.44,balance:16.64}],market_overview:"Dry bulk shipping market resilient in 2024 — BDI averaged 1,850 points, up 12% YoY. IMO 2030 targets accelerating fleet renewal.",glossary:{DSCR:"Debt Service Coverage Ratio = EBITDA / (Principal + Interest)",LTC:"Loan to Cost = Loan Amount / Contract Price",ACR:"Asset Coverage Ratio = Market Value / Outstanding Loan",LTV:"Loan to Value = Outstanding Loan / Market Value"},references:["Clarkson Research Shipping Intelligence Weekly","VesselsValue vessel appraisal","MAS Annual Report 2024"]}
 };
 
 // ── Required fields per section (for completeness check) ─────────────────────
@@ -554,10 +618,25 @@ async function loadReportDetail(rid){
     </div>`;
 
     const dl=document.getElementById('docList');
-    dl.innerHTML=docs.length?docs.map(d=>`<div class="d-flex align-items-center gap-1 mb-1">
-      <span class="badge bg-light text-dark border">${esc(d.original_filename)}</span>
-      <span class="text-muted" style="font-size:10px">${fb(d.file_size_bytes)}</span></div>`).join('')
-      :'<span class="text-muted">No PDFs uploaded yet.</span>';
+    dl.innerHTML=docs.length?docs.map(d=>{
+      const fmt=(d.file_format||'').toUpperCase()||'?';
+      const fmtColor={PDF:'danger',DOCX:'primary',PPTX:'warning',TXT:'secondary',JPG:'success',PNG:'success',IMG:'success'}[fmt]||'secondary';
+      const typeLabel=DOC_TYPE_LABELS[d.document_type]||d.document_type||'Other';
+      const etlBadge=d.etl_status==='done'?'<span class="badge bg-success ms-1" style="font-size:9px">ETL✓</span>':d.etl_status==='error'?'<span class="badge bg-danger ms-1" style="font-size:9px">ETL!</span>':'';
+      return`<div class="border rounded p-1 mb-1" style="font-size:11px;">
+        <div class="d-flex align-items-center gap-1 flex-wrap">
+          <span class="badge bg-${fmtColor}" style="font-size:9px">${esc(fmt)}</span>
+          <span class="fw-semibold text-truncate" style="max-width:140px" title="${esc(d.original_filename)}">${esc(d.original_filename)}</span>
+          <span class="text-muted">${fb(d.file_size_bytes)}</span>${etlBadge}
+        </div>
+        <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
+        <div class="d-flex gap-1 mt-1">
+          <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>
+          <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:10px" onclick="deleteDocument('${d.id}')">🗑 Delete</button>
+        </div>
+      </div>`;
+    }).join('')
+      :'<span class="text-muted">No documents uploaded yet.</span>';
 
     renderSectionsTable();
   }catch(e){toast(e.message,'danger');}
@@ -574,7 +653,7 @@ function renderSectionsTable(){
     const inpIcon=inp?.has_data?'<span class="input-ok">✓</span>':'<span class="input-miss">✗</span>';
     return `<tr style="cursor:pointer" onclick="openPanel(${n},'input')">
       <td class="ps-2"><span class="sec-badge s-${sc}">${n}</span></td>
-      <td>${SNAMES[n]}</td>
+      <td>${snm(n)}</td>
       <td class="text-center">${inpIcon}</td>
       <td><span class="badge bg-${sc==='done'?'success':sc==='generating'?'warning text-dark':sc==='error'?'danger':'secondary'} small">${sl}</span></td>
       <td class="text-muted small">${tok}</td>
@@ -774,13 +853,13 @@ function renderReview(){
     const inp=sectionInputMap[n];
     if(o?.status==='done'&&o.markdown){
       return `<div id="rsec-${n}" class="card review-section-card">
-        <div class="card-header">§${n} — ${SNAMES[n]}</div>
+        <div class="card-header">§${n} — ${snm(n)}</div>
         <div class="card-body markdown-body">${marked.parse(o.markdown)}</div>
       </div>`;
     }
     return `<div id="rsec-${n}" class="card review-section-card border-warning">
       <div class="card-header bg-light d-flex justify-content-between align-items-center">
-        <span>§${n} — ${SNAMES[n]}</span>
+        <span>§${n} — ${snm(n)}</span>
         <span class="badge bg-${o?.status==='error'?'danger':'secondary'}">${o?.status||'not generated'}</span>
       </div>
       <div class="card-body text-center py-4">
@@ -899,7 +978,7 @@ function renderQualityReport(){
       :`<span class="badge ${compPct>=90?'bg-success':compPct>=70?'bg-warning text-dark':'bg-danger'}">${compPct}%</span>`;
     return `<tr>
       <td class="ps-2"><strong>§${n}</strong></td>
-      <td class="small">${esc(SNAMES[n])}</td>
+      <td class="small">${esc(snm(n))}</td>
       <td class="text-center">${hasInput?'<span class="text-success fw-bold">✓</span>':'<span class="text-danger fw-bold">✗</span>'}</td>
       <td class="text-center">${compBadge}</td>
       <td class="text-center">${hasOutput?'<span class="text-success fw-bold">✓</span>':'<span class="text-muted">—</span>'}</td>
@@ -969,15 +1048,95 @@ async function regenSec2(){
 // ── Upload PDF ────────────────────────────────────────────────────────────────
 async function uploadPDF(){
   const inp=document.getElementById('pdfInput');
-  if(!inp.files.length){toast('Select a PDF file','warning');return;}
+  if(!inp.files.length){toast('Select a file','warning');return;}
   const file=inp.files[0];
-  const form=new FormData();form.append('file',file);
+  const docType=document.getElementById('docType').value||'other';
+  const form=new FormData();
+  form.append('file',file);
+  form.append('document_type',docType);
+  toast(`Uploading ${file.name}…`,'info');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/documents',{method:'POST',headers:H(),body:form});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Upload failed');
-    toast(`Uploaded: ${file.name}`,'success');inp.value='';
+    toast(`✓ Uploaded: ${file.name}`,'success');inp.value='';
     await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
+}
+
+async function deleteDocument(docId){
+  if(!confirm('Delete this document from the report? This cannot be undone.'))return;
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId,{method:'DELETE',headers:H()});
+    if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||'Delete failed');}
+    toast('Document deleted','success');
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
+}
+
+async function etlDocument(docId,filename){
+  const modal=new bootstrap.Modal(document.getElementById('etlModal'));
+  const body=document.getElementById('etlModalBody');
+  const st=document.getElementById('etlModalStatus');
+  body.innerHTML=`<div class="text-center py-5"><div class="spinner-border text-success" style="width:3rem;height:3rem;"></div><div class="mt-3 text-muted fw-semibold">Running AI extraction on: <strong>${esc(filename)}</strong><br><small>This may take 20-60 seconds…</small></div></div>`;
+  st.textContent='';
+  modal.show();
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/etl',{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'ETL failed');
+    if(!d.sections_extracted||!d.sections_extracted.length){
+      body.innerHTML='<div class="alert alert-warning m-3">No structured data could be extracted from this document. The document may be an image-only scan or have no recognisable credit report data.</div>';
+      st.textContent='No data extracted';
+      return;
+    }
+    const rows=d.sections_extracted.map(n=>{
+      const sec=parseInt(n)||n;
+      const data=d.data[String(sec)]||{};
+      const fcount=Object.keys(data).length;
+      const preview=JSON.stringify(data,null,2).slice(0,800);
+      return`<div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:#e8f5ee;">
+          <span class="fw-bold">§${sec} — ${esc(snm(sec))}</span>
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-success">${fcount} field${fcount!==1?'s':''} extracted</span>
+            <button class="btn btn-sm btn-primary" onclick="saveExtractedToSection(${sec},${JSON.stringify(JSON.stringify(data))})">
+              Apply to §${sec}</button>
+          </div>
+        </div>
+        <div class="card-body p-2">
+          <details><summary class="text-muted small" style="cursor:pointer">Show extracted JSON</summary>
+          <pre class="mt-2" style="font-size:11px;max-height:250px;overflow-y:auto;background:#f8f9fa;padding:8px;border-radius:4px;">${esc(preview)}${preview.length===800?'\n…(truncated)':''}</pre>
+          </details>
+        </div>
+      </div>`;
+    }).join('');
+    body.innerHTML=`<div class="alert alert-success m-3 py-2"><strong>✓ AI ETL Complete</strong> — ${d.sections_extracted.length} section(s) extracted from <em>${esc(filename)}</em><br><small class="text-muted">Review extracted data below. Click "Apply to §N" to save fields as section input (merges with existing data).</small></div>${rows}`;
+    st.textContent=`${d.sections_extracted.length} sections extracted`;
+    await loadReportDetail(currentRid); // refresh etl_status badge
+  }catch(e){
+    body.innerHTML=`<div class="alert alert-danger m-3"><strong>ETL Failed:</strong> ${esc(e.message)}</div>`;
+    st.textContent='Error';
+  }
+}
+
+async function saveExtractedToSection(secNo,dataJson){
+  let newData;
+  try{newData=JSON.parse(dataJson);}catch(e){toast('Invalid extraction data','danger');return;}
+  // Merge with existing section input if any
+  let merged=newData;
+  try{
+    const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{headers:H()});
+    if(r.ok){const ex=await r.json();merged=Object.assign({},ex.input_json||{},newData);}
+  }catch(e){}
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:secNo,input_json:merged})});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Save failed');
+    sectionInputMap[secNo]={has_data:true,saved_at:d.saved_at};
+    sectionInputDataMap[secNo]=merged;
+    renderSectionsTable();
+    toast(`§${secNo} updated with ${Object.keys(newData).length} extracted fields ✓`,'success');
   }catch(e){toast(e.message,'danger');}
 }
 
