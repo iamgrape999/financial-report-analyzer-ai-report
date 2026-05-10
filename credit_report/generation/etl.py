@@ -310,32 +310,148 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
 }""",
 
     6: """Section 6 — Project Analysis:
-{vessel_name, hull_number, vessel_type, vessel_class, dwt, teu, grt, loa_m, beam_m,
-main_engine, speed_knots, eco_design (bool), imo_tier,
-shipyard, shipyard_country, shipyard_docks, shipyard_berth_m, shipyard_capacity_dwt,
-shipyard_annual_cgt, shipyard_ontime_delivery_pct, shipyard_rating,
-class_society, flag_state, contract_date, contract_price_usd_m,
-payment_milestones[{milestone, status, date, pct, amount_usd_m, cub_drawdown_usd_m}],
-delivery_date, grace_period_days,
-construction_progress_vessels_delivered, construction_progress_value_pct,
-construction_risk_assessment,
-charterer, charterer_credit_rating,
-charter_rate_usd_day, charter_duration_years, charter_type,
-project_risk_ratings[{risk_category, rating, comments}]}""",
+{
+  "6A_project": {
+    "hull_number": null, "vessel_type": null, "teu": null, "fuel_type": null,
+    "imo_tier": null, "eco_design": null, "dwt": null, "grt": null,
+    "loa_m": null, "beam_m": null, "main_engine": null, "speed_knots": null,
+    "class_society": null, "flag_state": null,
+    "contract_price_usd_m": null, "loan_amount_usd_m": null, "ltc_pct": null,
+    "delivery_date": null, "grace_period_days": null, "latest_delivery_date": null,
+    "deployment_purpose": null, "eu_ets_applicable": null,
+    "regulatory_positioning": null
+  },
+  "6B_builder": {
+    "name": null, "formerly": null, "founded": null, "hq": null, "listed": null,
+    "market_position": null, "market_position_source": null,
+    "market_position_date": null,
+    "contracts_for_large_vessels": [],
+    "track_record_verbatim": null,
+    "technology_overlap_verbatim": null,
+    "historical_note_verbatim": null,
+    "ontime_delivery_pct": null, "shipyard_docks": null,
+    "shipyard_berth_m": null, "shipyard_capacity_dwt": null,
+    "shipyard_annual_cgt": null
+  },
+  "6C_contract": {
+    "contract_type": null, "buyer": null, "builder": null,
+    "price_verbatim": null, "currency": null, "contract_date": null,
+    "expected_delivery": null, "grace_period": null, "latest_delivery_date": null,
+    "late_delivery_penalty_verbatim": null,
+    "buyer_termination_verbatim": null,
+    "builder_termination_verbatim": null,
+    "change_order_verbatim": null,
+    "rows": [{"term": null, "detail_verbatim": null}]
+  },
+  "6D_milestones": {
+    "milestones": [
+      {"no": null, "milestone": null, "expected_date": null, "actual_date": null,
+       "status": null, "pct_of_contract": null, "amount_usd_m": null,
+       "cum_paid_usd_m": null, "cub_drawdown": null,
+       "rg_in_force": null, "rg_amount_usd_m": null}
+    ],
+    "footnotes": [{"symbol": null, "text_verbatim": null}],
+    "commentary_first_drawdown": null,
+    "commentary_banking_act_33_3": null,
+    "commentary_pam_sam": null
+  },
+  "6E_rg_mechanism": {
+    "applicable": null, "issuer_full_name": null,
+    "issuer_rating_verbatim": null, "beneficiary": null,
+    "format_verbatim": null, "governing_law": null,
+    "trigger_events": [], "claim_process_verbatim": null,
+    "payout_timeline": null,
+    "coverage_summary_min_pct": null, "coverage_summary_max_pct": null
+  },
+  "6F_construction_progress": {
+    "status_date": null, "milestones_completed": null, "milestones_total": null,
+    "completion_pct": null, "on_schedule": null, "next_milestone": null,
+    "risks": [
+      {"title": null, "likelihood": null, "description": null,
+       "mitigant_bullets": []}
+    ]
+  },
+  "6G_force_majeure": {
+    "applicable": null, "covered_events": [],
+    "historical_context_verbatim": null,
+    "current_supply_chain_status": null
+  }
+}""",
 
     7: """Section 7 — Financial Analysis:
-{reporting_currency, unit, reporting_entity, auditor, audit_opinion,
-accounting_standard, fiscal_year_end,
-income_statement{FY_YYYY{revenue, opex, gross_profit, ebitda, depreciation, ebit,
-  interest_expense, pbt, tax, net_income}},
-balance_sheet{FY_YYYY{cash, trade_receivables, current_assets, pp_e, total_assets,
-  short_term_debt, trade_payables, current_liabilities, long_term_debt, total_debt, equity}},
-cash_flow{FY_YYYY{cfo, capex, cfi, cff, net_change}},
-key_ratios{FY_YYYY{dscr, debt_ebitda, tangible_leverage, current_ratio,
-  net_margin_pct, roa_pct, roe_pct, ebitda_interest_cover}},
-industry_index{ccfi_level, scfi_level, year},
-facility_dscr_projection{FY_YYYY{revenue, opex, ebitda, debt_service, dscr}},
-fx_exposure, off_balance_sheet, accounting_notes}""",
+{
+  "entities_to_analyze": [
+    {"name": null, "role": null, "basis": null, "auditor": null, "opinion": null,
+     "currency": null, "unit": null, "guarantor_exists": null, "depth": null}
+  ],
+  "7A_borrower_financials": {
+    "reporting_currency": null, "unit": null, "reporting_entity": null,
+    "auditor": null, "audit_opinion": null,
+    "accounting_standard": null, "fiscal_year_end": null,
+    "income_statement": {"FY_YYYY": {
+      "revenue": null, "cogs": null, "gross_profit": null,
+      "other_op_income": null, "op_profit": null,
+      "finance_income": null, "finance_cost": null, "other_non_op": null,
+      "pbt": null, "tax": null, "net_income": null,
+      "ebitda": null, "depreciation": null}},
+    "balance_sheet": {"FY_YYYY": {
+      "cash": null, "trade_receivables": null, "inventories": null,
+      "other_ca": null, "total_ca": null,
+      "vessels_ppe": null, "right_of_use_assets": null,
+      "other_nca": null, "total_nca": null, "total_assets": null,
+      "trade_payables": null, "st_borrowings": null,
+      "current_lease_liabilities": null, "other_cl": null, "total_cl": null,
+      "lt_borrowings": null, "nc_lease_liabilities": null,
+      "other_ncl": null, "total_ncl": null, "total_liabilities": null,
+      "share_capital": null, "retained_earnings": null, "total_equity": null}},
+    "cash_flow": {"FY_YYYY": {
+      "ocf": null, "icf": null, "fcf": null, "net_change": null,
+      "opening_cash": null, "fx_effect": null, "closing_cash": null}}
+  },
+  "7B_key_ratios": {"FY_YYYY": {
+    "gross_margin_pct": null, "op_margin_pct": null,
+    "ni_margin_pct": null, "ebitda_margin_pct": null,
+    "roa_pct": null, "roe_pct": null,
+    "total_debt": null, "net_debt": null,
+    "debt_equity": null, "net_debt_equity": null, "debt_ebitda": null,
+    "ebitda_interest": null, "ocf_total_debt": null, "ocf_interest": null,
+    "ar_days": null, "ap_days": null, "inventory_days": null,
+    "dscr": null, "tangible_leverage": null, "current_ratio": null}},
+  "7C_guarantor_financials": {
+    "applicable": null, "depth": null,
+    "guarantor_name": null, "reporting_currency": null, "unit": null,
+    "income_statement": {}, "balance_sheet": {}, "cash_flow": {}
+  },
+  "7D_guarantor_ratios": {"applicable": null, "FY_YYYY": {}},
+  "7E_base_case": {
+    "applicable": null,
+    "key_assumptions": [{"assumption": null, "value": null, "source": null}],
+    "projected_financials": {"FY_YYYY": {
+      "revenue": null, "gross_profit": null, "op_profit": null, "net_income": null,
+      "cash": null, "debt": null, "equity": null,
+      "ocf": null, "capex": null, "debt_service": null, "fcf": null}},
+    "dscr_table": [{"period": null, "ocf": null, "debt_service": null, "dscr": null}],
+    "conclusion": null
+  },
+  "7F_worse_case": {
+    "applicable": null,
+    "stress_assumptions": [
+      {"assumption": null, "base": null, "worse": null, "stress_magnitude": null}
+    ],
+    "stressed_summary": {"FY_YYYY": {
+      "revenue": null, "op_profit": null, "net_income": null,
+      "ocf": null, "cash": null, "dscr": null}},
+    "conclusion": null
+  },
+  "7G_lessee_financials": {"applicable": null, "lessees": []},
+  "7H_sensitivity": {
+    "applicable": null,
+    "rows": [{"variable": null, "base_case": null, "stress": null,
+      "dscr_min_impact": null, "cash_trough_impact": null, "conclusion": null}]
+  },
+  "industry_index": {"ccfi_level": null, "scfi_level": null, "year": null},
+  "fx_exposure": null, "off_balance_sheet": null, "accounting_notes": null
+}""",
 
     8: """Section 8 — Changes in Engaged Banks / ACRA Charges:
 {acra_search{entity_name, uen, search_date, total_charges},
