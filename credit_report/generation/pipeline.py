@@ -81,6 +81,12 @@ async def run_section_generation(
     si = si_result.scalar_one_or_none()
     input_json: dict = json.loads(si.input_json) if si and si.input_json else {}
 
+    if not input_json:
+        raise ValueError(
+            f"Section {section_no} has no analyst input data. "
+            "Save section input JSON before triggering AI generation."
+        )
+
     evidence_chunks = retrieve_evidence(report_id, section_no)
 
     existing = await get_section_output(db, report_id, section_no)

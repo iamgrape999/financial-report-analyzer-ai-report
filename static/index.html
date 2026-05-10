@@ -7,487 +7,644 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <style>
-  body { background: #f0f2f5; font-family: 'Segoe UI', system-ui, sans-serif; }
-  .navbar { background: linear-gradient(135deg, #1a3a5c 0%, #0d6efd 100%); }
-  .card { border: none; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-  .card-header { border-radius: 12px 12px 0 0 !important; font-weight: 600; }
-  #loginCard { max-width: 420px; margin: 6rem auto; }
-  .section-badge { width: 32px; height: 32px; border-radius: 50%; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; }
-  .status-done { background:#d1fae5; color:#065f46; }
-  .status-generating { background:#fef3c7; color:#92400e; }
-  .status-error { background:#fee2e2; color:#991b1b; }
-  .status-pending { background:#e5e7eb; color:#374151; }
-  .markdown-output { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:1.5rem; max-height:600px; overflow-y:auto; font-size:14px; line-height:1.7; }
-  .markdown-output table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:13px; }
-  .markdown-output th, .markdown-output td { border:1px solid #d1d5db; padding:6px 12px; text-align:left; }
-  .markdown-output th { background:#f9fafb; font-weight:600; }
-  .markdown-output h2 { font-size:1.3rem; margin-top:1.5rem; border-bottom:2px solid #e5e7eb; padding-bottom:6px; }
-  .markdown-output h3 { font-size:1.1rem; margin-top:1.2rem; color:#1a3a5c; }
-  .spinner-sm { width:14px; height:14px; border-width:2px; }
-  #toast-container { position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999; }
-  .view { display:none; }
-  .view.active { display:block; }
-  .report-row { cursor:pointer; transition:background .15s; }
-  .report-row:hover { background:#f8faff; }
-  .section-row { cursor:pointer; transition:background .15s; }
-  .section-row:hover td { background:#f8faff; }
-  .doc-pill { background:#e0e7ff; color:#3730a3; border-radius:20px; padding:2px 10px; font-size:12px; display:inline-block; margin:2px; }
+/* ── Cathay Financial Holdings (國泰金控) brand: white / green / black ── */
+:root{--cg:#00703C;--cg-dark:#005a30;--cg-light:#e8f5ee;--cg-border:#b2dfce;}
+body{background:#f5f5f5;font-family:'Segoe UI',system-ui,sans-serif;color:#1a1a1a;}
+.navbar{background:#00703C;}
+.navbar-brand{letter-spacing:.3px;}
+.card{border:none;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);}
+.card-header{border-radius:12px 12px 0 0!important;font-weight:600;}
+#loginCard{max-width:420px;margin:6rem auto;}
+#loginCard .card-body{border-top:4px solid #00703C;border-radius:0 0 12px 12px;}
+.view{display:none;}.view.active{display:block;}
+.report-row{cursor:pointer;transition:background .12s;}.report-row:hover{background:#e8f5ee;}
+.sec-badge{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;}
+.s-done{background:#d1fae5;color:#065f46;}
+.s-generating{background:#fef3c7;color:#92400e;}
+.s-error{background:#fee2e2;color:#991b1b;}
+.s-pending{background:#e5e7eb;color:#374151;}
+.input-ok{color:#16a34a;font-weight:700;}
+.input-miss{color:#dc2626;font-weight:700;}
+.markdown-body{font-size:14px;line-height:1.78;}
+.markdown-body table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:13px;}
+.markdown-body th,.markdown-body td{border:1px solid #d1d5db;padding:6px 10px;text-align:left;}
+.markdown-body th{background:#e8f5ee;font-weight:600;color:#1a1a1a;}
+.markdown-body h2{font-size:1.2rem;margin-top:1.5rem;border-bottom:2px solid #00703C;padding-bottom:5px;}
+.markdown-body h3{font-size:1.05rem;margin-top:1.1rem;color:#00703C;}
+.markdown-body pre{background:#f4f4f5;padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;}
+#toast-cont{position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;}
+.spinner-sm{width:14px;height:14px;border-width:2px;}
+.section-panel{border-top:3px solid #00703C;}
+textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:vertical;}
+/* Review view */
+.review-sticky{position:sticky;top:0;z-index:100;background:#fff;border-bottom:3px solid #00703C;padding:8px 16px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.review-section-card{margin-bottom:2.5rem;scroll-margin-top:60px;}
+.review-section-card .card-header{font-size:1rem;font-weight:700;background:#00703C;color:#fff;}
+.sec2-stale{background:#fffbeb;border:1px solid #f59e0b;border-radius:10px;padding:12px 16px;margin:12px 16px;}
+/* Bootstrap color overrides — Cathay green replaces Bootstrap blue */
+.btn-primary{background-color:#00703C!important;border-color:#00703C!important;color:#fff!important;}
+.btn-primary:hover,.btn-primary:focus,.btn-primary:active{background-color:#005a30!important;border-color:#005a30!important;}
+.btn-outline-primary{color:#00703C!important;border-color:#00703C!important;background:transparent!important;}
+.btn-outline-primary:hover{background-color:#00703C!important;color:#fff!important;}
+.bg-primary{background-color:#00703C!important;}
+.text-primary{color:#00703C!important;}
+.border-primary{border-color:#00703C!important;}
+.nav-tabs .nav-link.active{color:#00703C!important;border-color:#b2dfce #b2dfce #fff!important;}
+.nav-tabs .nav-link:hover{color:#005a30!important;}
+.table-light>*>tr>th,.table-light>*>tr>td,.table thead.table-light th{background-color:#e8f5ee!important;color:#1a1a1a;}
+.badge.bg-info{background-color:#0e9f6e!important;}
 </style>
 </head>
 <body>
 
-<!-- Navbar -->
-<nav class="navbar navbar-dark px-3 py-2">
-  <span class="navbar-brand fw-bold fs-5">📊 Financial Report Analyzer</span>
-  <div id="navUser" class="d-none text-white small">
-    <span id="navRole" class="badge bg-light text-dark me-2"></span>
-    <span id="navEmail" class="me-3"></span>
+<nav class="navbar navbar-dark px-3 py-2 d-flex justify-content-between" style="border-bottom:3px solid #005a30;">
+  <span class="navbar-brand fw-bold" style="letter-spacing:.4px;">🏦 Financial Report Analyzer &nbsp;<small style="font-size:11px;opacity:.8;font-weight:400;">國泰金控</small></span>
+  <div id="navUser" class="d-none text-white small d-flex align-items-center gap-2">
+    <span id="navRole" class="badge bg-light text-dark"></span>
+    <span id="navEmail"></span>
     <button class="btn btn-sm btn-outline-light" onclick="logout()">Logout</button>
   </div>
 </nav>
+<div id="toast-cont"></div>
 
-<!-- Toast -->
-<div id="toast-container"></div>
-
-<!-- LOGIN VIEW -->
+<!-- ══════════ LOGIN ══════════ -->
 <div id="viewLogin" class="view active container">
   <div id="loginCard" class="card p-4">
     <h4 class="text-center mb-4 fw-bold text-primary">Sign In</h4>
-    <div id="loginError" class="alert alert-danger d-none"></div>
-    <div class="mb-3">
-      <label class="form-label fw-semibold">Email</label>
-      <input id="loginEmail" type="email" class="form-control" placeholder="analyst@bank.com" autofocus>
-    </div>
-    <div class="mb-4">
-      <label class="form-label fw-semibold">Password</label>
-      <input id="loginPassword" type="password" class="form-control" placeholder="••••••••">
-    </div>
+    <div id="loginErr" class="alert alert-danger d-none small"></div>
+    <div class="mb-3"><label class="form-label fw-semibold">Email</label>
+      <input id="loginEmail" type="email" class="form-control" autofocus></div>
+    <div class="mb-4"><label class="form-label fw-semibold">Password</label>
+      <input id="loginPw" type="password" class="form-control"></div>
     <button class="btn btn-primary w-100 fw-semibold" onclick="doLogin()">
-      <span id="loginSpinner" class="spinner-border spinner-sm d-none me-2"></span>Sign In
-    </button>
+      <span id="loginSpin" class="spinner-border spinner-sm d-none me-2"></span>Sign In</button>
   </div>
 </div>
 
-<!-- DASHBOARD VIEW -->
+<!-- ══════════ DASHBOARD ══════════ -->
 <div id="viewDashboard" class="view container py-4">
-  <div class="d-flex justify-content-between align-items-center mb-4">
-    <h4 class="fw-bold mb-0">📋 Reports</h4>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">+ New Report</button>
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="fw-bold mb-0">📋 Reports</h5>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createModal">+ New Report</button>
   </div>
   <div class="card">
     <div class="card-body p-0">
       <table class="table table-hover mb-0">
-        <thead class="table-light">
-          <tr>
-            <th class="ps-3">Borrower</th>
-            <th>Type</th>
-            <th>Branch</th>
-            <th>Status</th>
-            <th>Created</th>
-          </tr>
-        </thead>
-        <tbody id="reportTableBody">
-          <tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr>
-        </tbody>
+        <thead class="table-light"><tr>
+          <th class="ps-3">Borrower</th><th>Type</th><th>Branch</th><th>Status</th><th>Created</th>
+        </tr></thead>
+        <tbody id="rptBody"><tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
 </div>
 
-<!-- REPORT DETAIL VIEW -->
-<div id="viewReport" class="view container py-4">
-  <button class="btn btn-outline-secondary btn-sm mb-3" onclick="showDashboard()">← Back to Reports</button>
+<!-- ══════════ REPORT DETAIL ══════════ -->
+<div id="viewReport" class="view container-fluid py-3 px-4">
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <button class="btn btn-outline-secondary btn-sm" onclick="showDashboard()">← Reports</button>
+    <h6 id="rptTitle" class="mb-0 fw-bold text-truncate flex-grow-1"></h6>
+  </div>
 
   <div class="row g-3 mb-3">
-    <div class="col-md-8">
+    <!-- Report info -->
+    <div class="col-lg-5">
       <div class="card h-100">
-        <div class="card-header bg-primary text-white">Report Details</div>
-        <div class="card-body" id="reportMeta"></div>
+        <div class="card-header bg-primary text-white py-2">Report Info</div>
+        <div class="card-body small" id="rptMeta"></div>
       </div>
     </div>
-    <div class="col-md-4">
+    <!-- PDF evidence -->
+    <div class="col-lg-4">
       <div class="card h-100">
-        <div class="card-header">Actions</div>
+        <div class="card-header py-2">📎 Evidence PDFs <small class="text-muted fw-normal">(optional — improves quality)</small></div>
+        <div class="card-body small d-flex flex-column gap-2">
+          <div class="d-flex gap-2">
+            <input type="file" id="pdfInput" accept=".pdf" class="form-control form-control-sm">
+            <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload</button>
+          </div>
+          <div id="docList"><span class="text-muted">No PDFs yet.</span></div>
+        </div>
+      </div>
+    </div>
+    <!-- Actions -->
+    <div class="col-lg-3">
+      <div class="card h-100">
+        <div class="card-header py-2">Actions</div>
         <div class="card-body d-flex flex-column gap-2">
-          <button class="btn btn-success fw-semibold" onclick="generateAll()">
-            <span id="genAllSpinner" class="spinner-border spinner-sm d-none me-2"></span>⚡ Generate Full Report
-          </button>
-          <button class="btn btn-outline-secondary btn-sm" onclick="loadReportDetail(currentReportId)">🔄 Refresh</button>
-          <hr class="my-1">
-          <label class="form-label fw-semibold mb-0">Upload PDF Evidence</label>
-          <input type="file" id="pdfInput" accept=".pdf" class="form-control form-control-sm">
-          <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload PDF</button>
-          <div id="docList" class="mt-2"></div>
+          <button class="btn btn-success btn-sm fw-semibold" onclick="preflight()">
+            <span id="genAllSpin" class="spinner-border spinner-sm d-none me-1"></span>⚡ Generate Full Report</button>
+          <button class="btn btn-primary btn-sm" onclick="openReview()">📖 Full Report Review</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="loadReportDetail(currentRid)">🔄 Refresh</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Section Status Table -->
+  <!-- Preflight alert -->
+  <div id="preflightAlert" class="alert alert-warning d-none small mb-3">
+    <strong>⚠ Cannot generate full report.</strong>
+    <div id="preflightMsg" class="mt-1"></div>
+  </div>
+
+  <!-- Sections table -->
   <div class="card mb-3">
-    <div class="card-header">Sections (click to view / generate)</div>
+    <div class="card-header py-2 d-flex justify-content-between">
+      <span>Sections — Click a row to edit input or view output</span>
+      <span class="text-muted small">✓ = input saved &nbsp;✗ = input missing</span>
+    </div>
     <div class="card-body p-0">
-      <table class="table table-sm mb-0">
-        <thead class="table-light">
-          <tr>
-            <th class="ps-3">#</th>
-            <th>Section</th>
-            <th>Status</th>
-            <th>Tokens</th>
-            <th>Generated</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="sectionsTable"></tbody>
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light"><tr>
+          <th class="ps-2" style="width:36px">#</th>
+          <th>Section</th>
+          <th class="text-center" style="width:48px">Input</th>
+          <th style="width:100px">Output</th>
+          <th style="width:80px">Tokens</th>
+          <th style="width:130px">Generated</th>
+          <th style="width:44px"></th>
+        </tr></thead>
+        <tbody id="secTable"></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Section Output Panel -->
-  <div class="card" id="sectionOutputPanel" style="display:none">
-    <div class="card-header d-flex justify-content-between">
-      <span id="sectionOutputTitle">Section Output</span>
-      <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('sectionOutputPanel').style.display='none'">×</button>
+  <!-- Section panel (input + output tabs) -->
+  <div class="card section-panel" id="secPanel" style="display:none">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+      <span id="secPanelTitle" class="fw-semibold"></span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="closePanel()">×</button>
     </div>
-    <div class="card-body">
-      <div id="sectionOutputContent" class="markdown-output"></div>
+    <ul class="nav nav-tabs px-3 pt-2" id="panelTabs">
+      <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('input');return false">✏ Input Data</a></li>
+      <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('output');return false">📄 Generated Output</a></li>
+    </ul>
+
+    <!-- Input tab -->
+    <div id="tabInput" class="p-3">
+      <div class="d-flex gap-2 mb-2 flex-wrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate()">📋 Load Template</button>
+        <small class="text-muted align-self-center">Replace template values with actual report data, then Save.</small>
+      </div>
+      <textarea id="jsonEd" class="form-control json-ed" rows="20"></textarea>
+      <div class="d-flex gap-2 mt-2 align-items-center">
+        <button class="btn btn-primary btn-sm" onclick="saveSectionInput()">💾 Save Input</button>
+        <span id="savedAt" class="text-muted small"></span>
+      </div>
+    </div>
+
+    <!-- Output tab -->
+    <div id="tabOutput" class="p-3" style="display:none">
+      <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+        <button class="btn btn-success btn-sm" onclick="generateCurrentSection()">
+          <span id="secGenSpin" class="spinner-border spinner-sm d-none me-1"></span>⚡ Generate This Section</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadSectionOutput(currentPanelSec)">🔄 Refresh</button>
+        <span id="sec2Notice" class="badge bg-warning text-dark d-none">§2 should be regenerated after all other sections are done</span>
+      </div>
+      <div id="outputContent" class="markdown-body border rounded p-3" style="min-height:150px;max-height:700px;overflow-y:auto;"></div>
     </div>
   </div>
+</div>
+
+<!-- ══════════ FULL REPORT REVIEW ══════════ -->
+<div id="viewReview" class="view">
+  <div class="review-sticky">
+    <button class="btn btn-outline-secondary btn-sm" onclick="showView('viewReport')">← Back</button>
+    <strong class="me-2 small">Jump to:</strong>
+    <div id="reviewNav" class="d-flex gap-1 flex-wrap"></div>
+    <div class="ms-auto d-flex gap-2">
+      <button class="btn btn-sm btn-outline-dark" onclick="exportReport()">📄 Export HTML</button>
+      <button class="btn btn-sm btn-outline-dark" onclick="exportMarkdown()">⬇ .md</button>
+    </div>
+  </div>
+
+  <!-- §2 stale warning -->
+  <div id="sec2StaleWarn" class="sec2-stale d-none">
+    <strong>⚠ Section 2 (Overall Comments) may be outdated</strong> — one or more other sections were generated after §2 was written. §2 should be regenerated so it reflects the complete report.
+    <button class="btn btn-sm btn-warning ms-3" onclick="regenSec2()">🔄 Regenerate §2 Overall Comments (with full context)</button>
+    <span id="regenSpin" class="spinner-border spinner-sm d-none ms-2"></span>
+  </div>
+
+  <div id="reviewContent" class="container py-3" style="max-width:960px;"></div>
 </div>
 
 <!-- Create Report Modal -->
 <div class="modal fade" id="createModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title fw-bold">New Report</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Borrower Name</label>
-          <input id="newBorrower" class="form-control" placeholder="ACME Shipping Ltd.">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Industry</label>
-          <select id="newIndustry" class="form-select">
-            <option value="marine">Marine / Shipping</option>
-            <option value="corporate">Corporate</option>
-            <option value="trade">Trade Finance</option>
-          </select>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Report Type</label>
-          <input id="newType" class="form-control" placeholder="e.g. Credit Risk Assessment">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Booking Branch</label>
-          <input id="newBranch" class="form-control" placeholder="e.g. Singapore">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-primary fw-semibold" onclick="createReport()">Create Report</button>
-      </div>
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title fw-bold">New Report</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <div class="mb-3"><label class="form-label fw-semibold">Borrower Name</label>
+        <input id="nBorrower" class="form-control" placeholder="ACME Shipping Ltd."></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Industry</label>
+        <select id="nIndustry" class="form-select">
+          <option value="marine">Marine / Shipping</option>
+          <option value="corporate">Corporate</option>
+          <option value="trade">Trade Finance</option>
+        </select></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Report Type</label>
+        <input id="nType" class="form-control" placeholder="e.g. Credit Risk Assessment"></div>
+      <div class="mb-3"><label class="form-label fw-semibold">Booking Branch</label>
+        <input id="nBranch" class="form-control" placeholder="e.g. Singapore"></div>
     </div>
-  </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+      <button class="btn btn-primary fw-semibold" onclick="createReport()">Create</button>
+    </div>
+  </div></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-const API = '/api/credit-report';
-let token = localStorage.getItem('token');
-let currentRole = localStorage.getItem('role');
-let currentEmail = localStorage.getItem('email');
-let currentReportId = null;
-const SECTION_NAMES = {
-  1:'Facility Structure & Key Terms', 2:'Overall Comments', 3:'Credit Risk Assessment',
-  4:'Borrower Background', 5:'Collateral Assessment', 6:'Project Overview',
-  7:'Financial Analysis', 8:'Legal Documentation & Charges', 9:'Compliance Checklist', 10:'Appendix'
+const API='/api/credit-report';
+let token=localStorage.getItem('token');
+let currentRole=localStorage.getItem('role');
+let currentEmail=localStorage.getItem('email');
+let currentRid=null;
+let currentPanelSec=null;
+let sectionInputMap={};  // {n: {has_data, saved_at}}
+let sectionOutputMap={}; // {n: output_obj}
+let allOutputs=[];
+
+const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix'};
+
+const TEMPLATES={
+  1:{borrower:"Company Ltd",facility_type:"Pre-delivery Term Loan",facility_amount_usd_m:50,tenor_years:5,purpose:"Pre-delivery financing for 2 newbuild bulk carriers",repayment:"Equal quarterly principal",interest_rate:"SOFR + 2.50%",collateral:["First priority mortgage over vessels","Assignment of shipbuilding contracts","Refund guarantee from shipyard"],guarantors:["Parent Holding Co Ltd"],governing_law:"Singapore"},
+  2:{note:"Generate this section LAST — after all §1,3-10 are complete. The AI uses preceding sections as context to write a comprehensive executive summary.",executive_summary:"To be generated from full report context.",key_positives:["Experienced sponsor","Long-term charter coverage"],key_risks:["Construction risk","Market cyclicality"],recommendation:"APPROVE/DECLINE",dscr_minimum:1.25,ltc_percent:65},
+  3:{internal_rating:"BB+",pd_assessment:"Low-Medium",mas_612_applicable:true,esg_screening:"Passed",sanctions_ofac:"Clear",sanctions_eu:"Clear",sanctions_mas:"Clear",key_risks:["Tariff sensitivity"],mitigants:["Time charter income covers debt service"]},
+  4:{company_name:"Borrower Co. Ltd",incorporation_year:2005,country:"Singapore",shareholders:[{name:"Holding Co Ltd",stake_percent:100}],fleet:{owned_vessels:5,vessel_types:["Bulk Carrier"],total_dwt:320000},key_management:[{name:"John Smith",title:"CEO",years:20}],annual_revenue_usd_m:150},
+  5:{collateral_type:"First mortgage + Refund guarantee",vessel_valuations:[{vessel:"MV Newbuild 1",dwt:64000,market_value_usd_m:30,valuer:"Clarkson Research"}],ltc_percent:65,acr_percent:120,ltv_at_maturity_percent:85,refund_guarantee:{bank:"Bank ABC",amount_usd_m:50}},
+  6:{vessel_name:"MV Newbuild 1",vessel_type:"Bulk Carrier",dwt:64000,shipyard:"Shipyard Co Ltd",country:"China",contract_price_usd_m:32,delivery_date:"2026-Q2",milestones:[{name:"Keel laying",date:"2025-Q1",pct:20},{name:"Launch",date:"2026-Q1",pct:30},{name:"Delivery",date:"2026-Q2",pct:50}],employment:"3-year time charter at USD 12,000/day"},
+  7:{currency:"USD",unit:"millions",income_statement:{FY2022:{revenue:120,ebitda:40,net_income:20,interest_expense:8},FY2023:{revenue:135,ebitda:45,net_income:25,interest_expense:8},FY2024:{revenue:150,ebitda:50,net_income:30,interest_expense:9}},balance_sheet_fy2024:{total_assets:300,cash:20,total_debt:150,equity:100},key_ratios:{dscr_fy2024:1.45,debt_equity:1.5,current_ratio:1.2,net_margin_pct:20}},
+  8:{security_package:["First priority ship mortgage","Assignment of earnings and insurances","Corporate guarantee"],other_lenders:[{bank:"Existing Bank",amount_usd_m:20,maturity:"2025-12"}],legal_counsel:"XYZ Law LLC",governing_law:"Singapore"},
+  9:{kyc:{completed:true,date:"2024-01-15"},aml:{cleared:true},sanctions:{ofac:"Clear",eu:"Clear",mas:"Clear",un:"Clear"},pep:"Not PEP",environmental:{eexi:"B",cii:"B"},banking_act_s33_3:"Within limit — 15% of capital",kyc_docs:["Certificate of Incorporation","Audited accounts x3","Board resolution"]},
+  10:{dscr_projections:[{year:1,revenue_usd_m:15,opex_usd_m:6,ebitda_usd_m:9,debt_service_usd_m:7,dscr:1.29},{year:2,revenue_usd_m:16,opex_usd_m:6.2,ebitda_usd_m:9.8,debt_service_usd_m:7,dscr:1.40},{year:3,revenue_usd_m:16.5,opex_usd_m:6.5,ebitda_usd_m:10,debt_service_usd_m:7,dscr:1.43},{year:4,revenue_usd_m:17,opex_usd_m:6.8,ebitda_usd_m:10.2,debt_service_usd_m:7,dscr:1.46},{year:5,revenue_usd_m:17,opex_usd_m:7,ebitda_usd_m:10,debt_service_usd_m:7,dscr:1.43}],fleet_table:[{vessel:"MV Newbuild 1",type:"Bulk Carrier",dwt:64000}]}
 };
 
-// ── Auth ────────────────────────────────────────────────────────────────────
-function authHeaders() {
-  return { 'Authorization': 'Bearer ' + token };
-}
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function H(){return{'Authorization':'Bearer '+token};}
+function HJ(){return{'Authorization':'Bearer '+token,'Content-Type':'application/json'};}
 
-async function doLogin() {
-  const email = document.getElementById('loginEmail').value.trim();
-  const pw = document.getElementById('loginPassword').value;
-  const errEl = document.getElementById('loginError');
-  const spin = document.getElementById('loginSpinner');
-  errEl.classList.add('d-none');
-  spin.classList.remove('d-none');
-
-  try {
-    const body = new URLSearchParams({ username: email, password: pw });
-    const res = await fetch(API + '/auth/login', { method: 'POST', body });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Login failed');
-    token = data.access_token;
-    currentRole = data.role;
-    currentEmail = email;
-    localStorage.setItem('token', token);
-    localStorage.setItem('role', currentRole);
-    localStorage.setItem('email', currentEmail);
+async function doLogin(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const pw=document.getElementById('loginPw').value;
+  const err=document.getElementById('loginErr');
+  const sp=document.getElementById('loginSpin');
+  err.classList.add('d-none');sp.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/auth/login',{method:'POST',body:new URLSearchParams({username:email,password:pw})});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Login failed');
+    token=d.access_token;currentRole=d.role;currentEmail=email;
+    localStorage.setItem('token',token);localStorage.setItem('role',currentRole);localStorage.setItem('email',currentEmail);
     showDashboard();
-  } catch (e) {
-    errEl.textContent = e.message;
-    errEl.classList.remove('d-none');
-  } finally {
-    spin.classList.add('d-none');
-  }
+  }catch(e){err.textContent=e.message;err.classList.remove('d-none');}
+  finally{sp.classList.add('d-none');}
 }
+function logout(){localStorage.clear();token=null;currentRole=null;currentEmail=null;currentRid=null;showView('viewLogin');document.getElementById('navUser').classList.add('d-none');}
 
-function logout() {
-  localStorage.clear();
-  token = null; currentRole = null; currentEmail = null; currentReportId = null;
-  showView('viewLogin');
-  document.getElementById('navUser').classList.add('d-none');
-}
+// ── Views ─────────────────────────────────────────────────────────────────────
+function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');}
 
-// ── Views ───────────────────────────────────────────────────────────────────
-function showView(id) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-
-async function showDashboard() {
+async function showDashboard(){
   showView('viewDashboard');
   document.getElementById('navUser').classList.remove('d-none');
-  document.getElementById('navRole').textContent = currentRole;
-  document.getElementById('navEmail').textContent = currentEmail;
+  document.getElementById('navRole').textContent=currentRole;
+  document.getElementById('navEmail').textContent=currentEmail;
   await loadReports();
 }
 
-// ── Reports ─────────────────────────────────────────────────────────────────
-async function loadReports() {
-  const tbody = document.getElementById('reportTableBody');
-  tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr>';
-  try {
-    const res = await fetch(API + '/reports?limit=50', { headers: authHeaders() });
-    if (res.status === 401) { logout(); return; }
-    const reports = await res.json();
-    if (!reports.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No reports yet. Click "New Report" to create one.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = reports.map(r => `
-      <tr class="report-row" onclick="loadReportDetail('${r.id}')">
-        <td class="ps-3 fw-semibold">${esc(r.borrower_name || '—')}</td>
-        <td>${esc(r.report_type || '—')}</td>
-        <td>${esc(r.booking_branch || '—')}</td>
-        <td>${statusBadge(r.status)}</td>
-        <td class="text-muted small">${fmtDate(r.created_at)}</td>
-      </tr>`).join('');
-  } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">${esc(e.message)}</td></tr>`;
-  }
+// ── Reports list ──────────────────────────────────────────────────────────────
+async function loadReports(){
+  const tb=document.getElementById('rptBody');
+  tb.innerHTML='<tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr>';
+  try{
+    const res=await fetch(API+'/reports?limit=50',{headers:H()});
+    if(res.status===401){logout();return;}
+    const data=await res.json();
+    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="text-center text-muted py-4">No reports yet.</td></tr>';return;}
+    tb.innerHTML=data.map(r=>`<tr class="report-row" onclick="loadReportDetail('${r.id}')">
+      <td class="ps-3 fw-semibold">${esc(r.borrower_name||'—')}</td>
+      <td>${esc(r.report_type||'—')}</td><td>${esc(r.booking_branch||'—')}</td>
+      <td>${sbadge(r.status)}</td><td class="text-muted small">${fd(r.created_at)}</td>
+    </tr>`).join('');
+  }catch(e){tb.innerHTML=`<tr><td colspan="5" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;}
 }
 
-async function createReport() {
-  const payload = {
-    borrower_name: document.getElementById('newBorrower').value.trim() || null,
-    industry: document.getElementById('newIndustry').value,
-    report_type: document.getElementById('newType').value.trim() || null,
-    booking_branch: document.getElementById('newBranch').value.trim() || null,
-  };
-  try {
-    const res = await fetch(API + '/reports', {
-      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Failed to create report');
+async function createReport(){
+  const p={borrower_name:document.getElementById('nBorrower').value.trim()||null,industry:document.getElementById('nIndustry').value,report_type:document.getElementById('nType').value.trim()||null,booking_branch:document.getElementById('nBranch').value.trim()||null};
+  try{
+    const res=await fetch(API+'/reports',{method:'POST',headers:HJ(),body:JSON.stringify(p)});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Failed');
     bootstrap.Modal.getInstance(document.getElementById('createModal')).hide();
-    toast('Report created', 'success');
-    await loadReportDetail(data.id);
-  } catch (e) {
-    toast(e.message, 'danger');
-  }
+    toast('Report created','success');await loadReportDetail(d.id);
+  }catch(e){toast(e.message,'danger');}
 }
 
-// ── Report Detail ────────────────────────────────────────────────────────────
-async function loadReportDetail(reportId) {
-  currentReportId = reportId;
+// ── Report detail ─────────────────────────────────────────────────────────────
+async function loadReportDetail(rid){
+  currentRid=rid;sectionInputMap={};sectionOutputMap={};allOutputs=[];closePanel();
   showView('viewReport');
-  document.getElementById('sectionOutputPanel').style.display = 'none';
-  document.getElementById('reportMeta').innerHTML = '<div class="text-muted small">Loading…</div>';
-  document.getElementById('sectionsTable').innerHTML = '<tr><td colspan="6" class="text-center py-3 text-muted">Loading…</td></tr>';
-
-  try {
-    const [repRes, outsRes, docsRes] = await Promise.all([
-      fetch(API + '/reports/' + reportId, { headers: authHeaders() }),
-      fetch(API + '/reports/' + reportId + '/outputs', { headers: authHeaders() }),
-      fetch(API + '/reports/' + reportId + '/documents', { headers: authHeaders() }),
+  document.getElementById('rptMeta').innerHTML='<span class="text-muted">Loading…</span>';
+  document.getElementById('secTable').innerHTML='<tr><td colspan="7" class="text-center py-3 text-muted">Loading…</td></tr>';
+  try{
+    const [rRes,outRes,docRes,inpRes]=await Promise.all([
+      fetch(API+'/reports/'+rid,{headers:H()}),
+      fetch(API+'/reports/'+rid+'/outputs',{headers:H()}),
+      fetch(API+'/reports/'+rid+'/documents',{headers:H()}),
+      fetch(API+'/reports/'+rid+'/inputs',{headers:H()}),
     ]);
-    const report = await repRes.json();
-    const outputs = outsRes.ok ? await outsRes.json() : [];
-    const docs = docsRes.ok ? await docsRes.json() : [];
+    const rpt=await rRes.json();
+    const outputs=outRes.ok?await outRes.json():[];
+    const docs=docRes.ok?await docRes.json():[];
+    const inputs=inpRes.ok?await inpRes.json():[];
 
-    // Meta
-    document.getElementById('reportMeta').innerHTML = `
-      <div class="row g-2">
-        <div class="col-6"><small class="text-muted">Borrower</small><div class="fw-semibold">${esc(report.borrower_name || '—')}</div></div>
-        <div class="col-6"><small class="text-muted">Industry</small><div>${esc(report.industry)}</div></div>
-        <div class="col-6"><small class="text-muted">Type</small><div>${esc(report.report_type || '—')}</div></div>
-        <div class="col-6"><small class="text-muted">Branch</small><div>${esc(report.booking_branch || '—')}</div></div>
-        <div class="col-6"><small class="text-muted">Status</small><div>${statusBadge(report.status)}</div></div>
-        <div class="col-6"><small class="text-muted">Created</small><div class="small text-muted">${fmtDate(report.created_at)}</div></div>
+    allOutputs=outputs;
+    outputs.forEach(o=>sectionOutputMap[o.section_no]=o);
+    inputs.forEach(i=>sectionInputMap[i.section_no]={has_data:true,saved_at:i.saved_at});
+
+    document.getElementById('rptTitle').textContent=rpt.borrower_name?`${rpt.borrower_name} — ${rpt.report_type||rpt.industry}`:rpt.id;
+    document.getElementById('rptMeta').innerHTML=`<div class="row g-1">
+      <div class="col-6"><small class="text-muted">Borrower</small><div class="fw-semibold">${esc(rpt.borrower_name||'—')}</div></div>
+      <div class="col-6"><small class="text-muted">Industry</small><div>${esc(rpt.industry)}</div></div>
+      <div class="col-6"><small class="text-muted">Type</small><div>${esc(rpt.report_type||'—')}</div></div>
+      <div class="col-6"><small class="text-muted">Branch</small><div>${esc(rpt.booking_branch||'—')}</div></div>
+      <div class="col-6"><small class="text-muted">Status</small><div>${sbadge(rpt.status)}</div></div>
+      <div class="col-6"><small class="text-muted">Created</small><div class="small text-muted">${fd(rpt.created_at)}</div></div>
+    </div>`;
+
+    const dl=document.getElementById('docList');
+    dl.innerHTML=docs.length?docs.map(d=>`<div class="d-flex align-items-center gap-1 mb-1">
+      <span class="badge bg-light text-dark border">${esc(d.original_filename)}</span>
+      <span class="text-muted" style="font-size:10px">${fb(d.file_size_bytes)}</span></div>`).join('')
+      :'<span class="text-muted">No PDFs uploaded yet.</span>';
+
+    renderSectionsTable();
+  }catch(e){toast(e.message,'danger');}
+}
+
+function renderSectionsTable(){
+  const tb=document.getElementById('secTable');
+  tb.innerHTML=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const o=sectionOutputMap[n];const inp=sectionInputMap[n];
+    const sc=o?(o.status==='done'?'done':o.status==='generating'?'generating':o.status==='error'?'error':'pending'):'pending';
+    const sl=o?o.status:'—';
+    const tok=o?.tokens_used?(o.tokens_used).toLocaleString():'—';
+    const gen=o?.generated_at?fd(o.generated_at):'—';
+    const inpIcon=inp?.has_data?'<span class="input-ok">✓</span>':'<span class="input-miss">✗</span>';
+    return `<tr style="cursor:pointer" onclick="openPanel(${n},'input')">
+      <td class="ps-2"><span class="sec-badge s-${sc}">${n}</span></td>
+      <td>${SNAMES[n]}</td>
+      <td class="text-center">${inpIcon}</td>
+      <td><span class="badge bg-${sc==='done'?'success':sc==='generating'?'warning text-dark':sc==='error'?'danger':'secondary'} small">${sl}</span></td>
+      <td class="text-muted small">${tok}</td>
+      <td class="text-muted small">${gen}</td>
+      <td><button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="event.stopPropagation();openPanel(${n},'output')" title="View/Generate output">▶</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Section panel ─────────────────────────────────────────────────────────────
+function openPanel(secNo,tab){
+  currentPanelSec=secNo;
+  document.getElementById('secPanelTitle').textContent=`§${secNo} — ${SNAMES[secNo]}`;
+  document.getElementById('secPanel').style.display='block';
+  document.getElementById('secPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+  // Show §2 regeneration hint in output tab
+  const notice=document.getElementById('sec2Notice');
+  if(secNo===2&&notice){const s=checkSection2Stale();notice.classList.toggle('d-none',!s);}
+  switchTab(tab);
+}
+function closePanel(){document.getElementById('secPanel').style.display='none';currentPanelSec=null;}
+
+function switchTab(tab){
+  document.querySelectorAll('#panelTabs .nav-link').forEach((el,i)=>el.classList.toggle('active',i===(tab==='input'?0:1)));
+  document.getElementById('tabInput').style.display=tab==='input'?'block':'none';
+  document.getElementById('tabOutput').style.display=tab==='output'?'block':'none';
+  if(tab==='input')loadInputEditor();else loadSectionOutput(currentPanelSec);
+}
+
+async function loadInputEditor(){
+  const sec=currentPanelSec;if(!sec)return;
+  document.getElementById('jsonEd').value='';document.getElementById('savedAt').textContent='';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{headers:H()});
+    if(!res.ok)return;
+    const d=await res.json();
+    document.getElementById('jsonEd').value=JSON.stringify(d.input_json,null,2);
+    document.getElementById('savedAt').textContent='Last saved: '+fd(d.saved_at);
+  }catch(e){}
+}
+function loadTemplate(){
+  const sec=currentPanelSec;if(!sec)return;
+  document.getElementById('jsonEd').value=JSON.stringify(TEMPLATES[sec]||{},null,2);
+  toast(`Template loaded for §${sec}. Edit values with actual data then Save.`,'info');
+}
+async function saveSectionInput(){
+  const sec=currentPanelSec;
+  const raw=document.getElementById('jsonEd').value.trim();
+  if(!raw){toast('Input is empty','warning');return;}
+  let parsed;
+  try{parsed=JSON.parse(raw);}catch(e){toast('Invalid JSON: '+e.message,'danger');return;}
+  if(typeof parsed!=='object'||Array.isArray(parsed)){toast('Input must be a JSON object {}','warning');return;}
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:parsed})});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Save failed');
+    sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
+    document.getElementById('savedAt').textContent='Saved: '+fd(d.saved_at);
+    renderSectionsTable();toast(`§${sec} input saved ✓`,'success');
+  }catch(e){toast(e.message,'danger');}
+}
+
+async function loadSectionOutput(sec){
+  const el=document.getElementById('outputContent');
+  el.innerHTML='<span class="text-muted small">Loading…</span>';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/sections/'+sec+'/output',{headers:H()});
+    if(!res.ok){el.innerHTML='<p class="text-muted fst-italic">Not yet generated.<br>Fill in input data (✏ Input Data tab) then click Generate.</p>';return;}
+    const d=await res.json();
+    el.innerHTML=d.markdown?marked.parse(d.markdown):'<p class="text-muted fst-italic">No content yet.</p>';
+  }catch(e){el.innerHTML=`<p class="text-danger">${esc(e.message)}</p>`;}
+}
+
+async function generateCurrentSection(){
+  const sec=currentPanelSec;if(!sec)return;
+  const sp=document.getElementById('secGenSpin');sp.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec,{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    toast(`§${sec} generated — ${(d.tokens_used||0).toLocaleString()} tokens`,'success');
+    const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
+    if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
+    renderSectionsTable();await loadSectionOutput(sec);
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+// ── Generate All ──────────────────────────────────────────────────────────────
+async function preflight(){
+  const missing=[];
+  for(let n=1;n<=10;n++){if(!sectionInputMap[n]?.has_data)missing.push(n);}
+  const al=document.getElementById('preflightAlert');
+  if(missing.length){
+    document.getElementById('preflightMsg').innerHTML=`Sections missing input data: <strong>§${missing.join(', §')}</strong>.<br>Click each row → ✏ Input Data → Load Template → edit → Save.`;
+    al.classList.remove('d-none');al.scrollIntoView({behavior:'smooth',block:'nearest'});return;
+  }
+  al.classList.add('d-none');
+  await generateAll();
+}
+async function generateAll(){
+  const sp=document.getElementById('genAllSpin');sp.classList.remove('d-none');
+  toast('Generating full report — this may take several minutes…','info');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate',{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    const ss=Object.entries(d.sections).map(([k,v])=>`§${k}:${v.split(':')[0]}`).join(' ');
+    toast('Generation complete. '+ss,'success');
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+// ── Full Report Review ────────────────────────────────────────────────────────
+function checkSection2Stale(){
+  const s2=sectionOutputMap[2];
+  if(!s2||s2.status!=='done'||!s2.generated_at)return false;
+  const t2=new Date(s2.generated_at).getTime();
+  return Object.values(sectionOutputMap).some(o=>
+    o.section_no!==2&&o.status==='done'&&o.generated_at&&new Date(o.generated_at).getTime()>t2
+  );
+}
+
+function openReview(){
+  renderReview();showView('viewReview');
+}
+
+function renderReview(){
+  // Nav pills
+  const nav=document.getElementById('reviewNav');
+  nav.innerHTML=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const o=sectionOutputMap[n];
+    const cls=o?.status==='done'?'success':o?.status==='error'?'danger':'secondary';
+    return `<a href="#rsec-${n}" class="badge bg-${cls} text-decoration-none" style="font-size:12px">§${n}</a>`;
+  }).join('');
+
+  // §2 stale warning
+  document.getElementById('sec2StaleWarn').classList.toggle('d-none',!checkSection2Stale());
+
+  // Sections content
+  const rc=document.getElementById('reviewContent');
+  rc.innerHTML=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const o=sectionOutputMap[n];
+    const inp=sectionInputMap[n];
+    if(o?.status==='done'&&o.markdown){
+      return `<div id="rsec-${n}" class="card review-section-card">
+        <div class="card-header">§${n} — ${SNAMES[n]}</div>
+        <div class="card-body markdown-body">${marked.parse(o.markdown)}</div>
       </div>`;
-
-    // Docs
-    const docList = document.getElementById('docList');
-    docList.innerHTML = docs.length
-      ? docs.map(d => `<span class="doc-pill" title="${esc(d.original_filename)} (${fmtBytes(d.file_size_bytes)})">${esc(d.original_filename)}</span>`).join('')
-      : '<small class="text-muted">No documents uploaded.</small>';
-
-    // Sections
-    const outMap = {};
-    outputs.forEach(o => outMap[o.section_no] = o);
-    const tbody = document.getElementById('sectionsTable');
-    tbody.innerHTML = Object.keys(SECTION_NAMES).map(no => {
-      const n = parseInt(no);
-      const o = outMap[n];
-      const statusCls = o ? (o.status === 'done' ? 'done' : o.status === 'generating' ? 'generating' : o.status === 'error' ? 'error' : 'pending') : 'pending';
-      const statusLabel = o ? o.status : 'not started';
-      const tokens = o?.tokens_used ? (o.tokens_used).toLocaleString() : '—';
-      const genAt = o?.generated_at ? fmtDate(o.generated_at) : '—';
-      return `
-        <tr class="section-row" onclick="showSectionOutput(${n}, ${JSON.stringify(SECTION_NAMES[no])})">
-          <td class="ps-3"><span class="section-badge status-${statusCls}">${n}</span></td>
-          <td>${SECTION_NAMES[no]}</td>
-          <td><span class="badge bg-${statusCls === 'done' ? 'success' : statusCls === 'generating' ? 'warning text-dark' : statusCls === 'error' ? 'danger' : 'secondary'}">${statusLabel}</span></td>
-          <td class="small text-muted">${tokens}</td>
-          <td class="small text-muted">${genAt}</td>
-          <td>
-            <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation();generateSection(${n})" title="Generate section ${n}">▶</button>
-          </td>
-        </tr>`;
-    }).join('');
-  } catch (e) {
-    toast(e.message, 'danger');
-  }
-}
-
-async function showSectionOutput(sectionNo, name) {
-  const panel = document.getElementById('sectionOutputPanel');
-  document.getElementById('sectionOutputTitle').textContent = `Section ${sectionNo} — ${name}`;
-  document.getElementById('sectionOutputContent').innerHTML = '<div class="text-muted">Loading…</div>';
-  panel.style.display = 'block';
-  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-  try {
-    const res = await fetch(API + '/reports/' + currentReportId + '/sections/' + sectionNo + '/output', { headers: authHeaders() });
-    if (!res.ok) {
-      document.getElementById('sectionOutputContent').innerHTML = '<div class="text-muted fst-italic">Not yet generated.</div>';
-      return;
     }
-    const data = await res.json();
-    document.getElementById('sectionOutputContent').innerHTML = data.markdown
-      ? marked.parse(data.markdown)
-      : '<div class="text-muted fst-italic">No content available.</div>';
-  } catch (e) {
-    document.getElementById('sectionOutputContent').innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
-  }
+    return `<div id="rsec-${n}" class="card review-section-card border-warning">
+      <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <span>§${n} — ${SNAMES[n]}</span>
+        <span class="badge bg-${o?.status==='error'?'danger':'secondary'}">${o?.status||'not generated'}</span>
+      </div>
+      <div class="card-body text-center py-4">
+        ${!inp?.has_data?'<p class="text-danger mb-2">⚠ No analyst input data saved. Go back and fill in the Input Data tab.</p>':'<p class="text-muted mb-2">Input data ready. Section not yet generated.</p>'}
+        <button class="btn btn-sm btn-primary" onclick="generateFromReview(${n})">
+          <span id="revSpin${n}" class="spinner-border spinner-sm d-none me-1"></span>Generate §${n}</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-async function generateSection(sectionNo) {
-  toast(`Generating section ${sectionNo}…`, 'info');
-  try {
-    const res = await fetch(API + '/reports/' + currentReportId + '/generate/' + sectionNo, {
-      method: 'POST', headers: authHeaders()
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Generation failed');
-    toast(`Section ${sectionNo}: ${data.status} (${(data.tokens_used||0).toLocaleString()} tokens)`, 'success');
-    await loadReportDetail(currentReportId);
-  } catch (e) {
-    toast(e.message, 'danger');
-  }
+async function generateFromReview(secNo){
+  const sp=document.getElementById('revSpin'+secNo);if(sp)sp.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+secNo,{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    toast(`§${secNo} generated ✓`,'success');
+    const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
+    if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
+    renderSectionsTable();renderReview();
+  }catch(e){toast(e.message,'danger');}
+  finally{if(sp)sp.classList.add('d-none');}
 }
 
-async function generateAll() {
-  const spin = document.getElementById('genAllSpinner');
-  spin.classList.remove('d-none');
-  toast('Generating full report — this may take several minutes…', 'info');
-  try {
-    const res = await fetch(API + '/reports/' + currentReportId + '/generate', {
-      method: 'POST', headers: authHeaders()
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Generation failed');
-    const statuses = Object.entries(data.sections).map(([k,v]) => `§${k}:${v}`).join(', ');
-    toast('Full report generated. ' + statuses, 'success');
-    await loadReportDetail(currentReportId);
-  } catch (e) {
-    toast(e.message, 'danger');
-  } finally {
-    spin.classList.add('d-none');
-  }
+async function regenSec2(){
+  const sp=document.getElementById('regenSpin');sp.classList.remove('d-none');
+  toast('Regenerating §2 Overall Comments with full report context…','info');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/2',{method:'POST',headers:H()});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    toast(`§2 regenerated — ${(d.tokens_used||0).toLocaleString()} tokens`,'success');
+    const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
+    if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
+    renderReview();
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
 }
 
-async function uploadPDF() {
-  const input = document.getElementById('pdfInput');
-  if (!input.files.length) { toast('Please select a PDF file', 'warning'); return; }
-  const file = input.files[0];
-  const form = new FormData();
-  form.append('file', file);
-  try {
-    const res = await fetch(API + '/reports/' + currentReportId + '/documents', {
-      method: 'POST', headers: authHeaders(), body: form
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Upload failed');
-    toast(`Uploaded: ${file.name}`, 'success');
-    input.value = '';
-    await loadReportDetail(currentReportId);
-  } catch (e) {
-    toast(e.message, 'danger');
-  }
+// ── Upload PDF ────────────────────────────────────────────────────────────────
+async function uploadPDF(){
+  const inp=document.getElementById('pdfInput');
+  if(!inp.files.length){toast('Select a PDF file','warning');return;}
+  const file=inp.files[0];
+  const form=new FormData();form.append('file',file);
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/documents',{method:'POST',headers:H(),body:form});
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||'Upload failed');
+    toast(`Uploaded: ${file.name}`,'success');inp.value='';
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
 }
 
-// ── Utilities ────────────────────────────────────────────────────────────────
-function statusBadge(s) {
-  const map = { draft:'secondary', validated:'info', review_in_progress:'warning', approved:'success' };
-  return `<span class="badge bg-${map[s]||'secondary'}">${s}</span>`;
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportReport(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections to export','warning');return;}
+  const body=outs.map(o=>`<h1>Section ${o.section_no} — ${SNAMES[o.section_no]}</h1>${marked.parse(o.markdown)}`).join('<hr>');
+  dlBlob(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Report</title>
+<style>body{font-family:Georgia,serif;max-width:900px;margin:40px auto;padding:0 20px;line-height:1.75;}
+table{border-collapse:collapse;width:100%;margin:1rem 0;}th,td{border:1px solid #ccc;padding:6px 10px;}th{background:#f0f0f0;}
+h1{font-size:1.4rem;border-bottom:2px solid #00703C;padding-bottom:6px;margin-top:2.5rem;}
+h2{font-size:1.2rem;}h3{font-size:1.05rem;color:#00703C;}</style></head>
+<body>${body}</body></html>`,'credit_report.html','text/html');
+}
+function exportMarkdown(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections to export','warning');return;}
+  dlBlob(outs.map(o=>`# Section ${o.section_no} — ${SNAMES[o.section_no]}\n\n${o.markdown}`).join('\n\n---\n\n'),'credit_report.md','text/markdown');
+}
+function dlBlob(content,filename,mime){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([content],{type:mime}));
+  a.download=filename;document.body.appendChild(a);a.click();
+  document.body.removeChild(a);URL.revokeObjectURL(a.href);
+  toast(`Downloaded ${filename}`,'success');
 }
 
-function fmtDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function sbadge(s){const m={draft:'secondary',validated:'info',review_in_progress:'warning',approved:'success'};return`<span class="badge bg-${m[s]||'secondary'}">${s}</span>`;}
+function fd(iso){if(!iso)return'—';return new Date(iso).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function toast(msg,type='info'){
+  const el=document.createElement('div');
+  el.className=`alert alert-${type} py-2 px-3 shadow-sm mb-2`;
+  el.style.cssText='min-width:260px;max-width:420px;font-size:13px;';
+  el.textContent=msg;
+  document.getElementById('toast-cont').appendChild(el);
+  setTimeout(()=>el.remove(),6000);
 }
-
-function fmtBytes(n) {
-  if (n < 1024) return n + ' B';
-  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
-  return (n/1048576).toFixed(1) + ' MB';
-}
-
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function toast(msg, type='info') {
-  const el = document.createElement('div');
-  el.className = `alert alert-${type} py-2 px-3 shadow-sm`;
-  el.style.cssText = 'min-width:260px;max-width:400px;font-size:13px;animation:fadeIn .3s;';
-  el.textContent = msg;
-  document.getElementById('toast-container').appendChild(el);
-  setTimeout(() => el.remove(), 5000);
-}
-
-// ── Enter key support ────────────────────────────────────────────────────────
-document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && document.getElementById('viewLogin').classList.contains('active')) doLogin();
-});
-
-// ── Init ─────────────────────────────────────────────────────────────────────
-if (token) {
-  showDashboard();
-} else {
-  showView('viewLogin');
-}
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&document.getElementById('viewLogin').classList.contains('active'))doLogin();});
+if(token){showDashboard();}else{showView('viewLogin');}
 </script>
 </body>
 </html>
