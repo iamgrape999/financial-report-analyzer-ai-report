@@ -667,6 +667,9 @@ async def etl_document(
     from google.genai import types as genai_types
     from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
 
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is not configured — cannot run ETL extraction")
+
     system_prompt, user_prompt = _build_etl_prompt(document_type, text, target_sections)
 
     try:

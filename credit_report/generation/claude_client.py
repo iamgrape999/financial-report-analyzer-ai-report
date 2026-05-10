@@ -44,6 +44,8 @@ async def generate_section_markdown(
     Returns (full_markdown, total_tokens_used).
     """
     key = api_key or GEMINI_API_KEY
+    if not key:
+        raise ValueError("GEMINI_API_KEY is not configured. Set it in Render environment variables to enable AI generation.")
     model = model_id or GEMINI_MODEL
     max_tokens = SECTION_MAX_OUTPUT_TOKENS.get(section_no) or CR_SECTION_MAX_TOKENS
 

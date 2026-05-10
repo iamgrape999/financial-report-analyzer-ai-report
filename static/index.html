@@ -516,8 +516,7 @@ async function saveFormInput(){
   if(!Object.keys(data).length){toast('No data entered','warning');return;}
   const{pct,missing}=getCompleteness(sec,data);
   if(pct<90){
-    toast(`Form is ${pct}% complete — need ≥90%. Missing: ${missing.slice(0,3).map(f=>f.l).join(', ')}${missing.length>3?'…':''}`, 'warning');
-    return;
+    toast(`§${sec} saved (${pct}% complete — fill in missing fields before generating AI output)`, 'warning');
   }
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:data})});
@@ -525,7 +524,7 @@ async function saveFormInput(){
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
     sectionInputDataMap[sec]=data;
     document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
-    renderSectionsTable();toast(`§${sec} saved via form ✓ (${pct}% complete)`,'success');
+    renderSectionsTable();if(pct>=90)toast(`§${sec} saved via form ✓ (${pct}% complete)`,'success');
   }catch(e){toast(e.message,'danger');}
 }
 
@@ -731,11 +730,7 @@ async function saveSectionInput(){
   try{parsed=JSON.parse(raw);}catch(e){toast('Invalid JSON: '+e.message,'danger');return;}
   if(typeof parsed!=='object'||Array.isArray(parsed)){toast('Input must be a JSON object {}','warning');return;}
   const{pct}=getCompleteness(sec,parsed);
-  if(pct<90){
-    renderCompleteness(sec,parsed);
-    toast(`§${sec} is only ${pct}% complete. Fill in missing fields (marked ✗) before saving.`,'warning');
-    return;
-  }
+  renderCompleteness(sec,parsed);
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:parsed})});
     const d=await res.json();
@@ -743,8 +738,9 @@ async function saveSectionInput(){
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
     sectionInputDataMap[sec]=parsed;
     document.getElementById('savedAt').textContent='Saved: '+fd(d.saved_at);
-    renderCompleteness(sec,parsed);
-    renderSectionsTable();toast(`§${sec} input saved ✓ (${pct}% complete)`,'success');
+    renderSectionsTable();
+    if(pct<90)toast(`§${sec} saved (${pct}% complete — fill in missing fields before generating)`, 'warning');
+    else toast(`§${sec} input saved ✓ (${pct}% complete)`,'success');
   }catch(e){toast(e.message,'danger');}
 }
 
