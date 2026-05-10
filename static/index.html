@@ -295,8 +295,9 @@ let currentRole=localStorage.getItem('role');
 let currentEmail=localStorage.getItem('email');
 let currentRid=null;
 let currentPanelSec=null;
-let sectionInputMap={};  // {n: {has_data, saved_at}}
-let sectionOutputMap={}; // {n: output_obj}
+let sectionInputMap={};     // {n: {has_data, saved_at}}
+let sectionInputDataMap={}; // {n: parsed input_json object} — cached for quality checks
+let sectionOutputMap={};    // {n: output_obj}
 let allOutputs=[];
 
 const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix'};
@@ -445,6 +446,7 @@ async function saveFormInput(){
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:data})});
     const d=await res.json();if(!res.ok)throw new Error(d.detail||'Save failed');
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
+    sectionInputDataMap[sec]=data;
     document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
     renderSectionsTable();toast(`§${sec} saved via form ✓ (${pct}% complete)`,'success');
   }catch(e){toast(e.message,'danger');}
@@ -521,7 +523,7 @@ async function createReport(){
 
 // ── Report detail ─────────────────────────────────────────────────────────────
 async function loadReportDetail(rid){
-  currentRid=rid;sectionInputMap={};sectionOutputMap={};allOutputs=[];closePanel();
+  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};allOutputs=[];closePanel();
   showView('viewReport');
   document.getElementById('rptMeta').innerHTML='<span class="text-muted">Loading…</span>';
   document.getElementById('secTable').innerHTML='<tr><td colspan="7" class="text-center py-3 text-muted">Loading…</td></tr>';
@@ -617,6 +619,7 @@ async function loadInputEditor(){
     const d=await res.json();
     ed.value=JSON.stringify(d.input_json,null,2);
     document.getElementById('savedAt').textContent='Last saved: '+fd(d.saved_at);
+    sectionInputDataMap[sec]=d.input_json;
     renderCompleteness(sec,d.input_json);
   }catch(e){}
 }
@@ -645,6 +648,7 @@ async function saveSectionInput(){
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Save failed');
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
+    sectionInputDataMap[sec]=parsed;
     document.getElementById('savedAt').textContent='Saved: '+fd(d.saved_at);
     renderCompleteness(sec,parsed);
     renderSectionsTable();toast(`§${sec} input saved ✓ (${pct}% complete)`,'success');
@@ -690,11 +694,26 @@ async function generateCurrentSection(){
 
 // ── Generate All ──────────────────────────────────────────────────────────────
 async function preflight(){
-  const missing=[];
-  for(let n=1;n<=10;n++){if(!sectionInputMap[n]?.has_data)missing.push(n);}
+  const missingData=[];
+  const lowComp=[];
+  for(let n=1;n<=10;n++){
+    if(!sectionInputMap[n]?.has_data){missingData.push(n);continue;}
+    // Check 90% completeness using cached data (or fetch if not yet cached)
+    let data=sectionInputDataMap[n];
+    if(!data){
+      try{const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+n,{headers:H()});
+        if(r.ok){const d=await r.json();data=d.input_json;sectionInputDataMap[n]=data;}
+      }catch(e){}
+    }
+    if(data){const{pct}=getCompleteness(n,data);if(pct<90)lowComp.push({n,pct});}
+  }
   const al=document.getElementById('preflightAlert');
-  if(missing.length){
-    document.getElementById('preflightMsg').innerHTML=`Sections missing input data: <strong>§${missing.join(', §')}</strong>.<br>Click each row → ✏ Input Data → Load Template → edit → Save.`;
+  if(missingData.length||lowComp.length){
+    let msg='';
+    if(missingData.length)msg+=`Missing input data: <strong>§${missingData.join(', §')}</strong>. `;
+    if(lowComp.length)msg+=`Below 90% completeness: <strong>${lowComp.map(x=>`§${x.n} (${x.pct}%)`).join(', ')}</strong>.`;
+    msg+='<br>Click each section row → 📋 Raw JSON or 📝 Structured Form → fill in missing fields → Save.';
+    document.getElementById('preflightMsg').innerHTML=msg;
     al.classList.remove('d-none');al.scrollIntoView({behavior:'smooth',block:'nearest'});return;
   }
   al.classList.add('d-none');
@@ -724,7 +743,15 @@ function checkSection2Stale(){
   );
 }
 
-function openReview(){
+async function openReview(){
+  // Pre-fetch all 10 section inputs in parallel so quality check has real data
+  await Promise.all(Array.from({length:10},(_,i)=>i+1).map(async n=>{
+    if(sectionInputDataMap[n])return; // already cached
+    try{
+      const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+n,{headers:H()});
+      if(res.ok){const d=await res.json();sectionInputDataMap[n]=d.input_json;}
+    }catch(e){}
+  }));
   renderReview();renderQualityReport();showView('viewReview');
 }
 
@@ -779,39 +806,102 @@ async function generateFromReview(secNo){
   finally{if(sp)sp.classList.add('d-none');}
 }
 
+// ── Red-team helpers ──────────────────────────────────────────────────────────
+function _extractFacts(obj,nums=[],strs=[]){
+  if(!obj||typeof obj!=='object')return{nums,strs};
+  for(const[k,v]of Object.entries(obj)){
+    if(typeof v==='number'&&v!==0&&isFinite(v))nums.push(v);
+    else if(typeof v==='string'&&v.trim().length>1&&v.length<120){
+      const t=v.trim();
+      if(!t.startsWith('To be generated')&&t!=='APPROVE/DECLINE'&&t!=='—')strs.push(t);
+    }else if(Array.isArray(v))v.forEach(item=>{if(typeof item==='object'&&item)_extractFacts(item,nums,strs);else if(typeof item==='string'&&item.length>1)strs.push(item);});
+    else if(typeof v==='object'&&v)_extractFacts(v,nums,strs);
+  }
+  return{nums,strs};
+}
+
+function redTeamCheck(secNo,inputData,markdown){
+  const issues=[];
+  if(!markdown)return issues;
+
+  // 1. Unfilled placeholders
+  if(/\[TBD\]|\[INSERT\]|\[PLACEHOLDER\]|\[FILL\]/i.test(markdown))
+    issues.push({sev:'danger',msg:'Unfilled placeholders detected in output — AI failed to generate content'});
+
+  // 2. Lorem ipsum
+  if(/lorem ipsum/i.test(markdown))
+    issues.push({sev:'danger',msg:'Lorem ipsum text found — output is placeholder, not real content'});
+
+  // 3. Very short output
+  if(markdown.length<200)
+    issues.push({sev:'danger',msg:`Output very short (${markdown.length} chars) — likely incomplete or generation failed`});
+
+  // 4. §2 staleness
+  if(secNo===2&&checkSection2Stale())
+    issues.push({sev:'warning',msg:'§2 Overall Comments is stale — regenerate after all other sections are finalised'});
+
+  if(!inputData)return issues;
+  const{nums,strs}=_extractFacts(inputData);
+
+  // 5. Key numeric grounding check
+  const critNums=nums.filter(n=>Math.abs(n)>=0.1);
+  if(critNums.length){
+    let ungrounded=0;
+    for(const n of critNums){
+      const fmts=[String(n),n.toFixed(1),n.toFixed(2),n.toLocaleString()];
+      if(!fmts.some(f=>markdown.includes(f)))ungrounded++;
+    }
+    const ungroundedPct=Math.round(ungrounded/critNums.length*100);
+    if(ungroundedPct>50)
+      issues.push({sev:'danger',msg:`${ungrounded}/${critNums.length} key numbers from input not found in output — high hallucination risk`});
+    else if(ungroundedPct>25)
+      issues.push({sev:'warning',msg:`${ungrounded}/${critNums.length} key numbers from input not referenced in output — verify content`});
+  }
+
+  // 6. Key named entity grounding (company/vessel names, legal terms)
+  const keyNames=strs.filter(s=>/^[A-Z]/.test(s)&&s.length>3&&!/^(USD|SGD|EUR|GBP|JPY|Clear|Passed|N\/A|Yes|No|True|False)$/.test(s));
+  if(keyNames.length>=2){
+    const missing=keyNames.slice(0,6).filter(name=>!markdown.includes(name));
+    if(missing.length>=3)
+      issues.push({sev:'warning',msg:`Key entities from input not found in output: "${missing.slice(0,3).join('", "')}" — possible hallucination or incorrect names`});
+  }
+
+  return issues;
+}
+
 function renderQualityReport(){
   const container=document.getElementById('qualityReport');
   const content=document.getElementById('qualityReportContent');
   if(!container||!content)return;
 
-  // Per-section completeness (we don't have the raw JSON for all sections here;
-  // we use the sectionInputMap to know if data was saved, and note that the 90%
-  // gate on save ensures saved data is ≥90% complete)
   let totalIssues=0;
   const rows=Array.from({length:10},(_,i)=>i+1).map(n=>{
     const inp=sectionInputMap[n];
     const out=sectionOutputMap[n];
     const hasInput=inp?.has_data;
     const hasOutput=out?.status==='done'&&out.markdown;
+    const inputData=sectionInputDataMap[n]||null;
 
-    // Quality checks on generated markdown
+    // Completeness check on cached input data
+    const{pct:compPct=null}=inputData?getCompleteness(n,inputData):{};
+
     const issues=[];
-    if(!hasInput)issues.push({sev:'danger',msg:'No analyst input data saved — output will be hallucinated'});
-    if(hasInput&&!hasOutput)issues.push({sev:'warning',msg:'Section not yet generated'});
-    if(hasOutput){
-      if(out.markdown.length<200)issues.push({sev:'danger',msg:'Generated content is very short (<200 chars) — likely incomplete'});
-      if(/\[TBD\]|\[INSERT\]|\[PLACEHOLDER\]|\[FILL\]/i.test(out.markdown))issues.push({sev:'danger',msg:'Placeholder text found in output — AI did not fill in content'});
-      if(/lorem ipsum/i.test(out.markdown))issues.push({sev:'danger',msg:'Lorem ipsum placeholder detected'});
-      if(n===2&&checkSection2Stale())issues.push({sev:'warning',msg:'§2 Overall Comments is stale — regenerate after all other sections are done'});
-    }
+    if(!hasInput)issues.push({sev:'danger',msg:'No analyst input data — section output will contain hallucinations'});
+    if(hasInput&&compPct!==null&&compPct<90)issues.push({sev:'danger',msg:`Input only ${compPct}% complete (need ≥90%) — re-save with all fields filled`});
+    if(hasInput&&!hasOutput)issues.push({sev:'warning',msg:'Input ready but section not yet generated'});
+    if(hasOutput)issues.push(...redTeamCheck(n,inputData,out.markdown));
     totalIssues+=issues.length;
 
-    const statusCls=issues.some(i=>i.sev==='danger')?'danger':issues.length?'warning':'success';
-    const statusLabel=issues.some(i=>i.sev==='danger')?'⚠ Issues':issues.length?'⚡ Review':'✓ OK';
+    const hasDanger=issues.some(i=>i.sev==='danger');
+    const statusCls=hasDanger?'danger':issues.length?'warning':'success';
+    const statusLabel=hasDanger?'⚠ Issues':issues.length?'⚡ Review':'✓ OK';
+    const compBadge=compPct===null?'<span class="text-muted small">—</span>'
+      :`<span class="badge ${compPct>=90?'bg-success':compPct>=70?'bg-warning text-dark':'bg-danger'}">${compPct}%</span>`;
     return `<tr>
       <td class="ps-2"><strong>§${n}</strong></td>
       <td class="small">${esc(SNAMES[n])}</td>
       <td class="text-center">${hasInput?'<span class="text-success fw-bold">✓</span>':'<span class="text-danger fw-bold">✗</span>'}</td>
+      <td class="text-center">${compBadge}</td>
       <td class="text-center">${hasOutput?'<span class="text-success fw-bold">✓</span>':'<span class="text-muted">—</span>'}</td>
       <td><span class="badge bg-${statusCls}">${statusLabel}</span>
         ${issues.map(i=>`<div class="small text-${i.sev==='danger'?'danger':'warning'} mt-1">⚠ ${i.msg}</div>`).join('')}
@@ -824,35 +914,39 @@ function renderQualityReport(){
   const outputDone=Object.values(sectionOutputMap).filter(v=>v.status==='done').length;
   const missingInputRate=Math.round((totalSections-inputReady)/totalSections*100);
   const missingOutputRate=Math.round((totalSections-outputDone)/totalSections*100);
+  const dangerCount=totalIssues; // already accumulated above
 
   content.innerHTML=`
     <div class="row g-3 mb-3">
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${inputReady===10?'#00703C':'#dc2626'}">${inputReady}/10</div>
         <div class="small text-muted">Sections with Input Data</div>
-        <div class="small ${inputReady===10?'text-success':'text-danger'}">Field missing rate: ${missingInputRate}%</div>
+        <div class="small ${inputReady===10?'text-success':'text-danger'}">欄位缺漏率 Field Missing Rate: ${missingInputRate}%</div>
       </div>
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${outputDone===10?'#00703C':'#f59e0b'}">${outputDone}/10</div>
         <div class="small text-muted">Sections Generated</div>
-        <div class="small ${outputDone===10?'text-success':'text-warning'}">Output missing rate: ${missingOutputRate}%</div>
+        <div class="small ${outputDone===10?'text-success':'text-warning'}">Output Missing Rate: ${missingOutputRate}%</div>
       </div>
       <div class="col-sm-4 text-center">
-        <div class="fw-bold" style="font-size:2rem;color:${totalIssues===0?'#00703C':'#dc2626'}">${totalIssues}</div>
-        <div class="small text-muted">Quality Issues Found</div>
-        <div class="small ${totalIssues===0?'text-success':'text-danger'}">${totalIssues===0?'No issues detected':'Requires attention'}</div>
+        <div class="fw-bold" style="font-size:2rem;color:${dangerCount===0?'#00703C':'#dc2626'}">${dangerCount}</div>
+        <div class="small text-muted">Red Team Issues Found</div>
+        <div class="small ${dangerCount===0?'text-success':'text-danger'}">${dangerCount===0?'No hallucinations detected':'Requires correction before export'}</div>
       </div>
     </div>
     <table class="table table-sm table-bordered mb-0">
       <thead class="table-light"><tr>
         <th class="ps-2" style="width:36px">§</th><th>Section</th>
-        <th class="text-center" style="width:60px">Input</th>
+        <th class="text-center" style="width:52px">Input</th>
+        <th class="text-center" style="width:60px">Complete</th>
         <th class="text-center" style="width:60px">Output</th>
-        <th>Quality Check</th>
+        <th>Red Team Check</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    ${totalIssues>0?`<div class="alert alert-warning mt-3 mb-0 small"><strong>⚠ Red Team Review:</strong> ${totalIssues} issue(s) detected above. Address all <span class="text-danger">danger</span> items — re-save input data or regenerate affected sections. Sections flagged as missing or placeholder-heavy will contain hallucinated content.</div>`:'<div class="alert alert-success mt-3 mb-0 small">✓ No quality issues detected. All sections are ready for export.</div>'}
+    ${dangerCount>0
+      ?`<div class="alert alert-danger mt-3 mb-0 small"><strong>⚠ Red Team Review — Action Required:</strong> ${dangerCount} issue(s) found. Fix all <strong>danger</strong> items before export: correct input data, regenerate affected sections, and verify numbers/names in generated output match the input JSON.</div>`
+      :'<div class="alert alert-success mt-3 mb-0 small"><strong>✓ Red Team Review Passed</strong> — No hallucinations, placeholder text, or grounding errors detected. Report is ready for export.</div>'}
   `;
   container.style.display='block';
 }
@@ -923,14 +1017,19 @@ async function exportDocx(){
       toast('DOCX downloaded ✓ (server-generated)','success');
       return;
     }
-    const errBody=await res.json().catch(()=>({}));
-    // 503 = python-docx not on server → try client-side fallback
-    if(res.status!==503)throw new Error(errBody.detail||`Server error ${res.status}`);
-    console.warn('Backend DOCX unavailable — using client-side fallback');
+    // 503 = python-docx not on server → use client-side fallback
+    if(res.status===503){
+      console.warn('Backend DOCX unavailable (503) — using client-side fallback');
+    } else {
+      const errBody=await res.json().catch(()=>({}));
+      throw new Error(errBody.detail||`Server error ${res.status}`);
+    }
   }catch(err){
-    if(!String(err).includes('503')&&!String(err).includes('fetch')){
+    if(!(err instanceof TypeError)&&!String(err.message).startsWith('Server error 503')){
+      // Real error (not network failure or 503) — stop here
       toast('DOCX export failed: '+err.message,'danger');sp.classList.add('d-none');return;
     }
+    console.warn('Backend unreachable — trying client-side DOCX fallback');
   }
 
   // ── Fallback: html-docx-js (loaded via CDN script tag) ───────────────────
