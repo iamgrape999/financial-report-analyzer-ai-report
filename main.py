@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from credit_report import router as credit_report_router
-from credit_report.config import AUTO_CREATE_TABLES, parse_cors_origins, validate_runtime_security
 from credit_report.database import AsyncSessionLocal, Base, engine
 
 # Import all models so Base.metadata knows about every table
@@ -46,10 +47,8 @@ async def _seed_admin() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    validate_runtime_security()
-    if AUTO_CREATE_TABLES:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     await _seed_admin()
     yield
 
@@ -61,17 +60,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-cors_origins = parse_cors_origins()
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials="*" not in cors_origins,
+    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*").split(","),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(credit_report_router)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/app")
+
+
+@app.get("/app", include_in_schema=False)
+async def ui():
+    return FileResponse("static/index.html")
 
 
 @app.get("/health", tags=["health"])

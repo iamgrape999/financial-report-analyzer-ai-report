@@ -1,5 +1,4 @@
-"""
-Convert Markdown section output into Block AST (ReportBlock + TableCell records).
+"""Convert Markdown section output into Block AST (ReportBlock + TableCell records).
 
 Called after Stage 1 (Claude → Markdown) to produce the editable Block AST layer.
 Numeric values in table cells are matched against CanonicalFacts by value (±0.5% tolerance).
@@ -20,8 +19,7 @@ _NUMERIC_RE = re.compile(r"(?<![A-Za-z%])([\d]{1,3}(?:,\d{3})*(?:\.\d+)?|\d+\.\d
 
 CHART_PLACEHOLDER_RE = re.compile(
     r"\[(?:Org Chart|Share Price Chart|Alliance Chart|Debt Maturity Chart|"
-    r"System-generated ESG rating image|Group Limit chart|"
-    r"[^\]]*(?:Chart|Image|Figure|Graph)[^\]]*)\]",
+    r"System-generated ESG rating image|Group Limit chart|[^\]]*(?:Chart|Image|Figure|Graph|Chart)[^\]]*)\]",
     re.IGNORECASE,
 )
 
