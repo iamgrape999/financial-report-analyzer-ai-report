@@ -235,7 +235,10 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <button class="btn btn-sm btn-outline-dark" onclick="exportReport()">📄 HTML</button>
       <button class="btn btn-sm btn-outline-dark" onclick="exportMarkdown()">⬇ .md</button>
       <button class="btn btn-sm btn-outline-dark" onclick="exportTxt()">📃 TXT</button>
-      <button class="btn btn-sm" style="background:#00703C;color:#fff" onclick="exportPdf()">🖨 PDF</button>
+      <button class="btn btn-sm btn-outline-dark" onclick="exportPdf()">🖨 PDF</button>
+      <button class="btn btn-sm fw-semibold" style="background:#00703C;color:#fff" onclick="exportDocx()">
+        <span id="docxSpin" class="spinner-border spinner-sm d-none me-1"></span>📝 DOCX
+      </button>
     </div>
   </div>
 
@@ -283,6 +286,8 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- html-docx-js: client-side DOCX fallback (~50 KB) -->
+<script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
 <script>
 const API='/api/credit-report';
 let token=localStorage.getItem('token');
@@ -899,6 +904,74 @@ function exportMarkdown(){
   if(!outs.length){toast('No generated sections to export','warning');return;}
   dlBlob(outs.map(o=>`# Section ${o.section_no} — ${SNAMES[o.section_no]}\n\n${o.markdown}`).join('\n\n---\n\n'),'credit_report.md','text/markdown');
 }
+// ── DOCX export — backend primary, html-docx-js CDN fallback ─────────────────
+async function exportDocx(){
+  if(!currentRid){toast('No report loaded','warning');return;}
+  const sp=document.getElementById('docxSpin');sp.classList.remove('d-none');
+  toast('Generating DOCX…','info');
+  try{
+    // ── Primary: backend python-docx endpoint ─────────────────────────────
+    const res=await fetch(API+'/reports/'+currentRid+'/export/docx',{headers:H()});
+    if(res.ok){
+      const blob=await res.blob();
+      const cd=res.headers.get('Content-Disposition')||'';
+      const fname=(cd.match(/filename="([^"]+)"/)||[])[1]||'credit_report.docx';
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);a.download=fname;
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);URL.revokeObjectURL(a.href);
+      toast('DOCX downloaded ✓ (server-generated)','success');
+      return;
+    }
+    const errBody=await res.json().catch(()=>({}));
+    // 503 = python-docx not on server → try client-side fallback
+    if(res.status!==503)throw new Error(errBody.detail||`Server error ${res.status}`);
+    console.warn('Backend DOCX unavailable — using client-side fallback');
+  }catch(err){
+    if(!String(err).includes('503')&&!String(err).includes('fetch')){
+      toast('DOCX export failed: '+err.message,'danger');sp.classList.add('d-none');return;
+    }
+  }
+
+  // ── Fallback: html-docx-js (loaded via CDN script tag) ───────────────────
+  try{
+    if(typeof htmlDocx==='undefined'){
+      toast('Client-side DOCX library not loaded yet — try again in a moment','warning');
+      sp.classList.add('d-none');return;
+    }
+    const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+    if(!outs.length){toast('No generated sections to export','warning');sp.classList.add('d-none');return;}
+
+    const body=outs.map(o=>`
+      <h1 style="color:#00703C;border-bottom:2px solid #00703C;padding-bottom:6px;">
+        §${o.section_no} — ${esc(SNAMES[o.section_no])}
+      </h1>
+      ${marked.parse(o.markdown)}
+    `).join('<hr style="border-top:1px dashed #ccc;margin:24px 0;">');
+
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+      <style>
+        body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.6;color:#1a1a1a;}
+        table{border-collapse:collapse;width:100%;margin:8pt 0;font-size:10pt;}
+        th,td{border:1px solid #999;padding:4pt 8pt;}
+        th{background:#e8f5ee;font-weight:bold;}
+        h1{font-size:14pt;color:#00703C;}
+        h2{font-size:12pt;border-bottom:1px solid #b2dfce;padding-bottom:3pt;}
+        h3{font-size:11pt;color:#00703C;}
+        ul{margin:4pt 0;}li{margin:2pt 0;}
+      </style>
+    </head><body>${body}</body></html>`;
+
+    const blob=htmlDocx.asBlob(html,{orientation:'portrait',margins:{top:720,right:720,bottom:720,left:1080}});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);a.download='credit_report.docx';
+    document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(a.href);
+    toast('DOCX downloaded ✓ (client-side fallback)','success');
+  }catch(e){toast('DOCX fallback failed: '+e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
 function stripMarkdown(md){
   return md
     .replace(/#{1,6}\s+/g,'')

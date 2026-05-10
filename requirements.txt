@@ -25,3 +25,4 @@ passlib>=1.7
 jsonpath-ng
 pyyaml
 pytest-asyncio
+python-docx>=1.1.0
