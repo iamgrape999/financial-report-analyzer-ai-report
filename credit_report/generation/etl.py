@@ -528,18 +528,96 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
   }
 }""",
 
-    10: """Section 10 — Appendix:
-{group_exposure_table[{entity, facility_type, limit_usd_m, outstanding_usd_m,
-  msr_rating, collateral, expiry}],
-fleet_growth_targets[{year, owned_teu, managed_teu, total_teu}],
-dscr_projections_base[{year, period, revenue, opex, ebitda, depreciation,
-  interest, principal, debt_service, dscr, outstanding_balance}],
-dscr_projections_worse[{year, period, revenue, opex, ebitda, depreciation,
-  interest, principal, debt_service, dscr, outstanding_balance}],
-sensitivity_analysis[{scenario, charter_rate_usd_day, min_dscr, conclusion}],
-loan_repayment_schedule[{period, principal, interest, total, balance}],
-blocking_data_gaps[{section, field, gap_description, data_source_needed}],
-market_overview, references[]}""",
+    10: """Section 10 — Appendix (3 input blocks):
+{
+  "10A_group_exposure": {
+    "entity_group": "Group name (e.g. EMC/EMA/EVA Group)",
+    "group_limit_usd_m": 0.0,
+    "currency": "USD",
+    "unit": "millions",
+    "as_of_date": "MMM YYYY",
+    "rows": [
+      {
+        "entity": "Legal entity name",
+        "branch": "SG | TW | HK | etc.",
+        "facility_type": "Term Loan (SLL) | RCF | etc.",
+        "current_approved_usd_m": 0.0,
+        "proposed_usd_m": 0.0,
+        "outstanding_usd_m": 0.0,
+        "collateral": "RG + Vessel Mortgage | Clean | etc.",
+        "guarantor": "EMC | None | etc.",
+        "maturity_str": "Dec 2034E",
+        "msr": "MSR3 | —",
+        "is_new_facility": false,
+        "subtotal_type": null
+      }
+    ],
+    "group_limit_sub_table": {
+      "approved_group_limit_usd_m": 0.0,
+      "proposed_total_exposure_usd_m": 0.0,
+      "utilization_pct": 0.0,
+      "headroom_usd_m": 0.0
+    },
+    "eva_note": null
+  },
+  "10B_fleet_growth": {
+    "group_name": "EMC",
+    "year_range": "2023-2028E",
+    "rows": [
+      {
+        "year_label": "2023",
+        "owned_fleet_teu_m": 0.0,
+        "total_fleet_teu_m": 0.0,
+        "total_vessels": 0,
+        "owned_pct": 0.0
+      }
+    ],
+    "cagr_pct": 0.0,
+    "chart_reference": "EMC Fleet Capacity Growth Chart — Source: [Source] [Date] / EMC Investor Presentation",
+    "key_notes": [
+      "Target capacity: [X] TEU by [year]",
+      "Owned fleet transition: X% → Y% — reducing charter reliance",
+      "Newbuild delivery: [X] vessels; orderbook [Y] vessels (Source: [Z])",
+      "CUB-financed vessel: [X] TEU, Hull No. [Y], delivery [date]",
+      "EMC CAPEX plan: USD[X]m; EMA capital commitment: USD[Y]m (as of [date])"
+    ]
+  },
+  "10C_projections": {
+    "entity_name": "EMA Standalone",
+    "basis": "Standalone",
+    "currency": "USD",
+    "unit": "USD'000",
+    "key_assumptions": [
+      {"assumption": "Charter rate (USD/day)", "FY2026E": 28000, "FY2027E": 28500}
+    ],
+    "assumptions_narrative": "Revenue growth assumes [basis]. COGS reflects [basis]. CAPEX per [basis].",
+    "base_case_pl": [
+      {"item": "Revenue", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Cost of Goods Sold", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Gross Profit", "FY2026E": 0, "FY2027E": 0, "is_subtotal": true}
+    ],
+    "base_case_bs": [
+      {"item": "Cash & Equivalents", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Total Current Assets", "FY2026E": 0, "FY2027E": 0, "is_subtotal": true}
+    ],
+    "base_case_cf": [
+      {"item": "Operating Cash Flow", "FY2026E": 0, "FY2027E": 0, "is_subtotal": false},
+      {"item": "Closing Cash", "FY2026E": 0, "FY2027E": 0, "is_subtotal": true}
+    ],
+    "base_case_dscr": [
+      {"year_label": "FY2026E", "ocf": 0, "debt_service": 0, "dscr": 0.0}
+    ],
+    "dscr_commentary": "DSCR remains above [X]x throughout. Minimum DSCR of [X]x occurs in [years].",
+    "stress_assumptions": [
+      {"assumption": "Revenue", "base_case": "[X]", "worse_case": "[Y]", "stress_magnitude": "-20%"}
+    ],
+    "worse_case_summary": [
+      {"item": "Revenue", "value": 0, "is_dscr": false},
+      {"item": "DSCR", "value": 0.0, "is_dscr": true}
+    ],
+    "worse_case_commentary": "Under Worse Case, DSCR declines to minimum [X]x in [year] but remains above 1.0x..."
+  }
+}""",
 }
 
 
