@@ -32,7 +32,7 @@ def upgrade() -> None:
     sa.Column('input_fact_ids', sa.Text(), nullable=True),
     sa.Column('is_stale', sa.Boolean(), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
@@ -45,7 +45,7 @@ def upgrade() -> None:
     sa.Column('rate', sa.Float(), nullable=False),
     sa.Column('rate_date', sa.String(length=20), nullable=False),
     sa.Column('source', sa.String(length=50), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('is_stale', sa.Boolean(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
@@ -58,7 +58,7 @@ def upgrade() -> None:
     sa.Column('category', sa.String(length=50), nullable=True),
     sa.Column('approved_by', sa.String(length=36), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('approved_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
@@ -77,7 +77,7 @@ def upgrade() -> None:
     sa.Column('is_stale', sa.Boolean(), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('last_edited_by', sa.String(length=36), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
@@ -89,7 +89,7 @@ def upgrade() -> None:
     sa.Column('content', sa.Text(), nullable=True),
     sa.Column('edited_by', sa.String(length=36), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.ForeignKeyConstraint(['block_id'], ['report_blocks.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -117,7 +117,7 @@ def upgrade() -> None:
     sa.Column('sample_value', sa.Float(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('mapping_rule_id', sa.String(length=36), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.ForeignKeyConstraint(['mapping_rule_id'], ['mapping_rules.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

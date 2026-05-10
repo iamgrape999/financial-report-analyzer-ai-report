@@ -29,7 +29,7 @@ def upgrade() -> None:
         sa.Column(
             "uploaded_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("(CURRENT_TIMESTAMP)"),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
             nullable=False,
         ),
         sa.Column("is_deleted", sa.Boolean(), nullable=False),

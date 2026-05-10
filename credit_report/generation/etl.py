@@ -453,25 +453,80 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
   "fx_exposure": null, "off_balance_sheet": null, "accounting_notes": null
 }""",
 
-    8: """Section 8 — Changes in Engaged Banks / ACRA Charges:
-{acra_search{entity_name, uen, search_date, total_charges},
-charges[{charge_no, chargee, charge_date, amount, property_charged, status}],
-engaged_banks[{bank, facility_type, committed_usd_m, outstanding_usd_m, since_year}],
-banking_pattern_assessment,
-credit_exposure_concentration,
-new_facility_impact}""",
+    8: """Section 8 — ACRA Banking Charges:
+{
+  "8A_acra_banking_charges": {
+    "section_applicability": "internal_only | not_applicable",
+    "acra_data_available": true,
+    "jurisdiction": "Singapore",
+    "search_date": "DD MMM YYYY",
+    "entity_name": "Full legal entity name",
+    "uen": "ACRA UEN",
+    "charges": [
+      {
+        "no": 1,
+        "chargee": "Full bank/lender name",
+        "date_of_registration": "DD MMM YYYY",
+        "date_of_charge": "DD MMM YYYY",
+        "amount_usd_m": 0.0,
+        "currency": "USD | SGD | other",
+        "property_charged": "Description of charged property (include CUB annotation if is_cub_charge)",
+        "status": "Registered | Satisfied (DD MMM YYYY)",
+        "is_cub_charge": false,
+        "cub_facility_ref": null
+      }
+    ],
+    "summary": {
+      "total_charges": 0,
+      "active_charges": 0,
+      "satisfied_charges": 0,
+      "total_active_usd_m": 0.0,
+      "cub_charge_count": 0,
+      "cub_total_usd_m": 0.0,
+      "unique_chargees": [],
+      "distinct_banking_groups": 0
+    }
+  },
+  "8B_other_information": "RESERVED — skip entirely"
+}""",
 
-    9: """Section 9 — Credit Analysis Checklist:
-{checklist[{category, item, status, remarks}],
-formal_recommendation,
-approval_authority,
-conditions_precedent[{cp_no, description, status}],
-covenants[{type, description, threshold, frequency}],
-acr_covenant{threshold_pct, test_frequency, cure_period_days},
-listing_requirement, insurance_requirement,
-negative_pledge (bool), change_of_control_clause (bool),
-information_undertakings[],
-signoff_date, signoff_officer}""",
+    9: """Section 9 — Credit Analysis Checklist & Recommendation:
+{
+  "9A_checklist": [
+    {
+      "no": 1,
+      "category": "KYC & Compliance | Sanctions & AML | Credit Risk | Financial | Collateral | Legal & Documentation | ESG & Environmental | Regulatory (MAS)",
+      "item": "Checklist item description",
+      "response": "Yes | No* | N/A",
+      "remarks": "Specific figures, names, dates required (e.g. MSR level, DSCR, valuer+date, §33-3 amount)"
+    }
+  ],
+  "9B_conditions_covenants": {
+    "conditions_precedent": [
+      {"no": 1, "description": "CP description", "testing": "Before first drawdown | Before vessel delivery"}
+    ],
+    "ongoing_covenants": [
+      {"description": "Covenant description", "threshold": "e.g. ACR >= 100%", "testing": "Every 2 years | Semi-annual | Annual | Ongoing"}
+    ],
+    "financial_covenants": "NIL | description if applicable"
+  },
+  "9C_recommendation": {
+    "decision": "APPROVE | APPROVE WITH CONDITIONS | DECLINE",
+    "facility_amount_usd_m": 0.0,
+    "tenor_years": 0,
+    "security_structure": "brief description",
+    "key_conditions": ["condition 1", "condition 2"],
+    "balloon_ltv_pct": null,
+    "balloon_ltv_cap_pct": null,
+    "risk_level_changes_from_prior": "None | Improved | Deteriorated — reason"
+  },
+  "9D_signoff": {
+    "date": "DD MMM YYYY",
+    "prepared_by": "Name, Title",
+    "reviewed_by": "Name, Title",
+    "department": "Credit Management Department, CUB SG Branch"
+  }
+}""",
 
     10: """Section 10 — Appendix:
 {group_exposure_table[{entity, facility_type, limit_usd_m, outstanding_usd_m,
