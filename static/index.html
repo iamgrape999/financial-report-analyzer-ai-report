@@ -41,6 +41,12 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 .review-section-card{margin-bottom:2.5rem;scroll-margin-top:60px;}
 .review-section-card .card-header{font-size:1rem;font-weight:700;background:#00703C;color:#fff;}
 .sec2-stale{background:#fffbeb;border:1px solid #f59e0b;border-radius:10px;padding:12px 16px;margin:12px 16px;}
+/* Field completeness */
+.field-check-list{font-size:12px;line-height:1.6;}
+.field-filled{color:#16a34a;}
+.field-missing{color:#dc2626;margin-bottom:2px;}
+.completeness-bar{height:8px;border-radius:4px;background:#e5e7eb;overflow:hidden;margin:4px 0 8px;}
+#completenessPanel{background:#fafafa;border-radius:8px;}
 /* Bootstrap color overrides — Cathay green replaces Bootstrap blue */
 .btn-primary{background-color:#00703C!important;border-color:#00703C!important;color:#fff!important;}
 .btn-primary:hover,.btn-primary:focus,.btn-primary:active{background-color:#005a30!important;border-color:#005a30!important;}
@@ -176,7 +182,8 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <button class="btn btn-sm btn-outline-secondary" onclick="closePanel()">×</button>
     </div>
     <ul class="nav nav-tabs px-3 pt-2" id="panelTabs">
-      <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('input');return false">✏ Input Data</a></li>
+      <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('input');return false">📋 Raw JSON</a></li>
+      <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('form');return false">📝 Structured Form</a></li>
       <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('output');return false">📄 Generated Output</a></li>
     </ul>
 
@@ -191,6 +198,18 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <button class="btn btn-primary btn-sm" onclick="saveSectionInput()">💾 Save Input</button>
         <span id="savedAt" class="text-muted small"></span>
       </div>
+      <!-- Field completeness checklist -->
+      <div id="completenessPanel" class="mt-3 p-3 border" style="display:none;"></div>
+    </div>
+
+    <!-- Structured Form tab -->
+    <div id="tabForm" class="p-3" style="display:none">
+      <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+        <button class="btn btn-primary btn-sm" onclick="saveFormInput()">💾 Save Form</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="syncFormToJson()">↔ Sync to JSON</button>
+        <small class="text-muted">Fill in each field below and click Save. ✗ fields are required for 90% completeness.</small>
+      </div>
+      <div id="formFields" class="row g-2"></div>
     </div>
 
     <!-- Output tab -->
@@ -212,9 +231,11 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <button class="btn btn-outline-secondary btn-sm" onclick="showView('viewReport')">← Back</button>
     <strong class="me-2 small">Jump to:</strong>
     <div id="reviewNav" class="d-flex gap-1 flex-wrap"></div>
-    <div class="ms-auto d-flex gap-2">
-      <button class="btn btn-sm btn-outline-dark" onclick="exportReport()">📄 Export HTML</button>
+    <div class="ms-auto d-flex gap-2 flex-wrap">
+      <button class="btn btn-sm btn-outline-dark" onclick="exportReport()">📄 HTML</button>
       <button class="btn btn-sm btn-outline-dark" onclick="exportMarkdown()">⬇ .md</button>
+      <button class="btn btn-sm btn-outline-dark" onclick="exportTxt()">📃 TXT</button>
+      <button class="btn btn-sm" style="background:#00703C;color:#fff" onclick="exportPdf()">🖨 PDF</button>
     </div>
   </div>
 
@@ -225,6 +246,13 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <span id="regenSpin" class="spinner-border spinner-sm d-none ms-2"></span>
   </div>
 
+  <!-- Field completeness & quality report -->
+  <div id="qualityReport" class="container pt-3" style="max-width:960px;display:none;">
+    <div class="card mb-3">
+      <div class="card-header py-2" style="background:#1a1a1a;color:#fff;font-weight:700;">📊 Report Field Completeness &amp; Quality Check</div>
+      <div class="card-body" id="qualityReportContent"></div>
+    </div>
+  </div>
   <div id="reviewContent" class="container py-3" style="max-width:960px;"></div>
 </div>
 
@@ -280,6 +308,150 @@ const TEMPLATES={
   9:{kyc:{completed:true,date:"2024-01-15"},aml:{cleared:true},sanctions:{ofac:"Clear",eu:"Clear",mas:"Clear",un:"Clear"},pep:"Not PEP",environmental:{eexi:"B",cii:"B"},banking_act_s33_3:"Within limit — 15% of capital",kyc_docs:["Certificate of Incorporation","Audited accounts x3","Board resolution"]},
   10:{dscr_projections:[{year:1,revenue_usd_m:15,opex_usd_m:6,ebitda_usd_m:9,debt_service_usd_m:7,dscr:1.29},{year:2,revenue_usd_m:16,opex_usd_m:6.2,ebitda_usd_m:9.8,debt_service_usd_m:7,dscr:1.40},{year:3,revenue_usd_m:16.5,opex_usd_m:6.5,ebitda_usd_m:10,debt_service_usd_m:7,dscr:1.43},{year:4,revenue_usd_m:17,opex_usd_m:6.8,ebitda_usd_m:10.2,debt_service_usd_m:7,dscr:1.46},{year:5,revenue_usd_m:17,opex_usd_m:7,ebitda_usd_m:10,debt_service_usd_m:7,dscr:1.43}],fleet_table:[{vessel:"MV Newbuild 1",type:"Bulk Carrier",dwt:64000}]}
 };
+
+// ── Required fields per section (for completeness check) ─────────────────────
+const REQUIRED_FIELDS={
+  1:[{p:'borrower',l:'Borrower Name'},{p:'facility_type',l:'Facility Type'},{p:'facility_amount_usd_m',l:'Facility Amount (USD M)'},{p:'tenor_years',l:'Tenor (years)'},{p:'purpose',l:'Purpose of Facility'},{p:'repayment',l:'Repayment Schedule'},{p:'interest_rate',l:'Interest Rate / Margin'},{p:'collateral',l:'Collateral Package'},{p:'guarantors',l:'Guarantors'},{p:'governing_law',l:'Governing Law'}],
+  2:[{p:'executive_summary',l:'Executive Summary'},{p:'key_positives',l:'Key Positives / Strengths'},{p:'key_risks',l:'Key Risks'},{p:'recommendation',l:'Credit Recommendation (Approve / Decline)'},{p:'dscr_minimum',l:'Minimum DSCR'},{p:'ltc_percent',l:'LTC (%)'}],
+  3:[{p:'internal_rating',l:'Internal Credit Rating'},{p:'pd_assessment',l:'PD Assessment Level'},{p:'mas_612_applicable',l:'MAS 612 Applicable'},{p:'esg_screening',l:'ESG Screening Result'},{p:'sanctions_ofac',l:'OFAC Sanctions Status'},{p:'sanctions_eu',l:'EU Sanctions Status'},{p:'sanctions_mas',l:'MAS Sanctions Status'},{p:'key_risks',l:'Key Risks Identified'},{p:'mitigants',l:'Risk Mitigants'}],
+  4:[{p:'company_name',l:'Company / Borrower Name'},{p:'incorporation_year',l:'Year of Incorporation'},{p:'country',l:'Country of Incorporation'},{p:'shareholders',l:'Shareholder Structure'},{p:'fleet',l:'Fleet Overview'},{p:'key_management',l:'Key Management Team'},{p:'annual_revenue_usd_m',l:'Annual Revenue (USD M)'}],
+  5:[{p:'collateral_type',l:'Collateral Type'},{p:'vessel_valuations',l:'Vessel Market Valuations'},{p:'ltc_percent',l:'LTC (%)'},{p:'acr_percent',l:'ACR (%)'},{p:'ltv_at_maturity_percent',l:'LTV at Maturity (%)'},{p:'refund_guarantee',l:'Refund Guarantee Details'}],
+  6:[{p:'vessel_name',l:'Vessel Name'},{p:'vessel_type',l:'Vessel Type'},{p:'dwt',l:'Deadweight Tonnage (DWT)'},{p:'shipyard',l:'Shipyard Name'},{p:'country',l:'Shipyard Country'},{p:'contract_price_usd_m',l:'Contract Price (USD M)'},{p:'delivery_date',l:'Expected Delivery Date'},{p:'milestones',l:'Construction Milestone Schedule'},{p:'employment',l:'Vessel Employment / Charter'}],
+  7:[{p:'currency',l:'Reporting Currency'},{p:'unit',l:'Unit (millions / thousands)'},{p:'income_statement',l:'Income Statement (3-yr historical)'},{p:'balance_sheet_fy2024',l:'Balance Sheet (latest year)'},{p:'key_ratios',l:'Key Financial Ratios'}],
+  8:[{p:'security_package',l:'Security / Charge Package'},{p:'other_lenders',l:'Other Lenders / Existing Facilities'},{p:'legal_counsel',l:'Legal Counsel'},{p:'governing_law',l:'Governing Law'}],
+  9:[{p:'kyc',l:'KYC Status'},{p:'aml',l:'AML Clearance'},{p:'sanctions',l:'Sanctions Screening Results'},{p:'pep',l:'PEP Status'},{p:'environmental',l:'EEXI / CII Environmental Rating'},{p:'banking_act_s33_3',l:'Banking Act s33(3) Compliance'},{p:'kyc_docs',l:'KYC Documents Checklist'}],
+  10:[{p:'dscr_projections',l:'5-Year DSCR Projections'},{p:'fleet_table',l:'Fleet Summary Table'}],
+};
+
+function isFieldFilled(data,path){
+  const v=data[path];
+  if(v===null||v===undefined)return false;
+  if(typeof v==='string'){const t=v.trim();return t!==''&&!t.startsWith('To be generated from')&&t!=='APPROVE/DECLINE';}
+  if(Array.isArray(v))return v.length>0;
+  if(typeof v==='object')return Object.keys(v).length>0;
+  return true;
+}
+
+function getCompleteness(secNo,data){
+  const fields=REQUIRED_FIELDS[secNo]||[];
+  if(!fields.length)return{filled:0,total:0,pct:100,missing:[]};
+  const missing=[];let filled=0;
+  for(const f of fields){if(isFieldFilled(data,f.p))filled++;else missing.push(f);}
+  return{filled,total:fields.length,pct:Math.round(filled/fields.length*100),missing};
+}
+
+function renderCompleteness(secNo,data){
+  const panel=document.getElementById('completenessPanel');if(!panel)return;
+  if(!data||typeof data!=='object'||Object.keys(data).length===0){panel.style.display='none';return;}
+  const{filled,total,pct,missing}=getCompleteness(secNo,data);
+  const allFields=REQUIRED_FIELDS[secNo]||[];if(!allFields.length){panel.style.display='none';return;}
+  const barColor=pct>=90?'#00703C':pct>=70?'#f59e0b':'#dc2626';
+  const badgeCls=pct>=90?'bg-success':pct>=70?'bg-warning text-dark':'bg-danger';
+  panel.style.display='block';
+  panel.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-1">
+    <strong style="font-size:12px">欄位完整度 Field Completeness: ${filled}/${total} (${pct}%)</strong>
+    <span class="badge ${badgeCls}">${pct>=90?'✓ Ready to Generate':pct+'% — Need ≥90%'}</span>
+  </div>
+  <div class="completeness-bar"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width .3s;"></div></div>
+  <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(data,f.p);
+    return`<div class="${ok?'field-filled':'field-missing'}">${ok?'✓':'✗'} ${f.l}${!ok?' <span class="text-muted fst-italic small"> — 資料源缺漏，待補 (Data source missing, pending upload)</span>':''}</div>`;
+  }).join('')}</div>`;
+}
+
+// ── Structured form field definitions per section ─────────────────────────────
+const FIELD_DEFS={
+  1:[{p:'borrower',l:'Borrower Name',t:'text'},{p:'facility_type',l:'Facility Type',t:'text',h:'e.g. Pre-delivery Term Loan'},{p:'facility_amount_usd_m',l:'Facility Amount (USD M)',t:'number'},{p:'tenor_years',l:'Tenor (years)',t:'number'},{p:'purpose',l:'Purpose',t:'textarea'},{p:'repayment',l:'Repayment Schedule',t:'text'},{p:'interest_rate',l:'Interest Rate / Margin',t:'text',h:'e.g. SOFR + 2.50%'},{p:'collateral',l:'Collateral Package (one per line)',t:'lines'},{p:'guarantors',l:'Guarantors (one per line)',t:'lines'},{p:'governing_law',l:'Governing Law',t:'text'}],
+  2:[{p:'executive_summary',l:'Executive Summary',t:'textarea'},{p:'key_positives',l:'Key Positives (one per line)',t:'lines'},{p:'key_risks',l:'Key Risks (one per line)',t:'lines'},{p:'recommendation',l:'Credit Recommendation',t:'select',opts:['APPROVE','DECLINE','CONDITIONAL APPROVE']},{p:'dscr_minimum',l:'Minimum DSCR',t:'number'},{p:'ltc_percent',l:'LTC (%)',t:'number'}],
+  3:[{p:'internal_rating',l:'Internal Credit Rating',t:'text',h:'e.g. BB+'},{p:'pd_assessment',l:'PD Assessment',t:'select',opts:['Low','Low-Medium','Medium','Medium-High','High']},{p:'mas_612_applicable',l:'MAS 612 Applicable',t:'bool'},{p:'esg_screening',l:'ESG Screening',t:'select',opts:['Passed','Failed','Conditional','N/A']},{p:'sanctions_ofac',l:'OFAC Sanctions',t:'select',opts:['Clear','Hit','N/A']},{p:'sanctions_eu',l:'EU Sanctions',t:'select',opts:['Clear','Hit','N/A']},{p:'sanctions_mas',l:'MAS Sanctions',t:'select',opts:['Clear','Hit','N/A']},{p:'key_risks',l:'Key Risks (one per line)',t:'lines'},{p:'mitigants',l:'Risk Mitigants (one per line)',t:'lines'}],
+  4:[{p:'company_name',l:'Company Name',t:'text'},{p:'incorporation_year',l:'Incorporation Year',t:'number'},{p:'country',l:'Country',t:'text'},{p:'shareholders',l:'Shareholders (JSON array)',t:'json',h:'[{"name":"Holding Co","stake_percent":100}]'},{p:'fleet',l:'Fleet Info (JSON)',t:'json',h:'{"owned_vessels":5,"vessel_types":["Bulk Carrier"],"total_dwt":320000}'},{p:'key_management',l:'Key Management (JSON array)',t:'json',h:'[{"name":"CEO Name","title":"CEO","years":20}]'},{p:'annual_revenue_usd_m',l:'Annual Revenue (USD M)',t:'number'}],
+  5:[{p:'collateral_type',l:'Collateral Type',t:'text'},{p:'vessel_valuations',l:'Vessel Valuations (JSON array)',t:'json',h:'[{"vessel":"MV Name","dwt":64000,"market_value_usd_m":30,"valuer":"Clarkson"}]'},{p:'ltc_percent',l:'LTC (%)',t:'number'},{p:'acr_percent',l:'ACR (%)',t:'number'},{p:'ltv_at_maturity_percent',l:'LTV at Maturity (%)',t:'number'},{p:'refund_guarantee',l:'Refund Guarantee (JSON)',t:'json',h:'{"bank":"Bank Name","amount_usd_m":50}'}],
+  6:[{p:'vessel_name',l:'Vessel Name',t:'text'},{p:'vessel_type',l:'Vessel Type',t:'select',opts:['Bulk Carrier','Tanker','Container','LNG Carrier','VLCC','Capesize','Panamax','Supramax','Handysize','Other']},{p:'dwt',l:'DWT (tons)',t:'number'},{p:'shipyard',l:'Shipyard Name',t:'text'},{p:'country',l:'Shipyard Country',t:'text'},{p:'contract_price_usd_m',l:'Contract Price (USD M)',t:'number'},{p:'delivery_date',l:'Delivery Date',t:'text',h:'e.g. 2026-Q2'},{p:'milestones',l:'Milestones (JSON array)',t:'json',h:'[{"name":"Keel laying","date":"2025-Q1","pct":20}]'},{p:'employment',l:'Charter / Employment',t:'textarea'}],
+  7:[{p:'currency',l:'Currency',t:'select',opts:['USD','SGD','HKD','EUR','GBP','JPY','Other']},{p:'unit',l:'Unit',t:'select',opts:['millions','thousands','actual']},{p:'income_statement',l:'Income Statement 3-yr (JSON)',t:'json',h:'{"FY2022":{"revenue":120,"ebitda":40,"net_income":20,"interest_expense":8}}'},{p:'balance_sheet_fy2024',l:'Balance Sheet Latest Year (JSON)',t:'json',h:'{"total_assets":300,"cash":20,"total_debt":150,"equity":100}'},{p:'key_ratios',l:'Key Ratios (JSON)',t:'json',h:'{"dscr_fy2024":1.45,"debt_equity":1.5,"current_ratio":1.2}'}],
+  8:[{p:'security_package',l:'Security Package (one per line)',t:'lines'},{p:'other_lenders',l:'Other Lenders (JSON array)',t:'json',h:'[{"bank":"Bank","amount_usd_m":20,"maturity":"2025-12"}]'},{p:'legal_counsel',l:'Legal Counsel',t:'text'},{p:'governing_law',l:'Governing Law',t:'text'}],
+  9:[{p:'kyc',l:'KYC (JSON)',t:'json',h:'{"completed":true,"date":"2024-01-15"}'},{p:'aml',l:'AML (JSON)',t:'json',h:'{"cleared":true}'},{p:'sanctions',l:'Sanctions (JSON)',t:'json',h:'{"ofac":"Clear","eu":"Clear","mas":"Clear","un":"Clear"}'},{p:'pep',l:'PEP Status',t:'select',opts:['Not PEP','PEP','Close Associate of PEP']},{p:'environmental',l:'EEXI/CII (JSON)',t:'json',h:'{"eexi":"B","cii":"B"}'},{p:'banking_act_s33_3',l:'Banking Act s33(3)',t:'text',h:'e.g. Within limit — 15% of capital'},{p:'kyc_docs',l:'KYC Documents (one per line)',t:'lines'}],
+  10:[{p:'dscr_projections',l:'DSCR Projections 5-yr (JSON array)',t:'json',h:'[{"year":1,"revenue_usd_m":15,"opex_usd_m":6,"ebitda_usd_m":9,"debt_service_usd_m":7,"dscr":1.29}]'},{p:'fleet_table',l:'Fleet Summary (JSON array)',t:'json',h:'[{"vessel":"MV Name","type":"Bulk Carrier","dwt":64000}]'}],
+};
+
+function _fid(sec,p){return`ff_${sec}_${p}`;}
+
+function renderFieldForm(secNo){
+  const defs=FIELD_DEFS[secNo]||[];
+  if(!defs.length)return'<p class="text-muted small col-12">No structured form defined for this section — use the Raw JSON tab.</p>';
+  return defs.map(f=>{
+    const id=_fid(secNo,f.p);let inp='';
+    if(f.t==='text')inp=`<input id="${id}" class="form-control form-control-sm" type="text" placeholder="${esc(f.h||'')}">`;
+    else if(f.t==='number')inp=`<input id="${id}" class="form-control form-control-sm" type="number" step="any">`;
+    else if(f.t==='textarea')inp=`<textarea id="${id}" class="form-control form-control-sm" rows="3" placeholder="${esc(f.h||'')}"></textarea>`;
+    else if(f.t==='lines')inp=`<textarea id="${id}" class="form-control form-control-sm" rows="3" placeholder="Enter one item per line"></textarea>`;
+    else if(f.t==='json')inp=`<textarea id="${id}" class="form-control form-control-sm json-ed" rows="4" placeholder="${esc(f.h||'JSON format')}"></textarea>`;
+    else if(f.t==='bool')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">—</option><option value="true">Yes / True</option><option value="false">No / False</option></select>`;
+    else if(f.t==='select')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">— Select —</option>${(f.opts||[]).map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
+    const req=REQUIRED_FIELDS[secNo]?.some(r=>r.p===f.p);
+    return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${f.l}${req?'<span class="text-danger ms-1" title="Required for 90%">*</span>':''}</label>${inp}</div>`;
+  }).join('');
+}
+
+function populateForm(secNo,data){
+  const defs=FIELD_DEFS[secNo]||[];
+  for(const f of defs){
+    const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
+    const v=data[f.p];if(v===null||v===undefined){el.value='';continue;}
+    if(f.t==='lines')el.value=Array.isArray(v)?v.join('\n'):String(v);
+    else if(f.t==='json')el.value=typeof v==='object'?JSON.stringify(v,null,2):String(v);
+    else if(f.t==='bool')el.value=String(v);
+    else el.value=String(v);
+  }
+}
+
+function collectFormData(secNo){
+  const defs=FIELD_DEFS[secNo]||[];const result={};
+  for(const f of defs){
+    const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
+    const raw=el.value.trim();if(!raw)continue;
+    if(f.t==='number'){const n=parseFloat(raw);if(!isNaN(n))result[f.p]=n;}
+    else if(f.t==='lines')result[f.p]=raw.split('\n').map(l=>l.trim()).filter(Boolean);
+    else if(f.t==='json'){try{result[f.p]=JSON.parse(raw);}catch(e){result[f.p]=raw;}}
+    else if(f.t==='bool')result[f.p]=raw==='true';
+    else result[f.p]=raw;
+  }
+  return result;
+}
+
+async function openStructuredForm(){
+  const sec=currentPanelSec;if(!sec)return;
+  const container=document.getElementById('formFields');if(!container)return;
+  container.innerHTML=renderFieldForm(sec);
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{headers:H()});
+    if(res.ok){const d=await res.json();populateForm(sec,d.input_json);}
+  }catch(e){}
+}
+
+async function saveFormInput(){
+  const sec=currentPanelSec;if(!sec)return;
+  const data=collectFormData(sec);
+  if(!Object.keys(data).length){toast('No data entered','warning');return;}
+  const{pct,missing}=getCompleteness(sec,data);
+  if(pct<90){
+    toast(`Form is ${pct}% complete — need ≥90%. Missing: ${missing.slice(0,3).map(f=>f.l).join(', ')}${missing.length>3?'…':''}`, 'warning');
+    return;
+  }
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:data})});
+    const d=await res.json();if(!res.ok)throw new Error(d.detail||'Save failed');
+    sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
+    document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
+    renderSectionsTable();toast(`§${sec} saved via form ✓ (${pct}% complete)`,'success');
+  }catch(e){toast(e.message,'danger');}
+}
+
+function syncFormToJson(){
+  const sec=currentPanelSec;if(!sec)return;
+  const data=collectFormData(sec);
+  document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
+  renderCompleteness(sec,data);
+  toast('Form synced to JSON editor','info');
+}
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 function H(){return{'Authorization':'Bearer '+token};}
@@ -419,27 +591,36 @@ function openPanel(secNo,tab){
 function closePanel(){document.getElementById('secPanel').style.display='none';currentPanelSec=null;}
 
 function switchTab(tab){
-  document.querySelectorAll('#panelTabs .nav-link').forEach((el,i)=>el.classList.toggle('active',i===(tab==='input'?0:1)));
+  const order=['input','form','output'];
+  document.querySelectorAll('#panelTabs .nav-link').forEach((el,i)=>el.classList.toggle('active',i===order.indexOf(tab)));
   document.getElementById('tabInput').style.display=tab==='input'?'block':'none';
+  document.getElementById('tabForm').style.display=tab==='form'?'block':'none';
   document.getElementById('tabOutput').style.display=tab==='output'?'block':'none';
-  if(tab==='input')loadInputEditor();else loadSectionOutput(currentPanelSec);
+  if(tab==='input')loadInputEditor();
+  else if(tab==='form')openStructuredForm();
+  else loadSectionOutput(currentPanelSec);
 }
 
 async function loadInputEditor(){
   const sec=currentPanelSec;if(!sec)return;
-  document.getElementById('jsonEd').value='';document.getElementById('savedAt').textContent='';
+  const ed=document.getElementById('jsonEd');
+  ed.value='';document.getElementById('savedAt').textContent='';
+  document.getElementById('completenessPanel').style.display='none';
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{headers:H()});
-    if(!res.ok)return;
+    if(!res.ok){renderCompleteness(sec,{});return;}
     const d=await res.json();
-    document.getElementById('jsonEd').value=JSON.stringify(d.input_json,null,2);
+    ed.value=JSON.stringify(d.input_json,null,2);
     document.getElementById('savedAt').textContent='Last saved: '+fd(d.saved_at);
+    renderCompleteness(sec,d.input_json);
   }catch(e){}
 }
 function loadTemplate(){
   const sec=currentPanelSec;if(!sec)return;
-  document.getElementById('jsonEd').value=JSON.stringify(TEMPLATES[sec]||{},null,2);
-  toast(`Template loaded for §${sec}. Edit values with actual data then Save.`,'info');
+  const tpl=TEMPLATES[sec]||{};
+  document.getElementById('jsonEd').value=JSON.stringify(tpl,null,2);
+  renderCompleteness(sec,tpl);
+  toast(`Template loaded for §${sec}. Replace placeholder values with actual data, then Save.`,'info');
 }
 async function saveSectionInput(){
   const sec=currentPanelSec;
@@ -448,13 +629,20 @@ async function saveSectionInput(){
   let parsed;
   try{parsed=JSON.parse(raw);}catch(e){toast('Invalid JSON: '+e.message,'danger');return;}
   if(typeof parsed!=='object'||Array.isArray(parsed)){toast('Input must be a JSON object {}','warning');return;}
+  const{pct}=getCompleteness(sec,parsed);
+  if(pct<90){
+    renderCompleteness(sec,parsed);
+    toast(`§${sec} is only ${pct}% complete. Fill in missing fields (marked ✗) before saving.`,'warning');
+    return;
+  }
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:parsed})});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Save failed');
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
     document.getElementById('savedAt').textContent='Saved: '+fd(d.saved_at);
-    renderSectionsTable();toast(`§${sec} input saved ✓`,'success');
+    renderCompleteness(sec,parsed);
+    renderSectionsTable();toast(`§${sec} input saved ✓ (${pct}% complete)`,'success');
   }catch(e){toast(e.message,'danger');}
 }
 
@@ -471,6 +659,17 @@ async function loadSectionOutput(sec){
 
 async function generateCurrentSection(){
   const sec=currentPanelSec;if(!sec)return;
+  // Enforce 90% completeness gate before generation
+  const raw=document.getElementById('jsonEd').value.trim();
+  if(raw){
+    let parsed={};try{parsed=JSON.parse(raw);}catch(e){}
+    const{pct,missing}=getCompleteness(sec,parsed);
+    if(pct<90){
+      renderCompleteness(sec,parsed);
+      toast(`§${sec} is ${pct}% complete — need ≥90% before generating. Fill in missing fields.`,'warning');
+      switchTab('input');return;
+    }
+  }
   const sp=document.getElementById('secGenSpin');sp.classList.remove('d-none');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec,{method:'POST',headers:H()});
@@ -521,7 +720,7 @@ function checkSection2Stale(){
 }
 
 function openReview(){
-  renderReview();showView('viewReview');
+  renderReview();renderQualityReport();showView('viewReview');
 }
 
 function renderReview(){
@@ -575,6 +774,84 @@ async function generateFromReview(secNo){
   finally{if(sp)sp.classList.add('d-none');}
 }
 
+function renderQualityReport(){
+  const container=document.getElementById('qualityReport');
+  const content=document.getElementById('qualityReportContent');
+  if(!container||!content)return;
+
+  // Per-section completeness (we don't have the raw JSON for all sections here;
+  // we use the sectionInputMap to know if data was saved, and note that the 90%
+  // gate on save ensures saved data is ≥90% complete)
+  let totalIssues=0;
+  const rows=Array.from({length:10},(_,i)=>i+1).map(n=>{
+    const inp=sectionInputMap[n];
+    const out=sectionOutputMap[n];
+    const hasInput=inp?.has_data;
+    const hasOutput=out?.status==='done'&&out.markdown;
+
+    // Quality checks on generated markdown
+    const issues=[];
+    if(!hasInput)issues.push({sev:'danger',msg:'No analyst input data saved — output will be hallucinated'});
+    if(hasInput&&!hasOutput)issues.push({sev:'warning',msg:'Section not yet generated'});
+    if(hasOutput){
+      if(out.markdown.length<200)issues.push({sev:'danger',msg:'Generated content is very short (<200 chars) — likely incomplete'});
+      if(/\[TBD\]|\[INSERT\]|\[PLACEHOLDER\]|\[FILL\]/i.test(out.markdown))issues.push({sev:'danger',msg:'Placeholder text found in output — AI did not fill in content'});
+      if(/lorem ipsum/i.test(out.markdown))issues.push({sev:'danger',msg:'Lorem ipsum placeholder detected'});
+      if(n===2&&checkSection2Stale())issues.push({sev:'warning',msg:'§2 Overall Comments is stale — regenerate after all other sections are done'});
+    }
+    totalIssues+=issues.length;
+
+    const statusCls=issues.some(i=>i.sev==='danger')?'danger':issues.length?'warning':'success';
+    const statusLabel=issues.some(i=>i.sev==='danger')?'⚠ Issues':issues.length?'⚡ Review':'✓ OK';
+    return `<tr>
+      <td class="ps-2"><strong>§${n}</strong></td>
+      <td class="small">${esc(SNAMES[n])}</td>
+      <td class="text-center">${hasInput?'<span class="text-success fw-bold">✓</span>':'<span class="text-danger fw-bold">✗</span>'}</td>
+      <td class="text-center">${hasOutput?'<span class="text-success fw-bold">✓</span>':'<span class="text-muted">—</span>'}</td>
+      <td><span class="badge bg-${statusCls}">${statusLabel}</span>
+        ${issues.map(i=>`<div class="small text-${i.sev==='danger'?'danger':'warning'} mt-1">⚠ ${i.msg}</div>`).join('')}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const totalSections=10;
+  const inputReady=Object.values(sectionInputMap).filter(v=>v.has_data).length;
+  const outputDone=Object.values(sectionOutputMap).filter(v=>v.status==='done').length;
+  const missingInputRate=Math.round((totalSections-inputReady)/totalSections*100);
+  const missingOutputRate=Math.round((totalSections-outputDone)/totalSections*100);
+
+  content.innerHTML=`
+    <div class="row g-3 mb-3">
+      <div class="col-sm-4 text-center">
+        <div class="fw-bold" style="font-size:2rem;color:${inputReady===10?'#00703C':'#dc2626'}">${inputReady}/10</div>
+        <div class="small text-muted">Sections with Input Data</div>
+        <div class="small ${inputReady===10?'text-success':'text-danger'}">Field missing rate: ${missingInputRate}%</div>
+      </div>
+      <div class="col-sm-4 text-center">
+        <div class="fw-bold" style="font-size:2rem;color:${outputDone===10?'#00703C':'#f59e0b'}">${outputDone}/10</div>
+        <div class="small text-muted">Sections Generated</div>
+        <div class="small ${outputDone===10?'text-success':'text-warning'}">Output missing rate: ${missingOutputRate}%</div>
+      </div>
+      <div class="col-sm-4 text-center">
+        <div class="fw-bold" style="font-size:2rem;color:${totalIssues===0?'#00703C':'#dc2626'}">${totalIssues}</div>
+        <div class="small text-muted">Quality Issues Found</div>
+        <div class="small ${totalIssues===0?'text-success':'text-danger'}">${totalIssues===0?'No issues detected':'Requires attention'}</div>
+      </div>
+    </div>
+    <table class="table table-sm table-bordered mb-0">
+      <thead class="table-light"><tr>
+        <th class="ps-2" style="width:36px">§</th><th>Section</th>
+        <th class="text-center" style="width:60px">Input</th>
+        <th class="text-center" style="width:60px">Output</th>
+        <th>Quality Check</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${totalIssues>0?`<div class="alert alert-warning mt-3 mb-0 small"><strong>⚠ Red Team Review:</strong> ${totalIssues} issue(s) detected above. Address all <span class="text-danger">danger</span> items — re-save input data or regenerate affected sections. Sections flagged as missing or placeholder-heavy will contain hallucinated content.</div>`:'<div class="alert alert-success mt-3 mb-0 small">✓ No quality issues detected. All sections are ready for export.</div>'}
+  `;
+  container.style.display='block';
+}
+
 async function regenSec2(){
   const sp=document.getElementById('regenSpin');sp.classList.remove('d-none');
   toast('Regenerating §2 Overall Comments with full report context…','info');
@@ -621,6 +898,42 @@ function exportMarkdown(){
   const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
   if(!outs.length){toast('No generated sections to export','warning');return;}
   dlBlob(outs.map(o=>`# Section ${o.section_no} — ${SNAMES[o.section_no]}\n\n${o.markdown}`).join('\n\n---\n\n'),'credit_report.md','text/markdown');
+}
+function stripMarkdown(md){
+  return md
+    .replace(/#{1,6}\s+/g,'')
+    .replace(/\*\*(.*?)\*\*/g,'$1')
+    .replace(/\*(.*?)\*/g,'$1')
+    .replace(/`([^`]+)`/g,'$1')
+    .replace(/^\|.+\|$/gm,l=>l.replace(/\|/g,' ').replace(/\s+/g,' ').trim())
+    .replace(/^\s*[-*]\s+/gm,'• ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g,'$1')
+    .replace(/\n{3,}/g,'\n\n').trim();
+}
+function exportTxt(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections','warning');return;}
+  dlBlob(outs.map(o=>`\n${'='.repeat(60)}\nSECTION ${o.section_no} — ${SNAMES[o.section_no]}\n${'='.repeat(60)}\n\n${stripMarkdown(o.markdown)}`).join('\n\n'),'credit_report.txt','text/plain');
+}
+function exportPdf(){
+  const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+  if(!outs.length){toast('No generated sections','warning');return;}
+  const body=outs.map(o=>`<h1>§${o.section_no} — ${esc(SNAMES[o.section_no])}</h1>${marked.parse(o.markdown)}`).join('<hr>');
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Report</title>
+<style>body{font-family:Georgia,serif;max-width:920px;margin:40px auto;padding:0 24px;line-height:1.75;color:#1a1a1a;}
+table{border-collapse:collapse;width:100%;margin:1rem 0;}th,td{border:1px solid #ccc;padding:6px 10px;}th{background:#e8f5ee;}
+h1{font-size:1.4rem;border-bottom:3px solid #00703C;padding-bottom:6px;margin-top:2.5rem;}
+h2{font-size:1.2rem;border-bottom:1px solid #b2dfce;padding-bottom:4px;}h3{color:#00703C;}
+hr{border:none;border-top:1px dashed #ccc;margin:2rem 0;}
+@media print{.noprint{display:none!important;}}
+</style></head><body>
+<div class="noprint" style="padding:12px;background:#e8f5ee;border-radius:6px;margin-bottom:20px;display:flex;gap:12px;align-items:center;">
+  <strong style="color:#00703C">📄 Credit Analysis Report</strong>
+  <button onclick="window.print()" style="margin-left:auto;padding:7px 18px;background:#00703C;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">🖨 Print / Save as PDF</button>
+</div>
+${body}</body></html>`);
+  win.document.close();
 }
 function dlBlob(content,filename,mime){
   const a=document.createElement('a');
