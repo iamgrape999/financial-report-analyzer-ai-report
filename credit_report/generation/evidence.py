@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 
 from credit_report.config import CREDIT_REPORTS_ROOT, CR_MAX_CHUNKS_PER_SECTION, SECTION_RETRIEVAL_KEYWORDS
+
+logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
@@ -78,28 +81,34 @@ def retrieve_evidence(
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract plain text from PDF bytes. Tries pdfminer first, then pypdf."""
+    # pdfminer — best for native-text PDFs
     try:
         import io
-        from pdfminer.high_level import extract_text_to_fp
-        from pdfminer.layout import LAParams
+        from pdfminer.high_level import extract_text
 
-        output = io.StringIO()
-        extract_text_to_fp(io.BytesIO(pdf_bytes), output, laparams=LAParams(), output_type="text", codec="utf-8")
-        result = output.getvalue()
-        if result.strip():
+        result = extract_text(io.BytesIO(pdf_bytes))
+        if result and result.strip():
+            logger.debug("extract_text_from_pdf: pdfminer succeeded, chars=%d", len(result))
             return result
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("extract_text_from_pdf: pdfminer failed: %s", e)
 
+    # pypdf fallback
     try:
         import io
         import pypdf
 
         reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
         pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n\n".join(p for p in pages if p.strip())
-    except Exception:
-        return ""
+        result = "\n\n".join(p for p in pages if p.strip())
+        if result.strip():
+            logger.debug("extract_text_from_pdf: pypdf succeeded, chars=%d", len(result))
+            return result
+    except Exception as e:
+        logger.debug("extract_text_from_pdf: pypdf failed: %s", e)
+
+    logger.warning("extract_text_from_pdf: all parsers returned empty text — may be a scanned PDF")
+    return ""
 
 
 def extract_text_from_docx(file_bytes: bytes) -> str:
@@ -113,14 +122,14 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
         for para in doc.paragraphs:
             if para.text.strip():
                 parts.append(para.text.strip())
-        # Also extract tables
         for table in doc.tables:
             for row in table.rows:
                 row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
                 if row_text:
                     parts.append(row_text)
         return "\n".join(parts)
-    except Exception:
+    except Exception as e:
+        logger.warning("extract_text_from_docx: failed: %s", e)
         return ""
 
 
@@ -137,7 +146,6 @@ def extract_text_from_pptx(file_bytes: bytes) -> str:
             for shape in slide.shapes:
                 if hasattr(shape, "text") and shape.text.strip():
                     slide_parts.append(shape.text.strip())
-                # Extract table data
                 if shape.has_table:
                     for row in shape.table.rows:
                         row_text = " | ".join(
@@ -148,31 +156,123 @@ def extract_text_from_pptx(file_bytes: bytes) -> str:
             if len(slide_parts) > 1:
                 parts.append("\n".join(slide_parts))
         return "\n\n".join(parts)
-    except Exception:
+    except Exception as e:
+        logger.warning("extract_text_from_pptx: failed: %s", e)
         return ""
 
 
-def extract_text_from_image_gemini(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-    """Use Gemini vision to extract text and data from an image (OCR + VLM)."""
+def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """Use Anthropic Claude Vision to OCR and extract text+tables from an image."""
     try:
-        from google import genai
-        from google.genai import types as genai_types
+        import anthropic
         import base64
-        from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
+        from credit_report.config import ANTHROPIC_API_KEY, CREDIT_REPORT_MODEL
 
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        image_b64 = base64.b64encode(image_bytes).decode()
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[
-                genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                "Extract ALL text, numbers, tables, and data from this image. "
-                "Preserve table structure with | separators. Include all financial figures, "
-                "dates, company names, and key metrics. Output as plain text.",
-            ],
+        if not ANTHROPIC_API_KEY:
+            logger.warning("extract_text_from_image: ANTHROPIC_API_KEY not set")
+            return ""
+
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model=CREDIT_REPORT_MODEL,
+            max_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime_type,
+                            "data": base64.b64encode(image_bytes).decode(),
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract ALL text, numbers, tables, and structured data from this image. "
+                            "For tables, preserve the structure using | separators between columns and "
+                            "new lines between rows. Include all financial figures, dates, company names, "
+                            "key metrics, percentages, and ratios exactly as shown. "
+                            "Output as plain text maintaining original layout structure."
+                        ),
+                    },
+                ],
+            }],
         )
-        return response.text or ""
-    except Exception:
+        result = response.content[0].text or ""
+        logger.debug("extract_text_from_image: extracted chars=%d mime=%s", len(result), mime_type)
+        return result
+    except Exception as e:
+        logger.warning("extract_text_from_image: Claude Vision failed: %s", e)
+        return ""
+
+
+def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) -> str:
+    """
+    For scanned/image PDFs where text extraction yields nothing:
+    convert each page to an image and OCR with Claude Vision.
+    Requires Pillow.
+    """
+    try:
+        import io
+        import base64
+        import anthropic
+        from credit_report.config import ANTHROPIC_API_KEY, CREDIT_REPORT_MODEL
+
+        if not ANTHROPIC_API_KEY:
+            return ""
+
+        # Try to get page images using pypdf + Pillow
+        import pypdf
+        from PIL import Image
+
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        page_count = min(len(reader.pages), max_pages)
+        if page_count == 0:
+            return ""
+
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        all_text: list[str] = []
+
+        for page_no in range(page_count):
+            try:
+                page = reader.pages[page_no]
+                # Extract images embedded in the PDF page
+                images = list(page.images)
+                if not images:
+                    continue
+                for img_obj in images[:3]:  # Up to 3 images per page
+                    img_bytes = img_obj.data
+                    response = client.messages.create(
+                        model=CREDIT_REPORT_MODEL,
+                        max_tokens=2048,
+                        messages=[{
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/jpeg",
+                                        "data": base64.b64encode(img_bytes).decode(),
+                                    },
+                                },
+                                {
+                                    "type": "text",
+                                    "text": f"[Page {page_no + 1}] Extract all text and table data from this page image. Preserve table structure with | separators.",
+                                },
+                            ],
+                        }],
+                    )
+                    all_text.append(response.content[0].text or "")
+            except Exception as e:
+                logger.debug("extract_text_from_scanned_pdf_vision: page %d failed: %s", page_no + 1, e)
+                continue
+
+        return "\n\n".join(t for t in all_text if t.strip())
+    except Exception as e:
+        logger.warning("extract_text_from_scanned_pdf_vision: failed: %s", e)
         return ""
 
 
@@ -181,34 +281,36 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
     Detect file format and extract text accordingly.
 
     Returns (extracted_text, detected_format).
+    For scanned PDFs where text extraction fails, attempts Claude Vision OCR.
     """
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if ext == "pdf":
-        return extract_text_from_pdf(file_bytes), "pdf"
+        text = extract_text_from_pdf(file_bytes)
+        if not text.strip():
+            logger.info("extract_text_from_file: PDF has no extractable text — trying vision OCR: %s", filename)
+            text = extract_text_from_scanned_pdf_vision(file_bytes)
+        return text, "pdf"
     elif ext in ("docx",):
         return extract_text_from_docx(file_bytes), "docx"
     elif ext in ("doc",):
-        # Try docx parser (may work for some .doc files)
         text = extract_text_from_docx(file_bytes)
         return text, "doc"
     elif ext in ("pptx",):
         return extract_text_from_pptx(file_bytes), "pptx"
     elif ext in ("ppt",):
-        text = extract_text_from_pptx(file_bytes)
-        return text, "ppt"
+        return extract_text_from_pptx(file_bytes), "ppt"
     elif ext in ("txt", "csv", "md"):
         return file_bytes.decode("utf-8", errors="replace"), ext
     elif ext in ("jpg", "jpeg"):
-        return extract_text_from_image_gemini(file_bytes, "image/jpeg"), "jpg"
+        return extract_text_from_image(file_bytes, "image/jpeg"), "jpg"
     elif ext in ("png",):
-        return extract_text_from_image_gemini(file_bytes, "image/png"), "png"
+        return extract_text_from_image(file_bytes, "image/png"), "png"
     elif ext in ("gif",):
-        return extract_text_from_image_gemini(file_bytes, "image/gif"), "gif"
+        return extract_text_from_image(file_bytes, "image/gif"), "gif"
     elif ext in ("webp",):
-        return extract_text_from_image_gemini(file_bytes, "image/webp"), "webp"
+        return extract_text_from_image(file_bytes, "image/webp"), "webp"
     else:
-        # Unknown — try PDF then DOCX
         text = extract_text_from_pdf(file_bytes)
         if not text:
             text = extract_text_from_docx(file_bytes)

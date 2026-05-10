@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
+from functools import partial
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -65,6 +67,12 @@ class ETLResult(BaseModel):
     document_type: str
     sections_extracted: list[int]
     data: dict[str, dict]  # {str(section_no): {field: value}}
+
+
+class SectionJsonImportResult(BaseModel):
+    section_no: int
+    fields_imported: int
+    message: str
 
 
 class SectionOutputOut(BaseModel):
@@ -179,7 +187,8 @@ async def upload_document(
 
     doc_id = str(uuid.uuid4())
     logger.info("upload_document: extracting text file=%r type=%s bytes=%d doc=%s report=%s", fname, document_type, len(file_bytes), doc_id, report_id)
-    text, detected_fmt = extract_text_from_file(file_bytes, fname)
+    loop = asyncio.get_event_loop()
+    text, detected_fmt = await loop.run_in_executor(None, partial(extract_text_from_file, file_bytes, fname))
     save_document_text(report_id, doc_id, text)
     logger.info("upload_document: saved doc=%s fmt=%s chars=%d report=%s user=%s", doc_id, detected_fmt, len(text), report_id, current_user.id)
 
@@ -270,6 +279,74 @@ async def etl_document_endpoint(
         document_type=doc_type,
         sections_extracted=sorted(extracted.keys()),
         data={str(k): v for k, v in extracted.items()},
+    )
+
+
+@router.post("/import-section-json", response_model=SectionJsonImportResult)
+async def import_section_json(
+    report_id: str,
+    section_no: int = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Import a structured JSON file directly as section input data.
+
+    Accepts a JSON file (e.g. financial-analysis.json) with field-value pairs and
+    saves them as the SectionInput for the given section_no.  Existing input is
+    merged (JSON-merged, file wins on conflict).
+    """
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, current_user)
+
+    if section_no < 1 or section_no > 10:
+        raise HTTPException(status_code=400, detail="section_no must be 1-10")
+
+    raw = await file.read()
+    try:
+        payload: dict = json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="JSON root must be an object")
+
+    result = await db.execute(
+        select(SectionInput).where(
+            SectionInput.report_id == report_id,
+            SectionInput.section_no == section_no,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        try:
+            current_data: dict = json.loads(existing.data or "{}")
+        except Exception:
+            current_data = {}
+        current_data.update(payload)
+        existing.data = json.dumps(current_data, ensure_ascii=False)
+        await db.flush()
+        logger.info(
+            "import_section_json: merged section=%d fields=%d report=%s user=%s",
+            section_no, len(payload), report_id, current_user.id,
+        )
+    else:
+        db.add(SectionInput(
+            report_id=report_id,
+            section_no=section_no,
+            data=json.dumps(payload, ensure_ascii=False),
+        ))
+        await db.flush()
+        logger.info(
+            "import_section_json: created section=%d fields=%d report=%s user=%s",
+            section_no, len(payload), report_id, current_user.id,
+        )
+
+    return SectionJsonImportResult(
+        section_no=section_no,
+        fields_imported=len(payload),
+        message=f"Imported {len(payload)} fields into section {section_no}",
     )
 
 

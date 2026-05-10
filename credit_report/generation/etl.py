@@ -57,77 +57,102 @@ agent_bank, lenders[{bank, commitment_usd_m}]}""",
 {credit_decision (APPROVE/DECLINE/CONDITIONAL), recommendation_rationale,
 key_strengths[], key_concerns[], conditions_precedent[], dscr_avg, ltc_percent}""",
 
-    3: """Section 3 — Credit Risk:
-{internal_rating, rating_rationale, pd_basis_points, pd_assessment, lgd_percent,
-mas_612_applicable (bool), mas_612_classification, industry_risk_level,
-esg_category (A/B/C), esg_screening, climate_risk, sanctions_ofac, sanctions_eu,
-sanctions_mas, sanctions_un, key_risks[], mitigants[], country_risk}""",
+    3: """Section 3 — Credit Ratings:
+{msr_rating (e.g. MSR3), msr_rationale, mas_612_classification, mas_612_applicable (bool),
+msci_esg_rating, sustainalytics_score, taiwan_cg_percentile,
+industry_risk_level, country_risk, esg_summary,
+sanctions_ofac, sanctions_eu, sanctions_mas, sanctions_un,
+climate_risk_assessment, poseidon_principles_alignment,
+key_risks[], mitigants[], watch_list_status}""",
 
-    4: """Section 4 — Borrower Background:
-{company_name, legal_entity_type, registration_number, incorporation_date,
-incorporation_country, ultimate_beneficial_owner, shareholders[{name, stake_percent, country}],
+    4: """Section 4 — Corporate Background:
+{company_name_en, company_name_zh, legal_entity_type, registration_number, ubn,
+incorporation_date, listing_date, stock_exchange, incorporation_country,
+ultimate_beneficial_owner, chairman, general_manager, finance_manager,
+shareholders[{name, stake_percent, country}],
 key_management[{name, title, years_experience, background}],
 business_description, primary_business, years_in_operation,
-fleet_owned[{vessel, type, dwt, year_built, flag, charter}],
-total_fleet_dwt, major_customers[{name, contract_type, duration_years, rate_usd_day}],
-annual_revenue_usd_m, ebitda_usd_m, market_position, group_auditor, banking_relationships[{bank, product}]}""",
+global_ranking, teu_capacity, market_share_pct,
+fleet_owned[{vessel, type, dwt, teu, year_built, flag, charter}],
+total_fleet_teu, major_customers[{name, contract_type, duration_years}],
+annual_revenue, currency, reporting_entity,
+ebitda, market_position, group_auditor,
+banking_relationships[{bank, product}],
+peer_comparison[{company, fleet_teu, market_share_pct}]}""",
 
-    5: """Section 5 — Collateral:
-{collateral_type, vessel_valuations[{vessel, dwt, year_built, market_value_usd_m, distressed_value_usd_m,
-valuation_date, valuer, valuation_basis}], contract_price_usd_m, loan_amount_usd_m,
-ltc_percent, acr_percent, ltv_at_maturity_percent,
-refund_guarantee{issuer, issuer_rating, amount_usd_m, expiry, covers},
+    5: """Section 5 — Collateral / Support:
+{collateral_type, refund_guarantee{issuer, issuer_rating, amount_usd_m,
+  coverage_pct_max_exposure, coverage_pct_first_milestones, expiry, legal_structure},
+vessel_valuations[{vessel, dwt, teu, year_built, market_value_usd_m, distressed_value_usd_m,
+  valuation_date, valuer, valuation_basis}],
+contract_price_usd_m, loan_amount_usd_m,
+ltc_percent, acr_percent, ltv_at_maturity_percent, balloon_usd_m, balloon_ltv_pct,
+value_maintenance_clause{acr_threshold_pct, ltv_threshold_pct, test_frequency_years,
+  cure_period_banking_days, remedy_options[]},
 insurance{h_and_m, p_and_i, war_risk},
-additional_security[], collateral_adequacy_conclusion}""",
+guarantor_support{market_cap_usd_m, total_fleet_teu, guarantee_scope, support_history},
+responsible_person_guarantee (bool),
+collateral_adequacy_conclusion}""",
 
-    6: """Section 6 — Project / Ship Finance:
-{vessel_name, hull_number, vessel_type, vessel_class, dwt, grt, loa_m, beam_m,
+    6: """Section 6 — Project Analysis:
+{vessel_name, hull_number, vessel_type, vessel_class, dwt, teu, grt, loa_m, beam_m,
 main_engine, speed_knots, eco_design (bool), imo_tier,
-shipyard, shipyard_country, shipyard_rating, class_society, flag_state,
-contract_date, contract_price_usd_m,
-payment_milestones[{milestone, date, pct, amount_usd_m}],
-delivery_date, construction_supervisor, construction_risk_assessment,
-employment_post_delivery, charterer, charterer_credit_rating,
-charter_rate_usd_day, charter_duration_years, charter_type}""",
+shipyard, shipyard_country, shipyard_docks, shipyard_berth_m, shipyard_capacity_dwt,
+shipyard_annual_cgt, shipyard_ontime_delivery_pct, shipyard_rating,
+class_society, flag_state, contract_date, contract_price_usd_m,
+payment_milestones[{milestone, status, date, pct, amount_usd_m, cub_drawdown_usd_m}],
+delivery_date, grace_period_days,
+construction_progress_vessels_delivered, construction_progress_value_pct,
+construction_risk_assessment,
+charterer, charterer_credit_rating,
+charter_rate_usd_day, charter_duration_years, charter_type,
+project_risk_ratings[{risk_category, rating, comments}]}""",
 
     7: """Section 7 — Financial Analysis:
-{reporting_currency, unit, auditor, audit_opinion, accounting_standard, fiscal_year_end,
+{reporting_currency, unit, reporting_entity, auditor, audit_opinion,
+accounting_standard, fiscal_year_end,
 income_statement{FY_YYYY{revenue, opex, gross_profit, ebitda, depreciation, ebit,
   interest_expense, pbt, tax, net_income}},
 balance_sheet{FY_YYYY{cash, trade_receivables, current_assets, pp_e, total_assets,
   short_term_debt, trade_payables, current_liabilities, long_term_debt, total_debt, equity}},
 cash_flow{FY_YYYY{cfo, capex, cfi, cff, net_change}},
-key_ratios{FY_YYYY{dscr, debt_ebitda, debt_equity, current_ratio, net_margin_pct,
-  roa_pct, roe_pct, interest_cover}},
+key_ratios{FY_YYYY{dscr, debt_ebitda, tangible_leverage, current_ratio,
+  net_margin_pct, roa_pct, roe_pct, ebitda_interest_cover}},
+industry_index{ccfi_level, scfi_level, year},
 facility_dscr_projection{FY_YYYY{revenue, opex, ebitda, debt_service, dscr}},
 fx_exposure, off_balance_sheet, accounting_notes}""",
 
-    8: """Section 8 — Legal Documentation:
-{facility_agreement{type, date, parties[], amount_usd_m},
-security_documents[{doc, vessel, amount_usd_m, status}],
-existing_charges[{charge, beneficiary, amount_usd_m, maturity}],
-cross_default_threshold_usd_m, pari_passu_clause (bool), negative_pledge (bool),
-legal_opinions[{jurisdiction, law_firm, date}],
-legal_counsel_borrower, legal_counsel_bank, governing_law, dispute_resolution,
-conditions_precedent[], conditions_subsequent[]}""",
+    8: """Section 8 — Changes in Engaged Banks / ACRA Charges:
+{acra_search{entity_name, uen, search_date, total_charges},
+charges[{charge_no, chargee, charge_date, amount, property_charged, status}],
+engaged_banks[{bank, facility_type, committed_usd_m, outstanding_usd_m, since_year}],
+banking_pattern_assessment,
+credit_exposure_concentration,
+new_facility_impact}""",
 
-    9: """Section 9 — Compliance Checklist:
-{kyc{completed (bool), completion_date, review_date, kyc_tier, cdd_level, documents_received[]},
-aml{cleared (bool), screening_date, adverse_media},
-sanctions{ofac, eu, mas, un, hm_treasury, screening_date, screening_system},
-pep{status, related_pep (bool), close_associate_pep (bool)},
-tax_compliance{country, fatca_classification, crs_status},
-environmental{eexi, cii, cii_year, poseidon_principles, imo_2030_readiness},
-mas_regulations{banking_act_s33_3, total_exposure_usd_m, concentration_pct, single_borrower_limit_pct},
-internal_approvals_required[], regulatory_approvals, watch_list, country_risk_approval}""",
+    9: """Section 9 — Credit Analysis Checklist:
+{checklist[{category, item, status, remarks}],
+formal_recommendation,
+approval_authority,
+conditions_precedent[{cp_no, description, status}],
+covenants[{type, description, threshold, frequency}],
+acr_covenant{threshold_pct, test_frequency, cure_period_days},
+listing_requirement, insurance_requirement,
+negative_pledge (bool), change_of_control_clause (bool),
+information_undertakings[],
+signoff_date, signoff_officer}""",
 
     10: """Section 10 — Appendix:
-{dscr_projections[{year, period, revenue_usd_m, opex_usd_m, ebitda_usd_m,
-  depreciation_usd_m, interest_usd_m, principal_usd_m, debt_service_usd_m, dscr, outstanding_balance_usd_m}],
-fleet_schedule[{vessel, type, dwt, year_built, flag, class, current_charter, market_value_usd_m,
-  existing_mortgage}],
+{group_exposure_table[{entity, facility_type, limit_usd_m, outstanding_usd_m,
+  msr_rating, collateral, expiry}],
+fleet_growth_targets[{year, owned_teu, managed_teu, total_teu}],
+dscr_projections_base[{year, period, revenue, opex, ebitda, depreciation,
+  interest, principal, debt_service, dscr, outstanding_balance}],
+dscr_projections_worse[{year, period, revenue, opex, ebitda, depreciation,
+  interest, principal, debt_service, dscr, outstanding_balance}],
 sensitivity_analysis[{scenario, charter_rate_usd_day, min_dscr, conclusion}],
 loan_repayment_schedule[{period, principal, interest, total, balance}],
+blocking_data_gaps[{section, field, gap_description, data_source_needed}],
 market_overview, references[]}""",
 }
 
@@ -174,24 +199,20 @@ async def etl_document(
         logger.warning("etl_document: empty document text, skipping")
         return {}
 
-    from google import genai
-    from google.genai import types as genai_types
-    from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
+    import anthropic
+    from credit_report.config import ANTHROPIC_API_KEY, CREDIT_REPORT_MODEL
 
     system_prompt, user_prompt = _build_etl_prompt(document_type, text, target_sections)
 
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        response = await client.aio.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=user_prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=8192,
-                temperature=0.1,
-            ),
+        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        response = await client.messages.create(
+            model=CREDIT_REPORT_MODEL,
+            max_tokens=8192,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
         )
-        raw = (response.text or "").strip()
+        raw = (response.content[0].text or "").strip()
 
         # Strip markdown code fences if present
         if raw.startswith("```"):
