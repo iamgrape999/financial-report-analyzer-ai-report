@@ -23,7 +23,7 @@ class UserTokenQuota(Base):
 
 
 class SectionDocument(Base):
-    """Metadata for a PDF document uploaded to a report for evidence retrieval."""
+    """Metadata for a document uploaded to a report for evidence retrieval and ETL."""
 
     __tablename__ = "section_documents"
 
@@ -31,6 +31,12 @@ class SectionDocument(Base):
     report_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # document_type: annual_report | financial_statement | analyst_presentation |
+    #   interim_report | valuation_report | charter_agreement | shipbuilding_contract |
+    #   kyc_document | legal_document | external_report | other
+    document_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="other")
+    file_format: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # pdf|docx|pptx|txt|jpg|png
+    etl_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="pending")  # pending|done|error
     uploaded_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

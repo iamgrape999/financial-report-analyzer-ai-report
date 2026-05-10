@@ -10,9 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi import Form
+
 from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB
 from credit_report.database import get_db
-from credit_report.generation.evidence import extract_text_from_pdf, save_document_text
+from credit_report.generation.evidence import extract_text_from_file, save_document_text
+from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
 from credit_report.generation.models import SectionDocument
 from credit_report.generation.pipeline import (
     check_hard_dependencies,
@@ -33,12 +36,35 @@ _MAX_UPLOAD_BYTES = CREDIT_REPORT_MAX_UPLOAD_MB * 1024 * 1024
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
+ALLOWED_EXTENSIONS = {
+    "pdf", "docx", "doc", "pptx", "ppt", "txt", "csv", "md",
+    "jpg", "jpeg", "png", "gif", "webp",
+}
+
+DOCUMENT_TYPES = [
+    "annual_report", "financial_statement", "analyst_presentation",
+    "interim_report", "valuation_report", "charter_agreement",
+    "shipbuilding_contract", "kyc_document", "legal_document",
+    "external_report", "other",
+]
+
+
 class DocumentOut(BaseModel):
     id: str
     original_filename: str
     file_size_bytes: int
+    document_type: Optional[str] = None
+    file_format: Optional[str] = None
+    etl_status: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class ETLResult(BaseModel):
+    doc_id: str
+    document_type: str
+    sections_extracted: list[int]
+    data: dict[str, dict]  # {str(section_no): {field: value}}
 
 
 class SectionOutputOut(BaseModel):
@@ -85,7 +111,7 @@ def _assert_owner_or_admin(report: Report, current_user: User) -> None:
         )
 
 
-def _assert_can_view(report: Report, current_user: User) -> None:
+def _assert_can_view(report: Report, current_user: User) -> None:  # noqa: F811
     if current_user.role in {"admin", "reviewer", "approver"}:
         return
     if report.created_by != current_user.id:
@@ -127,36 +153,44 @@ async def _load_section_input(db: AsyncSession, report_id: str, section_no: int)
 async def upload_document(
     report_id: str,
     file: UploadFile = File(...),
+    document_type: str = Form(default="other"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
-    """Upload a PDF evidence document for a report."""
+    """Upload a document (PDF, DOCX, PPTX, TXT, JPG, PNG, etc.) for a report."""
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        logger.warning("upload_document: rejected non-PDF file=%r report=%s user=%s", file.filename, report_id, current_user.id)
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    if document_type not in DOCUMENT_TYPES:
+        document_type = "other"
 
-    pdf_bytes = await file.read()
-    if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
-        logger.warning("upload_document: file too large bytes=%d limit=%dMB report=%s user=%s", len(pdf_bytes), CREDIT_REPORT_MAX_UPLOAD_MB, report_id, current_user.id)
+    fname = (file.filename or "upload").strip()
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+    if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit",
+            status_code=400,
+            detail=f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
+    file_bytes = await file.read()
+    if len(file_bytes) > _MAX_UPLOAD_BYTES:
+        logger.warning("upload_document: file too large bytes=%d limit=%dMB report=%s", len(file_bytes), CREDIT_REPORT_MAX_UPLOAD_MB, report_id)
+        raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
+
     doc_id = str(uuid.uuid4())
-    logger.info("upload_document: extracting text from PDF file=%r bytes=%d doc=%s report=%s", file.filename, len(pdf_bytes), doc_id, report_id)
-    text = extract_text_from_pdf(pdf_bytes)
+    logger.info("upload_document: extracting text file=%r type=%s bytes=%d doc=%s report=%s", fname, document_type, len(file_bytes), doc_id, report_id)
+    text, detected_fmt = extract_text_from_file(file_bytes, fname)
     save_document_text(report_id, doc_id, text)
-    logger.info("upload_document: saved doc=%s chars=%d report=%s user=%s", doc_id, len(text), report_id, current_user.id)
+    logger.info("upload_document: saved doc=%s fmt=%s chars=%d report=%s user=%s", doc_id, detected_fmt, len(text), report_id, current_user.id)
 
     doc = SectionDocument(
         id=doc_id,
         report_id=report_id,
-        original_filename=file.filename,
-        file_size_bytes=len(pdf_bytes),
+        original_filename=fname,
+        file_size_bytes=len(file_bytes),
+        document_type=document_type,
+        file_format=detected_fmt,
+        etl_status="pending",
         uploaded_by=current_user.id,
     )
     db.add(doc)
@@ -178,6 +212,65 @@ async def list_documents(
         .order_by(SectionDocument.uploaded_at.desc())
     )
     return list(result.scalars().all())
+
+
+@router.post("/documents/{doc_id}/etl", response_model=ETLResult)
+async def etl_document_endpoint(
+    report_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Run AI ETL on an uploaded document — extracts structured data for each relevant section.
+
+    Returns extracted field values per section so the UI can show them and let the
+    analyst review/save them as section inputs.
+    """
+    from credit_report.generation.evidence import load_document_texts
+    from pathlib import Path
+    from credit_report.config import CREDIT_REPORTS_ROOT
+
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, current_user)
+
+    result = await db.execute(
+        select(SectionDocument).where(
+            SectionDocument.id == doc_id,
+            SectionDocument.report_id == report_id,
+            SectionDocument.is_deleted == False,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Load extracted text from filesystem
+    txt_path = CREDIT_REPORTS_ROOT / report_id / f"{doc_id}.txt"
+    if not txt_path.exists():
+        raise HTTPException(status_code=422, detail="Document text not found — re-upload the file")
+
+    text = txt_path.read_text(encoding="utf-8")
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="Document appears to have no extractable text")
+
+    doc_type = doc.document_type or "other"
+    logger.info("etl_document_endpoint: doc=%s type=%s chars=%d report=%s user=%s", doc_id, doc_type, len(text), report_id, current_user.id)
+
+    try:
+        extracted = await etl_document(text=text, document_type=doc_type)
+    except Exception as exc:
+        logger.exception("etl_document_endpoint: ETL failed doc=%s: %s", doc_id, exc)
+        doc.etl_status = "error"
+        raise HTTPException(status_code=500, detail=f"ETL extraction failed: {exc}")
+
+    doc.etl_status = "done"
+
+    return ETLResult(
+        doc_id=doc_id,
+        document_type=doc_type,
+        sections_extracted=sorted(extracted.keys()),
+        data={str(k): v for k, v in extracted.items()},
+    )
 
 
 @router.delete("/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)

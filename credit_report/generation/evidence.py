@@ -77,33 +77,22 @@ def retrieve_evidence(
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """
-    Extract plain text from PDF bytes.
-
-    Tries pdfminer.six first (better layout), falls back to pypdf.
-    Returns empty string on failure rather than raising.
-    """
+    """Extract plain text from PDF bytes. Tries pdfminer first, then pypdf."""
     try:
         import io
-
         from pdfminer.high_level import extract_text_to_fp
         from pdfminer.layout import LAParams
 
         output = io.StringIO()
-        extract_text_to_fp(
-            io.BytesIO(pdf_bytes),
-            output,
-            laparams=LAParams(),
-            output_type="text",
-            codec="utf-8",
-        )
-        return output.getvalue()
+        extract_text_to_fp(io.BytesIO(pdf_bytes), output, laparams=LAParams(), output_type="text", codec="utf-8")
+        result = output.getvalue()
+        if result.strip():
+            return result
     except Exception:
         pass
 
     try:
         import io
-
         import pypdf
 
         reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
@@ -111,3 +100,116 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         return "\n\n".join(p for p in pages if p.strip())
     except Exception:
         return ""
+
+
+def extract_text_from_docx(file_bytes: bytes) -> str:
+    """Extract plain text from DOCX bytes using python-docx."""
+    try:
+        import io
+        from docx import Document
+
+        doc = Document(io.BytesIO(file_bytes))
+        parts: list[str] = []
+        for para in doc.paragraphs:
+            if para.text.strip():
+                parts.append(para.text.strip())
+        # Also extract tables
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                if row_text:
+                    parts.append(row_text)
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
+def extract_text_from_pptx(file_bytes: bytes) -> str:
+    """Extract plain text from PPTX bytes using python-pptx."""
+    try:
+        import io
+        from pptx import Presentation
+
+        prs = Presentation(io.BytesIO(file_bytes))
+        parts: list[str] = []
+        for slide_no, slide in enumerate(prs.slides, 1):
+            slide_parts = [f"[Slide {slide_no}]"]
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    slide_parts.append(shape.text.strip())
+                # Extract table data
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        row_text = " | ".join(
+                            cell.text.strip() for cell in row.cells if cell.text.strip()
+                        )
+                        if row_text:
+                            slide_parts.append(row_text)
+            if len(slide_parts) > 1:
+                parts.append("\n".join(slide_parts))
+        return "\n\n".join(parts)
+    except Exception:
+        return ""
+
+
+def extract_text_from_image_gemini(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """Use Gemini vision to extract text and data from an image (OCR + VLM)."""
+    try:
+        from google import genai
+        from google.genai import types as genai_types
+        import base64
+        from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        image_b64 = base64.b64encode(image_bytes).decode()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                "Extract ALL text, numbers, tables, and data from this image. "
+                "Preserve table structure with | separators. Include all financial figures, "
+                "dates, company names, and key metrics. Output as plain text.",
+            ],
+        )
+        return response.text or ""
+    except Exception:
+        return ""
+
+
+def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
+    """
+    Detect file format and extract text accordingly.
+
+    Returns (extracted_text, detected_format).
+    """
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext == "pdf":
+        return extract_text_from_pdf(file_bytes), "pdf"
+    elif ext in ("docx",):
+        return extract_text_from_docx(file_bytes), "docx"
+    elif ext in ("doc",):
+        # Try docx parser (may work for some .doc files)
+        text = extract_text_from_docx(file_bytes)
+        return text, "doc"
+    elif ext in ("pptx",):
+        return extract_text_from_pptx(file_bytes), "pptx"
+    elif ext in ("ppt",):
+        text = extract_text_from_pptx(file_bytes)
+        return text, "ppt"
+    elif ext in ("txt", "csv", "md"):
+        return file_bytes.decode("utf-8", errors="replace"), ext
+    elif ext in ("jpg", "jpeg"):
+        return extract_text_from_image_gemini(file_bytes, "image/jpeg"), "jpg"
+    elif ext in ("png",):
+        return extract_text_from_image_gemini(file_bytes, "image/png"), "png"
+    elif ext in ("gif",):
+        return extract_text_from_image_gemini(file_bytes, "image/gif"), "gif"
+    elif ext in ("webp",):
+        return extract_text_from_image_gemini(file_bytes, "image/webp"), "webp"
+    else:
+        # Unknown — try PDF then DOCX
+        text = extract_text_from_pdf(file_bytes)
+        if not text:
+            text = extract_text_from_docx(file_bytes)
+        return text, ext or "unknown"

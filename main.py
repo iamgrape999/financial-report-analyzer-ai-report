@@ -26,8 +26,26 @@ import credit_report.calculation_engine.models  # noqa: F401
 import credit_report.block_ast.models  # noqa: F401
 import credit_report.generation.models  # noqa: F401
 
+from sqlalchemy import text
+
 from credit_report.security.models import User
 from credit_report.security.auth import hash_password
+
+
+async def _safe_add_columns(conn) -> None:
+    """Add new columns to existing tables without failing if they already exist."""
+    # section_documents: document_type, file_format, etl_status columns (Sprint 2)
+    new_cols = [
+        ("section_documents", "document_type", "VARCHAR(50) DEFAULT 'other'"),
+        ("section_documents", "file_format",   "VARCHAR(10)"),
+        ("section_documents", "etl_status",    "VARCHAR(20) DEFAULT 'pending'"),
+    ]
+    for table, col, col_def in new_cols:
+        try:
+            await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}"))
+            logger.info("_safe_add_columns: added %s.%s", table, col)
+        except Exception:
+            pass  # Column already exists — expected on subsequent startups
 
 # Initialise logging before anything else logs
 setup_logging()
@@ -68,6 +86,9 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables created / verified")
+        # Safe column additions for section_documents table (idempotent)
+        await _safe_add_columns(conn)
+        logger.info("Database schema upgrade checks complete")
 
     await _seed_admin()
     logger.info("=== Service ready ===")
