@@ -93,16 +93,56 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
 }""",
 
     2: """Section 2 — Overall Comments:
-{credit_decision (APPROVE/DECLINE/CONDITIONAL), recommendation_rationale,
-key_strengths[], key_concerns[], conditions_precedent[], dscr_avg, ltc_percent}""",
+{
+  2A_credit_overview: {
+    bullets[{order (1-6), text_verbatim}],
+    tariff_impact_paragraphs[]
+  },
+  2B_solvency: {
+    primary_repayment_source_verbatim,
+    secondary_repayment_source_verbatim,
+    ema: {period, cash_bn_usd, total_debt_bn_usd, op_ebitda_bn_usd,
+      debt_ebitda_ratio, interest_coverage, prior_year_coverage}
+  },
+  2C_guarantor: {
+    guarantor_name_abbrev, period,
+    cash_twd_bn, cash_usd_bn, total_debt_twd_bn, total_debt_usd_bn,
+    interest_coverage, prior_year_coverage,
+    support_history_verbatim
+  },
+  2D_collateral: {
+    pre_delivery: {issuer_full_name, rating, rating_agencies[], coverage_verbatim,
+      assigned_to_cub (bool), satisfactory_to_bank (bool)},
+    post_delivery: {security_type, vessel_spec, ltc_pct, acr_pct, ltv_pct,
+      ltc_pct_bold, acr_pct_bold}
+  },
+  2E_risk_and_mitigants: {
+    risks[{risk_no, level, title, risk_bullets[], mitigant_bullets[]}]
+  }
+}""",
 
     3: """Section 3 — Credit Ratings:
-{msr_rating (e.g. MSR3), msr_rationale, mas_612_classification, mas_612_applicable (bool),
-msci_esg_rating, sustainalytics_score, taiwan_cg_percentile,
-industry_risk_level, country_risk, esg_summary,
-sanctions_ofac, sanctions_eu, sanctions_mas, sanctions_un,
-climate_risk_assessment, poseidon_principles_alignment,
-key_risks[], mitigants[], watch_list_status}""",
+{
+  3A_external_ratings: {
+    all_nil (bool),
+    ratings[{entity_abbrev, sp, sp_outlook, moodys, moodys_outlook,
+      fitch, fitch_outlook, rating_actions[]}]
+  },
+  3B_internal_ratings: {
+    rows[{entity_full_name, entity_abbrev, role,
+      fy2022_23, fy2023_24, fy2024, interim, current,
+      remarks, override_flag (bool)}],
+    period_display_labels: {[json_key]: display_name}
+  },
+  3C_mas_612: {
+    grade (PASS/SPECIAL_MENTION/SUBSTANDARD/DOUBTFUL/LOSS),
+    primary_paragraph_verbatim,
+    supporting_paragraphs[]
+  },
+  3D_esg_rating: {
+    entity_abbrev, rating_date, image_ref
+  }
+}""",
 
     4: """Section 4 — Corporate Background:
 {company_name_en, company_name_zh, legal_entity_type, registration_number, ubn,
