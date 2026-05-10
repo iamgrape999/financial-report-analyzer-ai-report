@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Optional
 
@@ -22,6 +23,8 @@ from credit_report.generation.pipeline import (
 from credit_report.models import Report, SectionInput, SectionOutput
 from credit_report.security.auth import get_current_user, require_analyst
 from credit_report.security.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports/{report_id}", tags=["generation"])
 
@@ -132,18 +135,22 @@ async def upload_document(
     _assert_owner_or_admin(report, current_user)
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
+        logger.warning("upload_document: rejected non-PDF file=%r report=%s user=%s", file.filename, report_id, current_user.id)
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
     pdf_bytes = await file.read()
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
+        logger.warning("upload_document: file too large bytes=%d limit=%dMB report=%s user=%s", len(pdf_bytes), CREDIT_REPORT_MAX_UPLOAD_MB, report_id, current_user.id)
         raise HTTPException(
             status_code=413,
             detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit",
         )
 
     doc_id = str(uuid.uuid4())
+    logger.info("upload_document: extracting text from PDF file=%r bytes=%d doc=%s report=%s", file.filename, len(pdf_bytes), doc_id, report_id)
     text = extract_text_from_pdf(pdf_bytes)
     save_document_text(report_id, doc_id, text)
+    logger.info("upload_document: saved doc=%s chars=%d report=%s user=%s", doc_id, len(text), report_id, current_user.id)
 
     doc = SectionDocument(
         id=doc_id,
@@ -191,8 +198,11 @@ async def delete_document(
     )
     doc = result.scalar_one_or_none()
     if not doc:
+        logger.warning("delete_document: not found doc=%s report=%s user=%s", doc_id, report_id, current_user.id)
         raise HTTPException(status_code=404, detail="Document not found")
     doc.is_deleted = True
+    await db.flush()
+    logger.info("delete_document: soft-deleted doc=%s report=%s user=%s", doc_id, report_id, current_user.id)
 
 
 # ── Section generation ────────────────────────────────────────────────────────
@@ -218,6 +228,7 @@ async def generate_section(
     # Require analyst input data before allowing generation
     input_data = await _load_section_input(db, report_id, section_no)
     if not input_data:
+        logger.warning("generate_section: no input data section=%d report=%s user=%s", section_no, report_id, current_user.id)
         raise HTTPException(
             status_code=422,
             detail=(
@@ -228,6 +239,7 @@ async def generate_section(
 
     missing = await check_hard_dependencies(db, report_id, section_no)
     if missing:
+        logger.info("generate_section: blocked on hard deps=%s section=%d report=%s", missing, section_no, report_id)
         raise HTTPException(
             status_code=409,
             detail=f"Hard dependencies not yet generated: sections {missing}",
@@ -242,6 +254,7 @@ async def generate_section(
         if ctx and ctx.status == "done" and ctx.markdown:
             preceding[n] = ctx.markdown
 
+    logger.info("generate_section: starting section=%d report=%s user=%s preceding_sections=%s", section_no, report_id, current_user.id, list(preceding.keys()))
     try:
         output = await run_section_generation(
             db=db,
@@ -252,9 +265,11 @@ async def generate_section(
             preceding_outputs=preceding or None,
         )
     except Exception as exc:
+        logger.exception("generate_section: generation failed section=%d report=%s: %s", section_no, report_id, exc)
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Generation failed: {exc}")
 
+    logger.info("generate_section: done section=%d report=%s status=%s tokens=%s", section_no, report_id, output.status, output.tokens_used)
     return GenerateOneResult(
         section_no=section_no,
         status=output.status,
@@ -284,6 +299,7 @@ async def generate_full_report(
             missing_inputs.append(sec_no)
 
     if missing_inputs:
+        logger.warning("generate_full_report: preflight failed missing_sections=%s report=%s user=%s", missing_inputs, report_id, current_user.id)
         raise HTTPException(
             status_code=422,
             detail=(
@@ -292,12 +308,14 @@ async def generate_full_report(
             ),
         )
 
+    logger.info("generate_full_report: starting full pipeline report=%s user=%s", report_id, current_user.id)
     results = await run_full_report_generation(
         db=db,
         report_id=report_id,
         actor_user_id=current_user.id,
         actor_role=current_user.role,
     )
+    logger.info("generate_full_report: complete report=%s results=%s", report_id, results)
     return GenerateAllResult(sections={str(k): v for k, v in results.items()})
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import re
 from typing import Optional
 
@@ -14,6 +15,8 @@ from credit_report.database import get_db
 from credit_report.models import Report, SectionOutput
 from credit_report.security.auth import get_current_user
 from credit_report.security.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports/{report_id}", tags=["export"])
 
@@ -65,6 +68,7 @@ async def export_docx(
         from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
     except ImportError:
+        logger.warning("export_docx: python-docx not installed, returning 503 for CDN fallback report=%s", report_id)
         raise HTTPException(
             status_code=503,
             detail="python-docx not available on this server — use client-side fallback",
@@ -81,6 +85,7 @@ async def export_docx(
     outputs = list(result.scalars().all())
 
     if not outputs:
+        logger.warning("export_docx: no completed sections report=%s user=%s", report_id, current_user.id)
         raise HTTPException(status_code=404, detail="No completed sections to export")
 
     doc = Document()
@@ -124,6 +129,7 @@ async def export_docx(
 
     safe_name = re.sub(r"[^\w\-]", "_", report.borrower_name or report_id)[:40]
     filename = f"credit_report_{safe_name}.docx"
+    logger.info("export_docx: streaming filename=%r sections=%d report=%s user=%s", filename, len(outputs), report_id, current_user.id)
 
     return StreamingResponse(
         buf,

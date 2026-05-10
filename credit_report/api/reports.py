@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from credit_report.audit.events import write_event
 from credit_report.database import get_db
@@ -76,6 +79,7 @@ async def create_report(
         created_by=current_user.id,
     )
     db.add(report)
+    logger.info("create_report: id=%s borrower=%r industry=%r user=%s", report.id, report.borrower_name, report.industry, current_user.id)
 
     await write_event(
         db,
@@ -148,6 +152,7 @@ async def update_status(
 
     old_status = report.status
     report.status = payload.status
+    logger.info("update_status: report=%s %r → %r user=%s", report_id, old_status, payload.status, current_user.id)
 
     await write_event(
         db,
@@ -238,6 +243,7 @@ async def save_section_input(
         facts_data = extractor.extract(report_id, cleaned)
         if facts_data:
             await upsert_facts(db, facts_data)
+            logger.debug("save_section_input: extracted %d facts section=%d report=%s", len(facts_data), section_no, report_id)
             await write_event(
                 db,
                 action="facts.extracted_from_input",
@@ -249,7 +255,7 @@ async def save_section_input(
                 after=f"{len(facts_data)} facts extracted",
             )
     except Exception:
-        pass  # Extraction failure never blocks input save
+        logger.warning("save_section_input: fact extraction failed (non-blocking) section=%d report=%s", section_no, report_id, exc_info=True)
 
     await write_event(
         db,
@@ -261,6 +267,7 @@ async def save_section_input(
         target_id=f"{report_id}/{section_no}",
     )
     await db.flush()
+    logger.info("save_section_input: saved section=%d report=%s user=%s", section_no, report_id, current_user.id)
 
     return SectionInputResponse(
         section_no=section_no,

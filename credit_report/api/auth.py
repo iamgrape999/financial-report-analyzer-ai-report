@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections import defaultdict
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+logger = logging.getLogger(__name__)
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +51,7 @@ def _check_brute_force(ip: str) -> None:
     _failed[ip] = [t for t in _failed[ip] if now - t < _BLOCK_SECS]
     recent = [t for t in _failed[ip] if now - t < _WINDOW_SECS]
     if len(recent) >= _MAX_FAILURES:
+        logger.warning("login: brute-force block ip=%s recent_failures=%d", ip, len(recent))
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many failed login attempts. Try again in 15 minutes.",
@@ -79,12 +83,15 @@ async def login(
     user = result.scalar_one_or_none()
     if not user or not verify_password(form_data.password, user.hashed_password):
         _record_failure(ip)
+        logger.warning("login: failed credential check email=%r ip=%s", form_data.username, ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
         _record_failure(ip)
+        logger.warning("login: inactive account user=%s ip=%s", user.id, ip)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account inactive")
 
     _clear_failures(ip)
+    logger.info("login: success user=%s role=%s ip=%s", user.id, user.role, ip)
     await write_event(db, action="auth.login", actor_user_id=user.id, actor_role=user.role)
     return TokenResponse(
         access_token=create_access_token(user.id, user.role),
@@ -98,6 +105,7 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     try:
         data = decode_token(payload.refresh_token)
     except Exception:
+        logger.warning("refresh: invalid token")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
     if data.get("type") != "refresh":
@@ -136,6 +144,7 @@ async def register(
         is_active=True,
     )
     db.add(new_user)
+    logger.info("register: new user id=%s email=%r role=%s created_by=%s", new_user.id, new_user.email, new_user.role, current_user.id)
 
     await write_event(
         db,
@@ -172,6 +181,7 @@ async def update_user_role(
 
     old_role = target.role
     target.role = role
+    logger.info("update_user_role: user=%s %r → %r by=%s", user_id, old_role, role, current_user.id)
 
     await write_event(
         db,
