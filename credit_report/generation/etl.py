@@ -776,7 +776,18 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "upside_pct": null,
     "rating_history": [
       {"date": null, "rating": null, "target_price": null, "note": null}
-    ]
+    ],
+    "estimate_revision": {
+      "prior_target_price": null,
+      "current_target_price": null,
+      "target_price_valuation_basis": null,
+      "prior_revenue_estimate": null,
+      "current_revenue_estimate": null,
+      "revenue_estimate_unit": null,
+      "prior_eps_estimate": null,
+      "current_eps_estimate": null,
+      "estimate_year": null
+    }
   },
   "11C_company_fundamentals": {
     "currency": null,
@@ -784,6 +795,8 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "share_capital_m_shares": null,
     "market_cap": null,
     "book_value_per_share": null,
+    "book_value_forecast_per_share": null,
+    "book_value_forecast_year": null,
     "net_cash_per_share": null,
     "foreign_holding_pct": null,
     "institutional_holding_pct": null,
@@ -791,7 +804,13 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "margin_balance_shares": null,
     "dividend_yield_pct": null,
     "shares_for_eps_calc": null,
-    "product_mix_notes": null
+    "debt_ratio_pct": null,
+    "esg_rating_sustainalytics": null,
+    "esg_risk_tier": null,
+    "product_mix_notes": null,
+    "revenue_geographic_mix": [
+      {"region": null, "pct_of_revenue": null, "year": null}
+    ]
   },
   "11D_investment_thesis": {
     "summary_verbatim": null,
@@ -828,7 +847,14 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "gross_profit_yoy_pct": null,
         "op_profit_yoy_pct": null,
         "net_income_yoy_pct": null,
-        "eps_yoy_pct": null
+        "eps_yoy_pct": null,
+        "per_ratio": null,
+        "pbr_ratio": null,
+        "roe_pct": null,
+        "roa_pct": null,
+        "cash_dividend_per_share": null,
+        "cash_dividend_yield_pct": null,
+        "payout_ratio_pct": null
       }
     ]
   },
@@ -972,7 +998,56 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       {"name": null, "value": null, "unit": null, "date": null}
     ],
     "industry_theme_verbatim": null
-  }
+  },
+  "11M_quarterly_forecast_comparison": [
+    {
+      "figure_no": null,
+      "figure_title": null,
+      "quarter_reviewed": null,
+      "currency": null,
+      "unit": null,
+      "line_items": [
+        {
+          "item": null,
+          "prior_year_same_q_actual": null,
+          "prior_year_same_q_label": null,
+          "sequential_q_actual": null,
+          "sequential_q_label": null,
+          "current_q_value": null,
+          "current_q_label": null,
+          "qoq_pct": null,
+          "yoy_pct": null,
+          "analyst_prior_estimate": null,
+          "market_consensus": null,
+          "variance_vs_analyst_pct": null,
+          "variance_vs_consensus_pct": null
+        }
+      ],
+      "key_ratios": [
+        {
+          "ratio_name": null,
+          "prior_year_same_q_pct": null,
+          "sequential_q_pct": null,
+          "current_q_pct": null,
+          "qoq_bps": null,
+          "yoy_bps": null,
+          "analyst_estimate_pct": null,
+          "market_estimate_pct": null,
+          "variance_vs_analyst_bps": null,
+          "variance_vs_consensus_bps": null
+        }
+      ]
+    }
+  ],
+  "11N_monthly_revenue": [
+    {
+      "month": null,
+      "revenue": null,
+      "mom_pct": null,
+      "yoy_pct": null,
+      "notes": null
+    }
+  ]
 }""",
 }
 
