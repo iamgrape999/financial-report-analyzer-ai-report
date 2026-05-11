@@ -124,6 +124,27 @@ async def run_section_generation(
         output.generated_at = datetime.now(timezone.utc)
         logger.info("run_section_generation: done section=%d report=%s tokens=%d model=%s chars=%d", section_no, report_id, tokens_used, GEMINI_MODEL, len(markdown))
 
+        # ── Block AST parsing (non-blocking) ─────────────────────────────────
+        try:
+            from credit_report.block_ast.builder import build_blocks
+            from credit_report.block_ast.repository import save_blocks
+            from credit_report.fact_store.repository import get_facts_for_report
+
+            raw_facts = await get_facts_for_report(db, report_id)
+            facts_payload = [
+                {"fact_id": f.id, "value": f.value, "value_text": f.value_text}
+                for f in raw_facts
+                if f.value is not None
+            ]
+            blocks, cells = build_blocks(report_id, section_no, markdown, facts_payload)
+            await save_blocks(db, blocks, cells)
+            logger.info("[AST] section=%d report=%s blocks=%d cells=%d",
+                        section_no, report_id, len(blocks), len(cells))
+        except Exception as _ast_err:
+            logger.warning("[AST] build_blocks failed section=%d report=%s: %s",
+                           section_no, report_id, _ast_err)
+        # ─────────────────────────────────────────────────────────────────────
+
         # Record consumption against the user's daily quota
         await record_tokens(db, actor_user_id, tokens_used)
 
