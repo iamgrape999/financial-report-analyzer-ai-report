@@ -279,6 +279,15 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       {"year": null, "fleet_capacity_mteu": null,
        "capacity_growth_pct": null, "throughput_growth_pct": null}
     ],
+    "supply_demand_forecast_by_institute": [
+      {"institute": null, "metric": null,
+       "yr_2023_pct": null, "yr_2024_pct": null, "yr_2025_pct": null,
+       "yr_2026F_pct": null, "yr_2027F_pct": null}
+    ],
+    "excess_supply_by_institute": [
+      {"institute": null, "yr_2025_pct": null,
+       "yr_2026F_pct": null, "yr_2027F_pct": null}
+    ],
     "key_market_drivers": [],
     "geopolitical_risk_narrative": null,
     "seasonal_cargo_profile": {
@@ -996,6 +1005,12 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "target_pbr": null,
     "target_per": null,
     "valuation_methodology": null,
+    "per_band_levels": [],
+    "per_band_chart_start": null,
+    "per_band_chart_end": null,
+    "pbr_band_levels": [],
+    "pbr_band_chart_start": null,
+    "pbr_band_chart_end": null,
     "peer_comparison": [
       {"company": null, "rating": null, "target_price": null, "pbr": null, "per": null}
     ]
@@ -1066,6 +1081,40 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "mom_pct": null,
       "yoy_pct": null,
       "notes": null
+    }
+  ],
+  "11O_estimate_revision_detail": [
+    {
+      "year": null,
+      "currency": null,
+      "unit": null,
+      "revenue_revised": null,
+      "revenue_prior": null,
+      "revenue_change_pct": null,
+      "gross_profit_revised": null,
+      "gross_profit_prior": null,
+      "gross_profit_change_pct": null,
+      "op_profit_revised": null,
+      "op_profit_prior": null,
+      "op_profit_change_pct": null,
+      "pre_tax_profit_revised": null,
+      "pre_tax_profit_prior": null,
+      "pre_tax_profit_change_pct": null,
+      "net_profit_revised": null,
+      "net_profit_prior": null,
+      "net_profit_change_pct": null,
+      "eps_revised": null,
+      "eps_prior": null,
+      "eps_change_pct": null,
+      "gross_margin_revised_pct": null,
+      "gross_margin_prior_pct": null,
+      "gross_margin_change_bps": null,
+      "op_margin_revised_pct": null,
+      "op_margin_prior_pct": null,
+      "op_margin_change_bps": null,
+      "net_margin_revised_pct": null,
+      "net_margin_prior_pct": null,
+      "net_margin_change_bps": null
     }
   ]
 }""",
