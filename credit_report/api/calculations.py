@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,7 +27,52 @@ from credit_report.calculation_engine.mapping.mapping_rules import (
 )
 from credit_report.security.auth import get_current_user
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/reports/{report_id}", tags=["calculations"])
+
+
+async def _upsert_calculation(
+    db: AsyncSession,
+    report_id: str,
+    entity: str,
+    period: str,
+    metric_name: str,
+    value: Optional[float],
+    formula: str,
+    input_fact_ids: list[str],
+) -> None:
+    """Insert or update a CalculationResult, bumping version on update."""
+    existing = await db.execute(
+        select(CalculationResult).where(
+            CalculationResult.report_id == report_id,
+            CalculationResult.entity == entity,
+            CalculationResult.period == period,
+            CalculationResult.metric_name == metric_name,
+        )
+    )
+    row = existing.scalar_one_or_none()
+    if row:
+        row.value = value
+        row.formula = formula
+        row.input_fact_ids = json.dumps(input_fact_ids)
+        row.is_stale = False
+        row.version += 1
+        row.updated_at = datetime.now(timezone.utc)
+    else:
+        db.add(CalculationResult(
+            id=str(uuid.uuid4()),
+            report_id=report_id,
+            metric_name=metric_name,
+            entity=entity,
+            period=period,
+            value=value,
+            value_text=None,
+            formula=formula,
+            input_fact_ids=json.dumps(input_fact_ids),
+            is_stale=False,
+            version=1,
+        ))
 
 
 # ── FX Rates ────────────────────────────────────────────────────────────────────────────────
@@ -106,6 +154,170 @@ async def list_calculations(
         q = q.where(CalculationResult.is_stale == True)
     result = await db.execute(q)
     return list(result.scalars().all())
+
+
+async def _run_recalculate_core(db: AsyncSession, report_id: str) -> tuple[int, int]:
+    """Core recalculation logic. No commit — caller must commit.
+
+    Returns (computed, ep_pairs) counts.
+    """
+    from credit_report.fact_store.repository import get_facts_for_report
+    from credit_report.calculation_engine.financial_ratios import (
+        debt_to_ebitda,
+        interest_coverage,
+        net_debt,
+        ebitda_margin,
+        net_margin,
+        debt_to_equity,
+    )
+    from credit_report.calculation_engine.dscr import calculate_dscr
+
+    facts = await get_facts_for_report(db, report_id)
+    fact_index: dict[tuple[str, str, str], object] = {}
+    for f in facts:
+        if f.value is not None and f.entity and f.period:
+            fact_index[(f.entity, f.period, f.metric_name)] = f
+
+    ep_pairs = {(f.entity, f.period) for f in facts if f.value is not None and f.entity and f.period}
+    computed = 0
+
+    for entity, period in ep_pairs:
+        def g(metric, _e=entity, _p=period):
+            return fact_index.get((_e, _p, metric))
+
+        calcs: list[tuple] = []
+        ebitda_f = g("ebitda")
+        debt_f = g("total_debt")
+        rev_f = g("revenue")
+        eq_f = g("total_equity")
+        cash_f = g("cash_and_equivalents")
+        ni_f = g("net_income")
+        int_f = g("interest_expense")
+        cfo_f = g("cash_flow_from_operations")
+
+        if debt_f and ebitda_f:
+            val, formula, fids = debt_to_ebitda(debt_f.value, ebitda_f.value, debt_f.id, ebitda_f.id)
+            calcs.append(("net_debt_ebitda", val, formula, fids))
+        if ebitda_f and rev_f:
+            val, formula, fids = ebitda_margin(ebitda_f.value, rev_f.value, ebitda_f.id, rev_f.id)
+            calcs.append(("ebitda_margin_pct", val, formula, fids))
+        if ni_f and rev_f:
+            val, formula, fids = net_margin(ni_f.value, rev_f.value, ni_f.id, rev_f.id)
+            calcs.append(("net_margin_pct", val, formula, fids))
+        if debt_f and eq_f:
+            val, formula, fids = debt_to_equity(debt_f.value, eq_f.value, debt_f.id, eq_f.id)
+            calcs.append(("debt_to_equity", val, formula, fids))
+        if debt_f and cash_f:
+            val, formula, fids = net_debt(debt_f.value, cash_f.value, debt_f.id, cash_f.id)
+            calcs.append(("net_debt", val, formula, fids))
+        if ebitda_f and int_f:
+            val, formula, fids = interest_coverage(ebitda_f.value, int_f.value, ebitda_f.id, int_f.id)
+            calcs.append(("interest_coverage", val, formula, fids))
+        if cfo_f and int_f:
+            val, formula, fids = calculate_dscr(
+                cfo_f.value, 0.0, int_f.value, cfo_f.id, None, int_f.id
+            )
+            calcs.append(("dscr_cfo_based", val, formula, fids))
+
+        for metric_name, val, formula, fids in calcs:
+            await _upsert_calculation(db, report_id, entity, period, metric_name, val, formula, fids)
+            computed += 1
+
+    return computed, len(ep_pairs)
+
+
+@router.post("/recalculate")
+async def recalculate(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Auto-compute all derivable financial ratios from the report's CanonicalFacts."""
+    computed, ep_pairs = await _run_recalculate_core(db, report_id)
+    await db.commit()
+    logger.info("recalculate: report=%s ep_pairs=%d computed=%d", report_id, ep_pairs, computed)
+    return {"calculations_computed": computed, "entity_period_pairs": ep_pairs}
+
+
+# ── LTV / ACR table ───────────────────────────────────────────────────────────────────────
+
+class LTVScheduleEntry(BaseModel):
+    year: float
+    outstanding_pct: float
+
+
+class LTVACRIn(BaseModel):
+    facility_amount: float
+    initial_asset_value: float
+    amortization_schedule: list[LTVScheduleEntry]
+    balloon_amount: Optional[float] = None
+    useful_life_25yr: float = 25.0
+    useful_life_20yr: float = 20.0
+    residual_pct: float = 5.0
+
+
+class LTVRowOut(BaseModel):
+    year: float
+    loan_outstanding: float
+    loan_outstanding_pct: float
+    asset_value_25yr: float
+    ltv_25yr_pct: float
+    asset_value_20yr: float
+    ltv_20yr_pct: float
+
+
+@router.post("/calculations/ltv-acr")
+async def compute_ltv_acr(
+    report_id: str,
+    payload: LTVACRIn,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Compute LTV / ACR table from facility + depreciation parameters."""
+    from credit_report.calculation_engine.ltv_acr import (
+        build_ltv_table,
+        balloon_ltv_summary,
+        acr_from_ltv,
+    )
+
+    schedule = [{"year": e.year, "outstanding_pct": e.outstanding_pct} for e in payload.amortization_schedule]
+    rows = build_ltv_table(
+        facility_amount=payload.facility_amount,
+        initial_asset_value=payload.initial_asset_value,
+        amortization_schedule=schedule,
+        useful_life_25yr=payload.useful_life_25yr,
+        useful_life_20yr=payload.useful_life_20yr,
+        residual_pct=payload.residual_pct,
+    )
+
+    rows_out = [
+        LTVRowOut(
+            year=r.year,
+            loan_outstanding=r.loan_outstanding,
+            loan_outstanding_pct=r.loan_outstanding_pct,
+            asset_value_25yr=r.asset_value_25yr,
+            ltv_25yr_pct=r.ltv_25yr_pct,
+            asset_value_20yr=r.asset_value_20yr,
+            ltv_20yr_pct=r.ltv_20yr_pct,
+        )
+        for r in rows
+    ]
+
+    balloon = None
+    if payload.balloon_amount is not None and rows:
+        last = rows[-1]
+        balloon = balloon_ltv_summary(
+            payload.balloon_amount,
+            last.asset_value_25yr,
+            last.asset_value_20yr,
+        )
+
+    return {
+        "facility_amount": payload.facility_amount,
+        "initial_asset_value": payload.initial_asset_value,
+        "ltv_table": [r.model_dump() for r in rows_out],
+        "balloon_summary": balloon,
+    }
 
 
 # ── Mapping: Unmapped queue ───────────────────────────────────────────────────────────────

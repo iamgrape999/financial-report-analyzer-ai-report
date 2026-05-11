@@ -257,6 +257,15 @@ async def save_section_input(
     except Exception:
         logger.warning("save_section_input: fact extraction failed (non-blocking) section=%d report=%s", section_no, report_id, exc_info=True)
 
+    # Auto-recalculate derived ratios from accumulated facts (non-blocking)
+    try:
+        from credit_report.api.calculations import _run_recalculate_core
+        n_calcs, _ = await _run_recalculate_core(db, report_id)
+        if n_calcs:
+            logger.debug("save_section_input: recalculated %d calcs section=%d report=%s", n_calcs, section_no, report_id)
+    except Exception:
+        logger.warning("save_section_input: recalculate failed (non-blocking) section=%d report=%s", section_no, report_id, exc_info=True)
+
     await write_event(
         db,
         action="section_input.saved",

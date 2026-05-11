@@ -1,0 +1,41 @@
+# Section 9 — Credit Checklist / Compliance: fact extraction mappings
+facts:
+  # Overall credit recommendation (APPROVE / DECLINE / CONDITIONAL)
+  - id_template: "COMPLIANCE-RECOMMENDATION-{entity}-CURRENT"
+    path: "9A_checklist.recommendation"
+    metric: "compliance_recommendation"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "text"
+
+  # Number of conditions precedent to drawdown
+  - id_template: "COMPLIANCE-CP-COUNT-{entity}-CURRENT"
+    path: "9A_checklist.conditions_precedent_count"
+    metric: "conditions_precedent_count"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "count"
+
+  # Whether all KYC/AML checks are cleared
+  - id_template: "COMPLIANCE-KYC-CLEARED-{entity}-CURRENT"
+    path: "9A_checklist.kyc_aml_cleared"
+    metric: "kyc_aml_cleared"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "boolean"
+
+  # Whether environmental / ESG screening is passed
+  - id_template: "COMPLIANCE-ESG-PASS-{entity}-CURRENT"
+    path: "9A_checklist.esg_screen_passed"
+    metric: "esg_screen_passed"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "boolean"
+
+  # Number of outstanding checklist items (0 = all clear)
+  - id_template: "COMPLIANCE-OUTSTANDING-ITEMS-{entity}-CURRENT"
+    path: "9B_checklist_items.outstanding_count"
+    metric: "outstanding_checklist_items"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "count"

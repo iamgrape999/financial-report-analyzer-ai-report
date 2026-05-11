@@ -1,0 +1,74 @@
+# Section 10 — Group Exposure & Stress Testing: fact extraction mappings
+facts:
+  # ── Group Exposure ────────────────────────────────────────────────────────────
+  - id_template: "EXPOSURE-APPROVED-GROUP-LIMIT-{entity}-CURRENT"
+    path: "10A_group_exposure.approved_group_limit_usd_m"
+    metric: "approved_group_limit_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "USD_m"
+
+  - id_template: "EXPOSURE-PROPOSED-{entity}-CURRENT"
+    path: "10A_group_exposure.proposed_exposure_usd_m"
+    metric: "proposed_exposure_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "USD_m"
+
+  - id_template: "EXPOSURE-EXISTING-{entity}-CURRENT"
+    path: "10A_group_exposure.existing_exposure_usd_m"
+    metric: "existing_exposure_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "USD_m"
+
+  # Total fleet TEU capacity (container shipping KPI)
+  - id_template: "FLEET-TOTAL-TEU-{entity}-CURRENT"
+    path: "10A_group_exposure.total_fleet_teu"
+    metric: "total_fleet_teu"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "TEU"
+
+  # ── Stress Test Financial Projections ─────────────────────────────────────────
+  # Base-case DSCR for FY2025F
+  - id_template: "STRESS-DSCR-BASE-{entity}-FY2025F"
+    path: "10C_financial_projections.base_dscr_fy2025"
+    metric: "dscr_base_case"
+    entity: "BORROWER"
+    period: "FY2025F"
+    unit: "x"
+
+  # Stress-case DSCR for FY2025F
+  - id_template: "STRESS-DSCR-WORSE-{entity}-FY2025F"
+    path: "10C_financial_projections.worse_dscr_fy2025"
+    metric: "dscr_stress_case"
+    entity: "BORROWER"
+    period: "FY2025F"
+    unit: "x"
+
+  # Base-case revenue for FY2025F
+  - id_template: "STRESS-REVENUE-BASE-{entity}-FY2025F"
+    path: "10C_financial_projections.base_revenue_fy2025"
+    metric: "revenue_base_case"
+    entity: "BORROWER"
+    period: "FY2025F"
+    currency_path: "10C_financial_projections.reporting_currency"
+    unit_path: "10C_financial_projections.unit"
+
+  # Stress-case revenue for FY2025F
+  - id_template: "STRESS-REVENUE-WORSE-{entity}-FY2025F"
+    path: "10C_financial_projections.worse_revenue_fy2025"
+    metric: "revenue_stress_case"
+    entity: "BORROWER"
+    period: "FY2025F"
+    currency_path: "10C_financial_projections.reporting_currency"
+    unit_path: "10C_financial_projections.unit"
+
+  # Stress assumption: freight rate drop (%)
+  - id_template: "STRESS-FREIGHT-DROP-PCT-{entity}-CURRENT"
+    path: "10C_financial_projections.freight_rate_drop_pct"
+    metric: "stress_freight_rate_drop_pct"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "percent"

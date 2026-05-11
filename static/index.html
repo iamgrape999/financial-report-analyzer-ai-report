@@ -293,6 +293,8 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       </button>
       <button class="btn btn-sm btn-outline-secondary" onclick="openFxModal()" title="Manage FX Rates">FX</button>
       <button class="btn btn-sm btn-outline-secondary" onclick="toggleDQPanel()" title="Data Quality">DQ</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="toggleCalcsPanel()" title="Calculations">⚙ Calcs</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="openFactInspector()" title="Fact Inspector">🔍 Facts</button>
     </div>
   </div>
 
@@ -321,6 +323,60 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       </div>
       <div class="card-body" id="dqPanelContent">
         <p class="text-muted small">Loading…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calculations Panel -->
+  <div id="calcsPanel" class="container pt-2 d-none" style="max-width:960px;">
+    <div class="card mb-3 border-0 shadow-sm">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center"
+           style="background:#00703C;color:#fff;font-weight:700;">
+        <span>⚙ Financial Calculations</span>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-light" onclick="runRecalculate()">
+            <span id="calcSpin" class="spinner-border spinner-sm d-none me-1"></span>
+            ↻ Recalculate
+          </button>
+          <button class="btn btn-sm btn-outline-light" onclick="toggleLtvPanel()">LTV/ACR Table</button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div id="calcsPanelContent">
+          <p class="text-muted small p-3">Click Recalculate to derive ratios from saved facts.</p>
+        </div>
+      </div>
+    </div>
+    <!-- LTV/ACR sub-panel -->
+    <div id="ltvPanel" class="card mb-3 border-0 shadow-sm d-none">
+      <div class="card-header py-2" style="background:#005a30;color:#fff;font-weight:700;">LTV / ACR Table</div>
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col-md-3">
+            <label class="form-label small">Facility (USD m)</label>
+            <input type="number" id="ltvFacility" class="form-control form-control-sm" placeholder="50">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Initial Asset Value (USD m)</label>
+            <input type="number" id="ltvAssetVal" class="form-control form-control-sm" placeholder="80">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Balloon Amount (USD m, optional)</label>
+            <input type="number" id="ltvBalloon" class="form-control form-control-sm" placeholder="">
+          </div>
+          <div class="col-md-3 d-flex align-items-end">
+            <button class="btn btn-success btn-sm w-100" onclick="computeLtvAcr()">
+              <span id="ltvSpin" class="spinner-border spinner-sm d-none me-1"></span>
+              Compute
+            </button>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small fw-bold">Amortization Schedule (year,pct per line e.g. "0,100 / 1,90 / 5,60")</label>
+          <input type="text" id="ltvSchedule" class="form-control form-control-sm"
+            value="0,100 / 0.5,95 / 1,90 / 2,80 / 3,70 / 4,60 / 5,50 / 6,40 / 7,30 / 8,20 / 9,10 / 10,5">
+        </div>
+        <div id="ltvTableWrap"></div>
       </div>
     </div>
   </div>
@@ -417,6 +473,46 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <div class="modal-footer">
       <span class="text-muted small me-auto" id="conflictsModalStatus"></span>
       <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- Fact Inspector Modal -->
+<div class="modal fade" id="factInspectorModal" tabindex="-1">
+  <div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header" style="background:#1a1a1a;color:#fff;">
+      <h5 class="modal-title fw-bold">🔍 Fact Inspector</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body p-0">
+      <!-- Filter tabs -->
+      <div class="d-flex gap-1 p-2 border-bottom flex-wrap align-items-center">
+        <span class="small fw-bold me-1">Filter:</span>
+        <button class="btn btn-sm btn-outline-secondary active" id="factTab-all" onclick="filterFacts('all')">All</button>
+        <button class="btn btn-sm btn-outline-success" id="factTab-validated" onclick="filterFacts('validated')">Validated</button>
+        <button class="btn btn-sm btn-outline-warning" id="factTab-conflicted" onclick="filterFacts('conflicted')">Conflicted</button>
+        <button class="btn btn-sm btn-outline-primary" id="factTab-user_overridden" onclick="filterFacts('user_overridden')">Overridden</button>
+        <button class="btn btn-sm btn-outline-secondary" id="factTab-deprecated" onclick="filterFacts('deprecated')">Deprecated</button>
+        <div class="ms-auto">
+          <input type="text" id="factSearch" class="form-control form-control-sm" placeholder="Search metric / entity…"
+            oninput="renderFactsTable()" style="width:200px;">
+        </div>
+      </div>
+      <div style="max-height:65vh;overflow-y:auto;">
+        <table class="table table-sm table-hover mb-0" style="font-size:12px;">
+          <thead class="table-light sticky-top">
+            <tr>
+              <th>§</th><th>Metric</th><th>Entity</th><th>Period</th>
+              <th>Value</th><th>Currency</th><th>Unit</th><th>State</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="factsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer justify-content-between py-2">
+      <span class="small text-muted" id="factsCount">—</span>
+      <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
     </div>
   </div></div>
 </div>
@@ -1849,6 +1945,200 @@ function renderConflicts(){
         </div>
       </div>
     </div>`).join('');
+}
+
+// ── Calculations Panel ────────────────────────────────────────────────────────
+async function toggleCalcsPanel(){
+  const panel=document.getElementById('calcsPanel');
+  panel.classList.toggle('d-none');
+  if(!panel.classList.contains('d-none'))await loadCalculations();
+}
+
+async function loadCalculations(){
+  if(!currentRid)return;
+  const content=document.getElementById('calcsPanelContent');
+  content.innerHTML='<p class="text-muted small p-3">Loading…</p>';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/calculations',{headers:H()});
+    if(!res.ok){content.innerHTML='<p class="text-danger small p-3">Could not load calculations.</p>';return;}
+    const calcs=await res.json();
+    if(!calcs.length){
+      content.innerHTML='<p class="text-muted small p-3">No calculations yet — click ↻ Recalculate to derive ratios from saved facts.</p>';
+      return;
+    }
+    // Group by entity
+    const byEntity={};
+    calcs.forEach(c=>{(byEntity[c.entity]||(byEntity[c.entity]=[])).push(c);});
+    const stateColor=s=>s?'text-warning':'text-success';
+    const rows=Object.entries(byEntity).map(([entity,items])=>{
+      const itemRows=items.map(c=>`
+        <tr>
+          <td><span class="badge bg-light text-dark">${esc(c.metric_name)}</span></td>
+          <td>${esc(c.period)}</td>
+          <td class="fw-bold">${c.value!=null?c.value.toFixed(3):'—'}</td>
+          <td><span title="${esc(c.formula||'')}" style="cursor:help;border-bottom:1px dotted #888;"
+            class="small text-muted">${(c.formula||'').slice(0,40)}${(c.formula||'').length>40?'…':''}</span></td>
+          <td><span class="${stateColor(c.is_stale)}">${c.is_stale?'stale':'✓'}</span></td>
+        </tr>`).join('');
+      return `<tr class="table-light fw-bold"><td colspan="5" style="background:#e8f5ee">
+        <small>${esc(entity)}</small></td></tr>${itemRows}`;
+    }).join('');
+    content.innerHTML=`
+      <table class="table table-sm table-hover mb-0" style="font-size:12px;">
+        <thead class="table-light"><tr>
+          <th>Metric</th><th>Period</th><th>Value</th>
+          <th>Formula</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }catch(e){content.innerHTML=`<p class="text-danger small p-3">${esc(e.message)}</p>`;}
+}
+
+async function runRecalculate(){
+  if(!currentRid){toast('No report loaded','warning');return;}
+  const spin=document.getElementById('calcSpin');
+  spin.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/recalculate',{method:'POST',headers:H()});
+    if(!res.ok)throw new Error((await res.json()).detail||'Recalculate failed');
+    const d=await res.json();
+    toast(`Recalculated ${d.calculations_computed} ratios across ${d.entity_period_pairs} entity-period pairs ✓`,'success');
+    await loadCalculations();
+  }catch(e){toast('Recalculate failed: '+e.message,'danger');}
+  finally{spin.classList.add('d-none');}
+}
+
+function toggleLtvPanel(){
+  document.getElementById('ltvPanel').classList.toggle('d-none');
+}
+
+async function computeLtvAcr(){
+  if(!currentRid){toast('No report loaded','warning');return;}
+  const facility=parseFloat(document.getElementById('ltvFacility').value);
+  const assetVal=parseFloat(document.getElementById('ltvAssetVal').value);
+  const balloonRaw=document.getElementById('ltvBalloon').value.trim();
+  const balloon=balloonRaw?parseFloat(balloonRaw):null;
+  if(!facility||!assetVal){toast('Enter facility and asset value','warning');return;}
+  const schedText=document.getElementById('ltvSchedule').value;
+  const schedule=schedText.split('/').map(s=>s.trim()).filter(Boolean).map(s=>{
+    const[yr,pct]=s.split(',').map(Number);
+    return{year:yr,outstanding_pct:pct};
+  });
+  if(!schedule.length){toast('Enter at least one amortization row','warning');return;}
+  const spin=document.getElementById('ltvSpin');
+  spin.classList.remove('d-none');
+  try{
+    const body={facility_amount:facility,initial_asset_value:assetVal,
+      amortization_schedule:schedule};
+    if(balloon!=null)body.balloon_amount=balloon;
+    const res=await fetch(API+'/reports/'+currentRid+'/calculations/ltv-acr',{
+      method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)
+    });
+    if(!res.ok)throw new Error((await res.json()).detail||'LTV computation failed');
+    const d=await res.json();
+    let html=`<table class="table table-sm" style="font-size:11px;">
+      <thead class="table-light"><tr>
+        <th>Year</th><th>Loan (USD m)</th><th>Loan %</th>
+        <th>Val 25yr</th><th>LTV 25yr %</th>
+        <th>Val 20yr</th><th>LTV 20yr %</th>
+      </tr></thead><tbody>`;
+    d.ltv_table.forEach(r=>{
+      const warn25=r.ltv_25yr_pct>70?'class="table-warning"':'';
+      const warn20=r.ltv_20yr_pct>70?'class="table-warning"':'';
+      html+=`<tr>
+        <td>${r.year}</td><td>${r.loan_outstanding.toFixed(1)}</td><td>${r.loan_outstanding_pct}%</td>
+        <td>${r.asset_value_25yr.toFixed(1)}</td><td ${warn25}>${r.ltv_25yr_pct}%</td>
+        <td>${r.asset_value_20yr.toFixed(1)}</td><td ${warn20}>${r.ltv_20yr_pct}%</td>
+      </tr>`;
+    });
+    html+='</tbody></table>';
+    if(d.balloon_summary){
+      const b=d.balloon_summary;
+      html+=`<div class="alert alert-info mt-2 mb-0 py-2 small">
+        <strong>Balloon LTV:</strong> ${b.balloon_amount.toFixed(1)} USD m &nbsp;|&nbsp;
+        25yr: LTV ${b.ltv_25yr_pct}% · ACR ${b.acr_25yr_pct}% &nbsp;|&nbsp;
+        20yr: LTV ${b.ltv_20yr_pct}% · ACR ${b.acr_20yr_pct}%
+      </div>`;
+    }
+    document.getElementById('ltvTableWrap').innerHTML=html;
+  }catch(e){toast('LTV error: '+e.message,'danger');}
+  finally{spin.classList.add('d-none');}
+}
+
+// ── Fact Inspector ────────────────────────────────────────────────────────────
+let _allFacts=[];
+let _factFilter='all';
+
+async function openFactInspector(){
+  if(!currentRid){toast('No report loaded','warning');return;}
+  _allFacts=[];
+  document.getElementById('factsTableBody').innerHTML='<tr><td colspan="9" class="text-center text-muted">Loading…</td></tr>';
+  document.getElementById('factsCount').textContent='Loading…';
+  new bootstrap.Modal(document.getElementById('factInspectorModal')).show();
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/facts',{headers:H()});
+    if(!res.ok)throw new Error('Could not load facts');
+    _allFacts=await res.json();
+  }catch(e){
+    document.getElementById('factsTableBody').innerHTML=`<tr><td colspan="9" class="text-danger">${esc(e.message)}</td></tr>`;
+    return;
+  }
+  filterFacts('all');
+}
+
+function filterFacts(state){
+  _factFilter=state;
+  document.querySelectorAll('[id^="factTab-"]').forEach(b=>b.classList.remove('active'));
+  const active=document.getElementById('factTab-'+state);
+  if(active)active.classList.add('active');
+  renderFactsTable();
+}
+
+function renderFactsTable(){
+  const search=(document.getElementById('factSearch')?.value||'').toLowerCase();
+  let facts=_allFacts;
+  if(_factFilter!=='all')facts=facts.filter(f=>f.state===_factFilter);
+  if(search)facts=facts.filter(f=>(f.metric_name||'').toLowerCase().includes(search)||(f.entity||'').toLowerCase().includes(search));
+  const stateClass={validated:'success',conflicted:'danger',user_overridden:'primary',
+    deprecated:'secondary',approved:'success'};
+  const tbody=document.getElementById('factsTableBody');
+  if(!facts.length){
+    tbody.innerHTML='<tr><td colspan="9" class="text-center text-muted py-3">No facts found.</td></tr>';
+    document.getElementById('factsCount').textContent='0 facts';
+    return;
+  }
+  tbody.innerHTML=facts.map(f=>`
+    <tr>
+      <td class="text-muted">${f.source_section_no||'—'}</td>
+      <td><span class="font-monospace">${esc(f.metric_name)}</span></td>
+      <td>${esc(f.entity||'—')}</td>
+      <td>${esc(f.period||'—')}</td>
+      <td class="fw-bold">${f.value!=null?f.value:esc(f.value_text||'—')}</td>
+      <td>${esc(f.currency||'—')}</td>
+      <td>${esc(f.unit||'—')}</td>
+      <td><span class="badge bg-${stateClass[f.state]||'secondary'}">${esc(f.state)}</span></td>
+      <td>
+        ${f.state!=='deprecated'?`<button class="btn btn-outline-secondary btn-sm py-0 px-1"
+          style="font-size:10px" onclick="overrideFact('${f.id}')">Override</button>`:''}
+      </td>
+    </tr>`).join('');
+  document.getElementById('factsCount').textContent=`${facts.length} / ${_allFacts.length} facts`;
+}
+
+async function overrideFact(factId){
+  const newVal=prompt('Enter override value:');
+  if(newVal===null)return;
+  const reason=prompt('Reason for override (optional):')||'Manual analyst override';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/facts/'+factId+'/override',{
+      method:'POST',
+      headers:{...H(),'Content-Type':'application/json'},
+      body:JSON.stringify({override_value:newVal,reason})
+    });
+    if(!res.ok)throw new Error((await res.json()).detail||'Override failed');
+    toast('Fact overridden ✓','success');
+    await openFactInspector();
+  }catch(e){toast('Override failed: '+e.message,'danger');}
 }
 
 async function resolveConflict(conflictId, chosenId, rejectedId){
