@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
     "annual_report":         [4, 7, 3, 2, 10, 1],
     "financial_statement":   [7, 4, 2, 10, 5],
-    "analyst_presentation":  [4, 7, 2, 3, 10, 1],
+    "analyst_presentation":  [11, 4, 7, 2, 3, 10, 1],
     "interim_report":        [7, 4, 2, 3],
     "valuation_report":      [5, 10, 6],
     "charter_agreement":     [1, 6, 5],
     "shipbuilding_contract": [6, 1, 5],
     "kyc_document":          [9, 1, 4],
     "legal_document":        [8, 1, 9],
-    "external_report":       [3, 4, 7, 2],
+    "external_report":       [11, 3, 4, 7, 2],
     "other":                 [4, 7, 1],
 }
 
@@ -43,8 +43,11 @@ Rules:
 - Dates: YYYY-MM-DD format or YYYY-QN (e.g. 2026-Q2)
 - Arrays: use [] when empty; include all items found
 - Return ONLY a valid JSON object. No markdown, no commentary, no code fences.
-- Structure the JSON with integer section numbers as keys (e.g. "4", "7")
+- Structure the JSON with integer section numbers as keys (e.g. "4", "7", "11")
 - Each section key maps to a flat or nested object matching the schema described
+- Schema keys shown as "FY_YYYY" are TEMPLATES: replace with actual years e.g. "2023", "2024", "2025", "2026F", "2027F" — one key per year found in the document
+- Schema keys shown as "QN_YYYY" are TEMPLATES: replace with actual quarter-year labels e.g. "1Q25", "2Q25", "1Q26F" — one key per quarter found in the document
+- For annual and quarterly estimate tables in broker/analyst reports: extract ALL periods present in the document, both historical and forecast (marked F or E)
 - IMPORTANT: always return the full JSON even if most fields are null; never truncate the output
 """
 
@@ -396,7 +399,11 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "other_op_income": null, "op_profit": null,
       "finance_income": null, "finance_cost": null, "other_non_op": null,
       "pbt": null, "tax": null, "net_income": null,
+      "eps": null,
       "ebitda": null, "depreciation": null}},
+    "quarterly_income_statement": {"QN_YYYY": {
+      "revenue": null, "op_profit": null, "net_income": null,
+      "eps": null, "gross_margin_pct": null, "op_margin_pct": null, "ni_margin_pct": null}},
     "balance_sheet": {"FY_YYYY": {
       "cash": null, "trade_receivables": null, "inventories": null,
       "other_ca": null, "total_ca": null,
@@ -619,6 +626,115 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       {"item": "DSCR", "value": 0.0, "is_dscr": true}
     ],
     "worse_case_commentary": "Under Worse Case, DSCR declines to minimum [X]x in [year] but remains above 1.0x..."
+  }
+}""",
+
+    11: """Section 11 — Analyst / Broker Research Report:
+{
+  "11A_report_meta": {
+    "analyst_firm": null,
+    "analyst_name": null,
+    "analyst_email": null,
+    "report_date": null,
+    "subject_company_en": null,
+    "subject_company_zh": null,
+    "subject_ticker": null,
+    "report_type": null,
+    "language": null
+  },
+  "11B_rating": {
+    "current_rating": null,
+    "current_rating_zh": null,
+    "rating_change": null,
+    "prior_rating": null,
+    "target_price_3m": null,
+    "target_price_12m": null,
+    "target_price_currency": null,
+    "current_price": null,
+    "current_price_currency": null,
+    "upside_pct": null,
+    "rating_history": [
+      {"date": null, "rating": null, "target_price": null, "note": null}
+    ]
+  },
+  "11C_company_fundamentals": {
+    "currency": null,
+    "unit": null,
+    "share_capital": null,
+    "market_cap": null,
+    "book_value_per_share": null,
+    "net_cash_per_share": null,
+    "foreign_holding_pct": null,
+    "institutional_holding_pct": null,
+    "insider_holding_pct": null,
+    "margin_balance_shares": null,
+    "dividend_yield_pct": null
+  },
+  "11D_investment_thesis": {
+    "summary_verbatim": null,
+    "bull_points": [],
+    "key_catalysts": [],
+    "risks": [],
+    "valuation_comment": null
+  },
+  "11E_annual_estimates": {
+    "currency": null,
+    "unit": null,
+    "periods": [
+      {
+        "year": null,
+        "is_forecast": null,
+        "revenue": null,
+        "gross_profit": null,
+        "op_profit": null,
+        "net_income": null,
+        "eps": null,
+        "gross_margin_pct": null,
+        "op_margin_pct": null,
+        "ni_margin_pct": null,
+        "roe_pct": null,
+        "revenue_yoy_pct": null,
+        "eps_yoy_pct": null
+      }
+    ]
+  },
+  "11F_quarterly_estimates": {
+    "currency": null,
+    "unit": null,
+    "periods": [
+      {
+        "quarter": null,
+        "is_forecast": null,
+        "revenue": null,
+        "op_profit": null,
+        "net_income": null,
+        "eps": null,
+        "gross_margin_pct": null,
+        "op_margin_pct": null,
+        "ni_margin_pct": null,
+        "revenue_yoy_pct": null,
+        "revenue_qoq_pct": null,
+        "eps_yoy_pct": null,
+        "eps_qoq_pct": null
+      }
+    ]
+  },
+  "11G_valuation_metrics": {
+    "pbr_current": null,
+    "per_current": null,
+    "ev_ebitda_current": null,
+    "target_pbr": null,
+    "target_per": null,
+    "valuation_methodology": null,
+    "peer_comparison": [
+      {"company": null, "rating": null, "target_price": null, "pbr": null, "per": null}
+    ]
+  },
+  "11H_industry_context": {
+    "key_market_indicators": [
+      {"name": null, "value": null, "unit": null, "date": null}
+    ],
+    "industry_theme_verbatim": null
   }
 }""",
 }

@@ -116,6 +116,13 @@ SECTION_RETRIEVAL_KEYWORDS: dict[int, list[str]] = {
          "capacity", "projection", "LTV schedule", "ACR schedule",
          "group exposure", "MSR", "fleet growth", "base case", "worse case",
          "blocking data", "data gaps", "QA"],
+    11: ["rating", "buy", "hold", "sell", "neutral", "target price", "目標價",
+         "price target", "analyst", "EPS", "每股盈餘", "投資建議", "investment recommendation",
+         "earnings per share", "forecast", "estimate", "projected", "预估", "預估",
+         "revenue estimate", "quarterly", "1Q", "2Q", "3Q", "4Q", "valuation",
+         "PBR", "PER", "upside", "downside", "research report", "個股報告",
+         "broker", "investment bank", "securities", "群益", "capital", "元大",
+         "年度預測", "季度預測", "EPS forecast", "dividend yield", "殖利率"],
 }
 
 # ── Continuation tokens ────────────────────────────────────────────────────────────────────────────────────────────
