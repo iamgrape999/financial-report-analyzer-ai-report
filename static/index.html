@@ -174,7 +174,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
             <option value="other">📁 其他 / Other</option>
           </select>
           <div class="d-flex gap-2">
-            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.xlsx,.xls" class="form-control form-control-sm">
+            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.xlsx" class="form-control form-control-sm">
             <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload</button>
           </div>
           <small class="text-muted">PDF · DOCX · PPTX · XLSX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
@@ -1538,14 +1538,30 @@ async function submitImprove(){
   document.getElementById('improveStatusMsg').textContent='Calling AI…';
   document.getElementById('improveSuggestionWrap').classList.add('d-none');
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+_improveBlockId+'/improve',{
+    // Resolve synthetic "section-N" IDs to real block IDs from the DB
+    let effectiveBlockId=_improveBlockId;
+    let effectiveVersion=_improveVersion;
+    if(_improveBlockId.startsWith('section-')){
+      const secNo=_improveBlockId.replace('section-','');
+      const br=await fetch(API+'/reports/'+currentRid+'/sections/'+secNo+'/blocks',{headers:H()});
+      if(!br.ok)throw new Error('Could not load blocks for this section');
+      const blocks=await br.json();
+      const textBlock=blocks.find(b=>b.block_type==='paragraph')||blocks.find(b=>b.block_type==='heading')||blocks[0];
+      if(!textBlock){
+        throw new Error('No AI-parsed blocks found — regenerate the section first, then try again');
+      }
+      effectiveBlockId=textBlock.id;
+      effectiveVersion=textBlock.version;
+    }
+    const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+effectiveBlockId+'/improve',{
       method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
-      body:JSON.stringify({instruction,expected_version:_improveVersion})
+      body:JSON.stringify({instruction,expected_version:effectiveVersion})
     });
     if(!res.ok)throw new Error((await res.json()).detail||'Request failed');
     const data=await res.json();
     _improveSuggestedContent=data.suggested_content;
     _improveVersion=data.current_version;
+    _improveBlockId=effectiveBlockId;
     document.getElementById('improveSuggestionText').textContent=data.suggested_content;
     document.getElementById('improveSuggestionWrap').classList.remove('d-none');
     document.getElementById('improveStatusMsg').textContent='Suggestion ready';

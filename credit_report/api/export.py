@@ -1,6 +1,8 @@
 """DOCX and PDF export endpoints for generated credit report sections."""
 from __future__ import annotations
 
+import asyncio
+import html as html_mod
 import io
 import logging
 import re
@@ -213,15 +215,16 @@ async def export_pdf(
         raise HTTPException(status_code=404, detail="No completed sections to export")
 
     borrower = report.borrower_name or report_id
-    report_date = datetime.now().strftime("%d %b %Y")
+    borrower_safe = html_mod.escape(borrower)
+    report_date = html_mod.escape(datetime.now().strftime("%d %b %Y"))
 
     html_parts = [
         f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Credit Report — {borrower}</title></head><body>
+<title>Credit Report — {borrower_safe}</title></head><body>
 <div class="cover">
   <div class="bank">CATHAY UNITED BANK</div>
   <div class="title">Credit Analysis Report</div>
-  <div class="borrower">{borrower}</div>
+  <div class="borrower">{borrower_safe}</div>
   <div class="rdate">{report_date}</div>
 </div>"""
     ]
@@ -235,7 +238,9 @@ async def export_pdf(
     html_parts.append("</body></html>")
     full_html = "\n".join(html_parts)
 
-    pdf_bytes = HTML(string=full_html).write_pdf(stylesheets=[CSS(string=_PDF_CSS)])
+    pdf_bytes = await asyncio.to_thread(
+        lambda: HTML(string=full_html).write_pdf(stylesheets=[CSS(string=_PDF_CSS)])
+    )
 
     safe_name = re.sub(r"[^\w\-]", "_", borrower)[:40]
     filename = f"credit_report_{safe_name}.pdf"
