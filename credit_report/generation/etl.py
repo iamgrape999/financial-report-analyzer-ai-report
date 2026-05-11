@@ -232,7 +232,29 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "order_book_pct_of_fleet": null,
     "alliance_membership": null,
     "imo_regulatory_notes": null,
-    "tariff_risk_notes": null
+    "tariff_risk_notes": null,
+    "freight_rate_by_route": {
+      "far_east_north_america_usd_teu": null,
+      "far_east_europe_usd_teu": null,
+      "far_east_us_west_coast_usd_teu": null,
+      "far_east_us_east_coast_usd_teu": null,
+      "far_east_mediterranean_usd_teu": null
+    },
+    "scfi_quarterly_history": [
+      {"period": null, "scfi": null, "fe_us_west": null, "fe_us_east": null,
+       "fe_europe": null, "fe_mediterranean": null}
+    ],
+    "fuel_cost_pct_of_cogs": [
+      {"period": null, "fuel_pct": null}
+    ],
+    "oil_prices": [
+      {"date_range": null, "wti_usd_bbl": null, "brent_usd_bbl": null}
+    ],
+    "wti_latest": null,
+    "brent_latest": null,
+    "geopolitical_chokepoints": [],
+    "world_uncertainty_index_level": null,
+    "world_uncertainty_index_date": null
   },
   "4J_peer_comparison": [
     {"company": null, "fleet_teu": null, "market_share_pct": null,
@@ -240,6 +262,53 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
   ],
   "4K_major_customers": [
     {"name": null, "contract_type": null, "duration_years": null}
+  ],
+  "4L_macro_context": {
+    "source": null,
+    "report_date": null,
+    "gdp_projections": [
+      {"region": null, "gdp_2024_pct": null, "gdp_2025_pct": null,
+       "gdp_2026_pct": null, "gdp_2027_pct": null}
+    ],
+    "fleet_supply_demand": [
+      {"year": null, "fleet_capacity_mteu": null,
+       "capacity_growth_pct": null, "throughput_growth_pct": null}
+    ],
+    "key_market_drivers": [],
+    "geopolitical_risk_narrative": null
+  },
+  "4M_alliance_history": {
+    "alliance_name": null,
+    "alliance_members": [],
+    "current_phase": null,
+    "history": [
+      {"phase": null, "period_start": null, "period_end": null,
+       "routes_count": null, "vessels_count": null, "capacity_wan_teu": null}
+    ]
+  },
+  "4N_trade_route_volume": [
+    {
+      "route": null,
+      "volume_unit": null,
+      "annual_yoy_pct": null,
+      "quarterly_data": [
+        {"period": null, "period_type": null,
+         "volume_prior_year": null, "volume_current_year": null, "yoy_pct": null}
+      ],
+      "monthly_data": [
+        {"month": null, "volume_prior_year": null,
+         "volume_current_year": null, "yoy_pct": null}
+      ]
+    }
+  ],
+  "4O_weekly_capacity_by_route": [
+    {
+      "route": null,
+      "yoy_change_pct": null,
+      "quarterly_capacity": [
+        {"year": null, "quarter": null, "weekly_capacity_teu": null}
+      ]
+    }
   ]
 }""",
 
@@ -659,7 +728,24 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "quarter": null,
       "years": {}
     }
-  ]
+  ],
+  "10F_fleet_capacity_growth": {
+    "group_name": null,
+    "unit": "TEU",
+    "rows": [
+      {"year": null, "fleet_capacity_teu": null, "growth_pct_vs_base": null,
+       "is_forecast": null}
+    ],
+    "cagr_pct": null
+  },
+  "10G_peer_newbuilding": {
+    "period": null,
+    "unit": "000 TEU",
+    "source": null,
+    "carriers": [
+      {"carrier": null, "newbuilding_teu": null, "rank": null}
+    ]
+  }
 }""",
 
     11: """Section 11 — Analyst / Broker Research Report:
