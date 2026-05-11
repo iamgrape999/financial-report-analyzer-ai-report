@@ -37,12 +37,14 @@ Your task: read the provided document excerpt and extract structured JSON data f
 Rules:
 - Extract ONLY what is explicitly stated in the document — never fabricate or guess
 - Use null for any field not found in the document
-- Financial figures: use USD millions unless the document states otherwise
+- Documents may be written in Traditional Chinese (繁體中文), Simplified Chinese (简体中文), or English — extract data faithfully from whichever language is used
+- Financial figures: preserve the document's ORIGINAL currency and units (NTD/TWD billions, USD millions, HKD millions, etc.); note the currency and unit explicitly in your response
 - Dates: YYYY-MM-DD format or YYYY-QN (e.g. 2026-Q2)
 - Arrays: use [] when empty; include all items found
 - Return ONLY a valid JSON object. No markdown, no commentary, no code fences.
 - Structure the JSON with integer section numbers as keys (e.g. "4", "7")
 - Each section key maps to a flat or nested object matching the schema described
+- IMPORTANT: always return the full JSON even if most fields are null; never truncate the output
 """
 
 # Extraction schema description per section (tells the model what fields to look for)
@@ -631,9 +633,11 @@ def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> 
         f"Document type: {doc_type_label}\n\n"
         f"Target sections to extract: {section_nos}\n\n"
         f"Required JSON schema (extract these fields if present):\n{schema_parts}\n\n"
-        f"---DOCUMENT TEXT START---\n{text[:60000]}\n---DOCUMENT TEXT END---\n\n"
+        f"---DOCUMENT TEXT START---\n{text[:80000]}\n---DOCUMENT TEXT END---\n\n"
         "Return ONLY valid JSON with section numbers (as strings) as keys. "
-        "Example: {\"4\": {\"company_name\": \"...\", ...}, \"7\": {\"income_statement\": {...}}}"
+        "Example: {\"4\": {\"4A_borrower\": {\"company_name_zh\": \"...\", ...}, ...}, "
+        "\"7\": {\"7A_borrower_financials\": {...}}}\n"
+        "Extract whatever data IS present — partial extraction is better than returning nothing."
     )
     return ETL_SYSTEM_PROMPT, user_prompt
 
@@ -679,10 +683,11 @@ async def etl_document(
             contents=user_prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                max_output_tokens=8192,
+                max_output_tokens=65536,
             ),
         )
         raw = (response.text or "").strip()
+        logger.debug("etl_document: raw response chars=%d doc_type=%s", len(raw), document_type)
 
         # Strip markdown code fences if present
         if raw.startswith("```"):
@@ -690,16 +695,18 @@ async def etl_document(
             if raw.endswith("```"):
                 raw = raw[: raw.rfind("```")]
 
-        parsed = json.loads(raw)
+        parsed = _parse_json_tolerant(raw, document_type)
+        if parsed is None:
+            return {}
+
         result: dict[int, dict] = {}
         for k, v in parsed.items():
             try:
                 sec_no = int(k)
                 if isinstance(v, dict) and v:
-                    # Remove null-only sections
-                    non_null = {fk: fv for fk, fv in v.items() if fv is not None}
-                    if non_null:
-                        result[sec_no] = non_null
+                    # Keep section if ANY nested value (at any depth) is non-null
+                    if _has_any_value(v):
+                        result[sec_no] = v
             except (ValueError, TypeError):
                 continue
 
@@ -708,9 +715,74 @@ async def etl_document(
                     {k: len(v) for k, v in result.items()})
         return result
 
-    except json.JSONDecodeError as e:
-        logger.error("etl_document: JSON parse error: %s — raw=%r", e, raw[:500] if 'raw' in dir() else "")
-        return {}
     except Exception as exc:
         logger.exception("etl_document: extraction failed doc_type=%s: %s", document_type, exc)
         return {}
+
+
+def _has_any_value(obj) -> bool:
+    """Recursively check if a dict/list contains ANY non-null leaf value."""
+    if obj is None:
+        return False
+    if isinstance(obj, dict):
+        return any(_has_any_value(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(_has_any_value(item) for item in obj)
+    return True  # scalar non-None value
+
+
+def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
+    """Parse JSON, with fallback to recover truncated output."""
+    # Normal parse
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt to recover truncated JSON: find the last complete top-level section.
+    # Gemini sometimes cuts output mid-stream when hitting token limit.
+    logger.warning("etl_document: JSON parse failed, attempting truncation recovery doc_type=%s raw_tail=%r",
+                   doc_type, raw[-200:])
+    recovered = {}
+    import re
+    # Extract all complete "N": { ... } top-level sections using brace counting
+    i = 0
+    while i < len(raw):
+        m = re.search(r'"(\d+)"\s*:', raw[i:])
+        if not m:
+            break
+        key_start = i + m.start()
+        after_colon = i + m.end()
+        # find the start of the value
+        j = after_colon
+        while j < len(raw) and raw[j] in ' \t\n\r':
+            j += 1
+        if j >= len(raw) or raw[j] != '{':
+            i = after_colon
+            continue
+        # count braces to find end of this section
+        depth = 0
+        end = j
+        while end < len(raw):
+            if raw[end] == '{':
+                depth += 1
+            elif raw[end] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            end += 1
+        if depth == 0:
+            section_json = raw[j:end + 1]
+            try:
+                section_data = json.loads(section_json)
+                recovered[m.group(1)] = section_data
+            except json.JSONDecodeError:
+                pass
+        i = after_colon
+
+    if recovered:
+        logger.info("etl_document: recovered %d sections from truncated JSON doc_type=%s",
+                    len(recovered), doc_type)
+        return recovered
+    logger.error("etl_document: JSON recovery failed doc_type=%s raw_head=%r", doc_type, raw[:300])
+    return None

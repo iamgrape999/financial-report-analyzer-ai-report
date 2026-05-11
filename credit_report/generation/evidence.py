@@ -161,6 +161,18 @@ def extract_text_from_pptx(file_bytes: bytes) -> str:
         return ""
 
 
+_OCR_PROMPT = (
+    "Extract ALL text, numbers, tables, and structured data from this document. "
+    "The document may be in Traditional Chinese (繁體中文), Simplified Chinese (简体中文), "
+    "or English — extract all text faithfully in its original language. "
+    "For tables, preserve the structure using | separators between columns and "
+    "new lines between rows. Include all financial figures, dates, company names, "
+    "key metrics, percentages, ratios, and headers exactly as shown. "
+    "Preserve original currency symbols and units (NTD, TWD, USD, HKD, etc.). "
+    "Output as plain text maintaining the original layout and page structure."
+)
+
+
 def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     """Use Gemini Vision to OCR and extract text+tables from an image."""
     try:
@@ -177,15 +189,9 @@ def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -
             model=GEMINI_MODEL,
             contents=[
                 genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                genai_types.Part.from_text(
-                    "Extract ALL text, numbers, tables, and structured data from this image. "
-                    "For tables, preserve the structure using | separators between columns and "
-                    "new lines between rows. Include all financial figures, dates, company names, "
-                    "key metrics, percentages, and ratios exactly as shown. "
-                    "Output as plain text maintaining original layout structure."
-                ),
+                genai_types.Part.from_text(_OCR_PROMPT),
             ],
-            config=genai_types.GenerateContentConfig(max_output_tokens=4096),
+            config=genai_types.GenerateContentConfig(max_output_tokens=32768),
         )
         result = response.text or ""
         logger.debug("extract_text_from_image: extracted chars=%d mime=%s", len(result), mime_type)
@@ -217,18 +223,12 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) 
             model=GEMINI_MODEL,
             contents=[
                 genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
-                genai_types.Part.from_text(
-                    "Extract ALL text, numbers, tables, and structured data from this PDF document. "
-                    "For tables, preserve the structure using | separators between columns and "
-                    "new lines between rows. Include all financial figures, dates, company names, "
-                    "key metrics, percentages, ratios, and headers exactly as shown. "
-                    "Output as plain text maintaining the original layout and page structure."
-                ),
+                genai_types.Part.from_text(_OCR_PROMPT),
             ],
-            config=genai_types.GenerateContentConfig(max_output_tokens=8192),
+            config=genai_types.GenerateContentConfig(max_output_tokens=32768),
         )
         result = response.text or ""
-        logger.debug("extract_text_from_scanned_pdf_vision: extracted chars=%d", len(result))
+        logger.info("extract_text_from_scanned_pdf_vision: extracted chars=%d", len(result))
         return result
     except Exception as e:
         logger.warning("extract_text_from_scanned_pdf_vision: Gemini Vision failed: %s", e)
