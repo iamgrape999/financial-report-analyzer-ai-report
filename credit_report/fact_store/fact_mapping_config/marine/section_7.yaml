@@ -3,12 +3,11 @@
 # iterate_path: walks every key in the target dict, one fact per year.
 facts:
   # ── Borrower: Income Statement ────────────────────────────────────────────────
-  - id_template: "FIN-REVENUE-BORROW-{entity}-{period}"
+  - id_template: "FIN-REVENUE-{entity}-{period}"
     iterate_path: "7A_borrower_financials.income_statement"
     field: "revenue"
     metric: "revenue"
     entity: "BORROWER"
-    id_template: "FIN-REVENUE-{entity}-{period}"
     currency_path: "7A_borrower_financials.reporting_currency"
     unit_path: "7A_borrower_financials.unit"
 

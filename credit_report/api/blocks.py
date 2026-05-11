@@ -90,6 +90,46 @@ async def list_blocks(
     return blocks
 
 
+@router.get("/blocks/stats")
+async def block_stats(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return data-quality summary: block validation counts and cell binding rate."""
+    from sqlalchemy import func, select as sa_select
+
+    blocks = await block_repo.get_all_blocks(db, report_id)
+
+    cell_result = await db.execute(
+        sa_select(TableCell.binding_status, func.count().label("n"))
+        .join(ReportBlock, TableCell.block_id == ReportBlock.id)
+        .where(ReportBlock.report_id == report_id)
+        .group_by(TableCell.binding_status)
+    )
+    cell_counts = {row.binding_status: row.n for row in cell_result}
+    bound = cell_counts.get("bound", 0)
+    unbound = cell_counts.get("unbound", 0)
+    total_cells = bound + unbound
+
+    pending = sum(1 for b in blocks if b.validation_status == "pending")
+    passed = sum(1 for b in blocks if b.validation_status == "passed")
+    failed = sum(1 for b in blocks if b.validation_status == "failed")
+    stale = sum(1 for b in blocks if b.is_stale)
+
+    return {
+        "total_blocks": len(blocks),
+        "pending": pending,
+        "passed": passed,
+        "failed": failed,
+        "stale": stale,
+        "total_cells": total_cells,
+        "bound_cells": bound,
+        "unbound_cells": unbound,
+        "binding_rate_pct": round(bound / total_cells * 100) if total_cells else 0,
+    }
+
+
 @router.get("/blocks/{block_id}", response_model=BlockOut)
 async def get_block(
     report_id: str,
@@ -160,46 +200,6 @@ async def section_blocks(
     current_user=Depends(get_current_user),
 ):
     return await block_repo.get_blocks_for_section(db, report_id, section_no)
-
-
-@router.get("/blocks/stats")
-async def block_stats(
-    report_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    """Return data-quality summary: block validation counts and cell binding rate."""
-    from sqlalchemy import func, select as sa_select
-
-    blocks = await block_repo.get_all_blocks(db, report_id)
-
-    cell_result = await db.execute(
-        sa_select(TableCell.binding_status, func.count().label("n"))
-        .join(ReportBlock, TableCell.block_id == ReportBlock.id)
-        .where(ReportBlock.report_id == report_id)
-        .group_by(TableCell.binding_status)
-    )
-    cell_counts = {row.binding_status: row.n for row in cell_result}
-    bound = cell_counts.get("bound", 0)
-    unbound = cell_counts.get("unbound", 0)
-    total_cells = bound + unbound
-
-    pending = sum(1 for b in blocks if b.validation_status == "pending")
-    passed = sum(1 for b in blocks if b.validation_status == "passed")
-    failed = sum(1 for b in blocks if b.validation_status == "failed")
-    stale = sum(1 for b in blocks if b.is_stale)
-
-    return {
-        "total_blocks": len(blocks),
-        "pending": pending,
-        "passed": passed,
-        "failed": failed,
-        "stale": stale,
-        "total_cells": total_cells,
-        "bound_cells": bound,
-        "unbound_cells": unbound,
-        "binding_rate_pct": round(bound / total_cells * 100) if total_cells else 0,
-    }
 
 
 @router.post("/blocks/{block_id}/validate")

@@ -76,7 +76,14 @@ class InputFactExtractor:
         )
         entity = self._normalize_entity(str(entity_raw or "UNKNOWN"))
         period = self._normalize_period(str(period_raw or ""))
-        return self._build_fact(report_id, mapping, entity, period, value)
+        currency = mapping.get("currency") or str(
+            self._resolve_path(input_json, mapping.get("currency_path", "")) or ""
+        ) or None
+        unit = mapping.get("unit") or str(
+            self._resolve_path(input_json, mapping.get("unit_path", "")) or ""
+        ) or None
+        override = {"currency": currency, "unit": unit}
+        return self._build_fact(report_id, mapping, entity, period, value, override)
 
     def _extract_iterate(self, report_id: str, input_json: dict, mapping: dict) -> list[dict]:
         """Iterate over all year-keys in a dict, emitting one fact per key.
@@ -203,7 +210,11 @@ class InputFactExtractor:
     @staticmethod
     def _normalize_period(raw: str) -> str:
         """FYE 31 Dec 2024 -> FY2024; 9M2025; H1 2024 -> H12024; etc."""
-        upper = raw.upper()
+        upper = raw.upper().strip()
+        # Reserved tokens pass through unchanged
+        if upper in ("CURRENT", "LATEST", "NOW", "YTD", "TTM"):
+            return upper
+
         m = _PERIOD_RE.search(raw)
         yr = m.group(1) if m else "UNKNOWN"
 
