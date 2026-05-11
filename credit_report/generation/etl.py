@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -629,15 +630,24 @@ def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> 
         SECTION_EXTRACTION_SCHEMA[n] for n in section_nos if n in SECTION_EXTRACTION_SCHEMA
     )
     doc_type_label = document_type.replace("_", " ").title()
+    text_snippet = text[:80000]
     user_prompt = (
         f"Document type: {doc_type_label}\n\n"
         f"Target sections to extract: {section_nos}\n\n"
         f"Required JSON schema (extract these fields if present):\n{schema_parts}\n\n"
-        f"---DOCUMENT TEXT START---\n{text[:80000]}\n---DOCUMENT TEXT END---\n\n"
+        f"---DOCUMENT TEXT START---\n{text_snippet}\n---DOCUMENT TEXT END---\n\n"
         "Return ONLY valid JSON with section numbers (as strings) as keys. "
         "Example: {\"4\": {\"4A_borrower\": {\"company_name_zh\": \"...\", ...}, ...}, "
         "\"7\": {\"7A_borrower_financials\": {...}}}\n"
         "Extract whatever data IS present — partial extraction is better than returning nothing."
+    )
+    logger.info(
+        "[ETL] _build_etl_prompt: doc_type=%s sections=%s "
+        "system_prompt_chars=%d schema_chars=%d text_chars=%d "
+        "(text_total=%d truncated=%s) user_prompt_chars=%d",
+        document_type, section_nos,
+        len(ETL_SYSTEM_PROMPT), len(schema_parts), len(text_snippet),
+        len(text), len(text_snippet) < len(text), len(user_prompt),
     )
     return ETL_SYSTEM_PROMPT, user_prompt
 
@@ -658,14 +668,29 @@ async def etl_document(
     Returns:
         {section_no: {field: value}} — only sections with non-empty extraction
     """
+    t_start = time.perf_counter()
     target_sections = section_nos or DOCUMENT_SECTION_MAP.get(document_type, [4, 7])
+
+    logger.info(
+        "[ETL] etl_document: START doc_type=%s target_sections=%s text_chars=%d",
+        document_type, target_sections, len(text),
+    )
+
     if not target_sections:
+        logger.warning("[ETL] etl_document: no target sections for doc_type=%s — returning empty", document_type)
         return {}
 
     text = text.strip()
     if not text:
-        logger.warning("etl_document: empty document text, skipping")
+        logger.warning("[ETL] etl_document: EMPTY document text — cannot extract anything")
         return {}
+
+    # Log a sample of the text Gemini will receive
+    sample_head = text[:300].replace("\n", " ")
+    sample_tail = text[-200:].replace("\n", " ") if len(text) > 300 else ""
+    logger.info("[ETL] document text sample (head): %r", sample_head)
+    if sample_tail:
+        logger.info("[ETL] document text sample (tail): %r", sample_tail)
 
     from google import genai
     from google.genai import types as genai_types
@@ -678,6 +703,12 @@ async def etl_document(
 
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
+        logger.info(
+            "[ETL] calling Gemini model=%s max_output_tokens=65536 "
+            "doc_type=%s sections=%s",
+            GEMINI_MODEL, document_type, target_sections,
+        )
+        t_gemini = time.perf_counter()
         response = await client.aio.models.generate_content(
             model=GEMINI_MODEL,
             contents=user_prompt,
@@ -686,37 +717,103 @@ async def etl_document(
                 max_output_tokens=65536,
             ),
         )
+        gemini_ms = (time.perf_counter() - t_gemini) * 1000
+
         raw = (response.text or "").strip()
-        logger.debug("etl_document: raw response chars=%d doc_type=%s", len(raw), document_type)
+
+        # Log Gemini finish reason to detect truncation
+        finish_reason = "unknown"
+        try:
+            finish_reason = str(response.candidates[0].finish_reason) if response.candidates else "no_candidates"
+        except Exception:
+            pass
+
+        logger.info(
+            "[ETL] Gemini response: elapsed=%.0fms chars=%d finish_reason=%s",
+            gemini_ms, len(raw), finish_reason,
+        )
+        if finish_reason not in ("FinishReason.STOP", "STOP", "1", "unknown"):
+            logger.warning(
+                "[ETL] Gemini finish_reason=%s — response may be truncated or blocked. "
+                "Raw tail: %r", finish_reason, raw[-300:],
+            )
+        if not raw:
+            logger.warning("[ETL] Gemini returned EMPTY response for doc_type=%s", document_type)
+            return {}
+
+        # Log raw response head/tail for debugging
+        logger.info("[ETL] raw response head (300 chars): %r", raw[:300])
+        if len(raw) > 300:
+            logger.info("[ETL] raw response tail (200 chars): %r", raw[-200:])
 
         # Strip markdown code fences if present
-        if raw.startswith("```"):
+        had_fences = raw.startswith("```")
+        if had_fences:
             raw = raw.split("\n", 1)[-1]
             if raw.endswith("```"):
                 raw = raw[: raw.rfind("```")]
+            logger.info("[ETL] stripped markdown code fences from response")
 
         parsed = _parse_json_tolerant(raw, document_type)
         if parsed is None:
+            logger.error(
+                "[ETL] JSON parse FAILED and recovery returned None — "
+                "doc_type=%s raw_chars=%d",
+                document_type, len(raw),
+            )
             return {}
+
+        logger.info("[ETL] parsed JSON: top-level keys=%s", list(parsed.keys()))
 
         result: dict[int, dict] = {}
         for k, v in parsed.items():
             try:
                 sec_no = int(k)
-                if isinstance(v, dict) and v:
-                    # Keep section if ANY nested value (at any depth) is non-null
-                    if _has_any_value(v):
-                        result[sec_no] = v
-            except (ValueError, TypeError):
+                if not isinstance(v, dict) or not v:
+                    logger.info("[ETL] section %s: skipped (not a non-empty dict, got %s)", k, type(v).__name__)
+                    continue
+                has_val = _has_any_value(v)
+                sub_keys = list(v.keys())
+                logger.info(
+                    "[ETL] section %s: sub_keys=%s has_any_value=%s",
+                    k, sub_keys, has_val,
+                )
+                if has_val:
+                    result[sec_no] = v
+                else:
+                    logger.warning(
+                        "[ETL] section %s: ALL values are null — section excluded. "
+                        "This means the document has no matching data for this section.",
+                        k,
+                    )
+            except (ValueError, TypeError) as e:
+                logger.warning("[ETL] section key %r could not be parsed: %s", k, e)
                 continue
 
-        logger.info("etl_document: extracted sections=%s doc_type=%s fields=%s",
-                    list(result.keys()), document_type,
-                    {k: len(v) for k, v in result.items()})
+        total_ms = (time.perf_counter() - t_start) * 1000
+        logger.info(
+            "[ETL] etl_document: COMPLETE doc_type=%s total_elapsed=%.0fms "
+            "sections_extracted=%s field_counts=%s",
+            document_type, total_ms,
+            list(result.keys()),
+            {k: len(v) for k, v in result.items()},
+        )
+        if not result:
+            logger.warning(
+                "[ETL] etl_document: NO DATA EXTRACTED for doc_type=%s — "
+                "all sections returned null-only values. "
+                "Check: (1) document text quality, (2) document type match, "
+                "(3) Gemini raw response above for clues.",
+                document_type,
+            )
         return result
 
     except Exception as exc:
-        logger.exception("etl_document: extraction failed doc_type=%s: %s", document_type, exc)
+        total_ms = (time.perf_counter() - t_start) * 1000
+        logger.exception(
+            "[ETL] etl_document: EXCEPTION after %.0fms doc_type=%s: %s",
+            total_ms, document_type, exc,
+        )
         return {}
 
 
@@ -735,14 +832,22 @@ def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
     """Parse JSON, with fallback to recover truncated output."""
     # Normal parse
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
+        parsed = json.loads(raw)
+        logger.info("[ETL] JSON parse: SUCCESS chars=%d doc_type=%s", len(raw), doc_type)
+        return parsed
+    except json.JSONDecodeError as e:
+        logger.warning(
+            "[ETL] JSON parse: FAILED doc_type=%s error=%s at pos=%d "
+            "— attempting truncation recovery",
+            doc_type, e.msg, e.pos,
+        )
 
     # Attempt to recover truncated JSON: find the last complete top-level section.
     # Gemini sometimes cuts output mid-stream when hitting token limit.
-    logger.warning("etl_document: JSON parse failed, attempting truncation recovery doc_type=%s raw_tail=%r",
-                   doc_type, raw[-200:])
+    logger.warning(
+        "[ETL] JSON recovery: scanning for complete sections in %d chars raw_tail=%r",
+        len(raw), raw[-200:],
+    )
     recovered = {}
     import re
     # Extract all complete "N": { ... } top-level sections using brace counting
