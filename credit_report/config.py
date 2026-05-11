@@ -122,7 +122,11 @@ SECTION_RETRIEVAL_KEYWORDS: dict[int, list[str]] = {
          "revenue estimate", "quarterly", "1Q", "2Q", "3Q", "4Q", "valuation",
          "PBR", "PER", "upside", "downside", "research report", "個股報告",
          "broker", "investment bank", "securities", "群益", "capital", "元大",
-         "年度預測", "季度預測", "EPS forecast", "dividend yield", "殖利率"],
+         "年度預測", "季度預測", "EPS forecast", "dividend yield", "殖利率",
+         "資產負債表", "balance sheet", "損益表", "income statement", "現金流量表",
+         "cash flow", "比率分析", "ratio analysis", "毛利率", "營業利益", "稅後純益",
+         "流動比率", "負債比率", "ROA", "ROE", "應收帳款", "ESG", "碳排放",
+         "季度損益表", "quarterly income", "EBITDA", "資本支出", "現金增資"],
 }
 
 # ── Continuation tokens ────────────────────────────────────────────────────────────────────────────────────────────

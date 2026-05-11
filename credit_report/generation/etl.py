@@ -640,7 +640,9 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "subject_company_zh": null,
     "subject_ticker": null,
     "report_type": null,
-    "language": null
+    "language": null,
+    "pages": null,
+    "data_sources": []
   },
   "11B_rating": {
     "current_rating": null,
@@ -660,7 +662,7 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
   "11C_company_fundamentals": {
     "currency": null,
     "unit": null,
-    "share_capital": null,
+    "share_capital_m_shares": null,
     "market_cap": null,
     "book_value_per_share": null,
     "net_cash_per_share": null,
@@ -668,16 +670,19 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "institutional_holding_pct": null,
     "insider_holding_pct": null,
     "margin_balance_shares": null,
-    "dividend_yield_pct": null
+    "dividend_yield_pct": null,
+    "shares_for_eps_calc": null,
+    "product_mix_notes": null
   },
   "11D_investment_thesis": {
     "summary_verbatim": null,
     "bull_points": [],
     "key_catalysts": [],
     "risks": [],
-    "valuation_comment": null
+    "valuation_comment": null,
+    "key_industry_drivers": []
   },
-  "11E_annual_estimates": {
+  "11E_annual_income_statement": {
     "currency": null,
     "unit": null,
     "periods": [
@@ -685,20 +690,30 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "year": null,
         "is_forecast": null,
         "revenue": null,
+        "cogs": null,
         "gross_profit": null,
+        "op_expenses": null,
         "op_profit": null,
+        "ebitda": null,
+        "non_op_income": null,
+        "pre_tax_income": null,
+        "tax": null,
         "net_income": null,
         "eps": null,
+        "diluted_eps": null,
         "gross_margin_pct": null,
+        "ebitda_margin_pct": null,
         "op_margin_pct": null,
         "ni_margin_pct": null,
-        "roe_pct": null,
         "revenue_yoy_pct": null,
+        "gross_profit_yoy_pct": null,
+        "op_profit_yoy_pct": null,
+        "net_income_yoy_pct": null,
         "eps_yoy_pct": null
       }
     ]
   },
-  "11F_quarterly_estimates": {
+  "11F_quarterly_income_statement": {
     "currency": null,
     "unit": null,
     "periods": [
@@ -706,20 +721,114 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "quarter": null,
         "is_forecast": null,
         "revenue": null,
+        "cogs": null,
+        "gross_profit": null,
+        "op_expenses": null,
         "op_profit": null,
+        "non_op_income": null,
+        "pre_tax_income": null,
+        "tax": null,
         "net_income": null,
         "eps": null,
         "gross_margin_pct": null,
         "op_margin_pct": null,
         "ni_margin_pct": null,
-        "revenue_yoy_pct": null,
         "revenue_qoq_pct": null,
-        "eps_yoy_pct": null,
-        "eps_qoq_pct": null
+        "revenue_yoy_pct": null,
+        "op_profit_qoq_pct": null,
+        "op_profit_yoy_pct": null,
+        "pre_tax_qoq_pct": null,
+        "pre_tax_yoy_pct": null,
+        "net_income_qoq_pct": null,
+        "net_income_yoy_pct": null
       }
     ]
   },
-  "11G_valuation_metrics": {
+  "11G_balance_sheet": {
+    "currency": null,
+    "unit": null,
+    "periods": [
+      {
+        "year": null,
+        "is_forecast": null,
+        "cash": null,
+        "accounts_receivable": null,
+        "inventory": null,
+        "other_current_assets": null,
+        "total_current_assets": null,
+        "equity_method_investments": null,
+        "ppe_net": null,
+        "other_non_current_assets": null,
+        "total_assets": null,
+        "accounts_payable": null,
+        "st_borrowings": null,
+        "other_current_liabilities": null,
+        "total_current_liabilities": null,
+        "lt_borrowings": null,
+        "other_non_current_liabilities": null,
+        "total_non_current_liabilities": null,
+        "total_liabilities": null,
+        "share_capital": null,
+        "retained_earnings": null,
+        "controlling_interest_equity": null,
+        "total_equity": null,
+        "total_liabilities_and_equity": null
+      }
+    ]
+  },
+  "11H_cash_flow": {
+    "currency": null,
+    "unit": null,
+    "periods": [
+      {
+        "year": null,
+        "is_forecast": null,
+        "operating_cash_flow": null,
+        "pre_tax_income": null,
+        "depreciation_amortization": null,
+        "working_capital_change": null,
+        "other_operating": null,
+        "investing_cash_flow": null,
+        "capex": null,
+        "lt_investment_change": null,
+        "other_investing": null,
+        "financing_cash_flow": null,
+        "lt_debt_bonds_change": null,
+        "capital_increase": null,
+        "cash_dividends_paid": null,
+        "other_financing": null,
+        "net_cash_change": null,
+        "beginning_cash": null,
+        "ending_cash": null
+      }
+    ]
+  },
+  "11I_ratio_analysis": {
+    "currency": null,
+    "unit": null,
+    "periods": [
+      {
+        "year": null,
+        "is_forecast": null,
+        "revenue_growth_pct": null,
+        "gross_profit_growth_pct": null,
+        "op_profit_growth_pct": null,
+        "net_income_growth_pct": null,
+        "gross_margin_pct": null,
+        "ebitda_margin_pct": null,
+        "op_margin_pct": null,
+        "ni_margin_pct": null,
+        "roa_pct": null,
+        "roe_pct": null,
+        "debt_ratio_pct": null,
+        "debt_to_equity_pct": null,
+        "current_ratio_pct": null,
+        "inventory_days": null,
+        "ar_days": null
+      }
+    ]
+  },
+  "11J_valuation_metrics": {
     "pbr_current": null,
     "per_current": null,
     "ev_ebitda_current": null,
@@ -730,7 +839,16 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       {"company": null, "rating": null, "target_price": null, "pbr": null, "per": null}
     ]
   },
-  "11H_industry_context": {
+  "11K_esg": {
+    "co2_reduction_target_pct": null,
+    "co2_base_year": null,
+    "co2_target_year": null,
+    "carbon_neutral_target_year": null,
+    "certifications": [],
+    "key_initiatives": [],
+    "regulatory_frameworks": []
+  },
+  "11L_industry_context": {
     "key_market_indicators": [
       {"name": null, "value": null, "unit": null, "date": null}
     ],
