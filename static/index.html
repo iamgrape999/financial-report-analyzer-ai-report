@@ -14,8 +14,9 @@ body{background:#f5f5f5;font-family:'Segoe UI',system-ui,sans-serif;color:#1a1a1
 .navbar-brand{letter-spacing:.3px;}
 .card{border:none;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);}
 .card-header{border-radius:12px 12px 0 0!important;font-weight:600;}
-#loginCard{max-width:420px;margin:6rem auto;}
+#loginCard{max-width:420px;margin:4rem auto;}
 #loginCard .card-body{border-top:4px solid #00703C;border-radius:0 0 12px 12px;}
+#loginErr{font-size:0.95rem;font-weight:500;padding:0.75rem 1rem;}
 .view{display:none;}.view.active{display:block;}
 .report-row{cursor:pointer;transition:background .12s;}.report-row:hover{background:#e8f5ee;}
 .sec-badge{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;}
@@ -80,13 +81,13 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 <div id="viewLogin" class="view active container">
   <div id="loginCard" class="card p-4">
     <h4 class="text-center mb-4 fw-bold text-primary">Sign In</h4>
-    <div id="loginErr" class="alert alert-danger d-none small"></div>
+    <div id="loginErr" class="alert alert-danger d-none"></div>
     <div class="mb-3"><label class="form-label fw-semibold">Email</label>
-      <input id="loginEmail" type="email" class="form-control" autofocus></div>
+      <input id="loginEmail" type="email" class="form-control form-control-lg" autocomplete="username" autofocus></div>
     <div class="mb-4"><label class="form-label fw-semibold">Password</label>
-      <input id="loginPw" type="password" class="form-control"></div>
-    <button class="btn btn-primary w-100 fw-semibold" onclick="doLogin()">
-      <span id="loginSpin" class="spinner-border spinner-sm d-none me-2"></span>Sign In</button>
+      <input id="loginPw" type="password" class="form-control form-control-lg" autocomplete="current-password"></div>
+    <button id="loginBtn" class="btn btn-primary w-100 fw-semibold py-2 fs-5" onclick="doLogin()">
+      <span id="loginSpin" class="spinner-border spinner-border-sm d-none me-2"></span>Sign In</button>
   </div>
 </div>
 
@@ -545,16 +546,33 @@ async function doLogin(){
   const pw=document.getElementById('loginPw').value;
   const err=document.getElementById('loginErr');
   const sp=document.getElementById('loginSpin');
+  if(!email){err.textContent='Please enter your email address.';err.classList.remove('d-none');return;}
+  if(!pw){err.textContent='Please enter your password.';err.classList.remove('d-none');return;}
   err.classList.add('d-none');sp.classList.remove('d-none');
+  const btn=document.getElementById('loginBtn');btn.disabled=true;
   try{
-    const res=await fetch(API+'/auth/login',{method:'POST',body:new URLSearchParams({username:email,password:pw})});
-    const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||'Login failed');
+    let res,d;
+    try{
+      res=await fetch(API+'/auth/login',{
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:new URLSearchParams({username:email,password:pw}).toString(),
+      });
+    }catch(netErr){
+      throw new Error('Network error — cannot reach server. Check your connection.');
+    }
+    try{d=await res.json();}catch(_){d={};}
+    if(!res.ok){
+      const msg=d.detail||(res.status===401?'Invalid email or password.':res.status===429?'Too many login attempts — try again in 15 minutes.':'Login failed ('+res.status+').');
+      throw new Error(msg);
+    }
     token=d.access_token;currentRole=d.role;currentEmail=email;
     localStorage.setItem('token',token);localStorage.setItem('role',currentRole);localStorage.setItem('email',currentEmail);
     showDashboard();
-  }catch(e){err.textContent=e.message;err.classList.remove('d-none');}
-  finally{sp.classList.add('d-none');}
+  }catch(e){
+    err.textContent=e.message||'Login failed. Please try again.';
+    err.classList.remove('d-none');
+  }finally{sp.classList.add('d-none');btn.disabled=false;}
 }
 function logout(){localStorage.clear();token=null;currentRole=null;currentEmail=null;currentRid=null;showView('viewLogin');document.getElementById('navUser').classList.add('d-none');}
 
