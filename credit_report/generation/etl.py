@@ -17,16 +17,16 @@ logger = logging.getLogger(__name__)
 
 # Which sections are relevant for each document type
 DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
-    "annual_report":         [4, 7, 3, 2, 10, 1],
-    "financial_statement":   [7, 4, 2, 10, 5],
-    "analyst_presentation":  [4, 7, 2, 3, 10, 1],   # company IR to analysts — NO §11
+    "annual_report":         [4, 7, 3, 2, 10],      # no §1 — credit facility not in annual reports
+    "financial_statement":   [7, 4, 2, 10],          # no §1/§5 — collateral not in financial statements
+    "analyst_presentation":  [4, 7, 3, 10],          # company IR — no §1/§2 (bank-internal sections)
     "interim_report":        [7, 4, 2, 3],
     "valuation_report":      [5, 10, 6],
     "charter_agreement":     [1, 6, 5],
     "shipbuilding_contract": [6, 1, 5],
     "kyc_document":          [9, 1, 4],
     "legal_document":        [8, 1, 9],
-    "external_report":       [11, 3, 4, 7, 2],      # broker/analyst research report — §11
+    "external_report":       [11, 4, 7],             # broker research — §11 first; no §2/§3 (bank-internal)
     "other":                 [4, 7, 1],
 }
 
@@ -502,6 +502,7 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "other_op_income": null, "op_profit": null,
       "finance_income": null, "finance_cost": null, "other_non_op": null,
       "pbt": null, "tax": null, "net_income": null,
+      "minority_interest": null, "net_income_to_parent": null,
       "eps": null,
       "ebitda": null, "depreciation": null}},
     "quarterly_income_statement": {"QN_YYYY": {
@@ -511,14 +512,18 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "cash": null, "trade_receivables": null, "inventories": null,
       "other_ca": null, "total_ca": null,
       "vessels_ppe": null, "right_of_use_assets": null,
+      "intangible_assets": null,
       "other_nca": null, "total_nca": null, "total_assets": null,
       "trade_payables": null, "st_borrowings": null,
       "current_lease_liabilities": null, "other_cl": null, "total_cl": null,
       "lt_borrowings": null, "nc_lease_liabilities": null,
       "other_ncl": null, "total_ncl": null, "total_liabilities": null,
-      "share_capital": null, "retained_earnings": null, "total_equity": null}},
+      "share_capital": null, "retained_earnings": null,
+      "controlling_interest_equity": null,
+      "non_controlling_interest": null,
+      "total_equity": null}},
     "cash_flow": {"FY_YYYY": {
-      "ocf": null, "icf": null, "fcf": null, "net_change": null,
+      "ocf": null, "capex": null, "icf": null, "fcf": null, "net_change": null,
       "opening_cash": null, "fx_effect": null, "closing_cash": null}}
   },
   "7B_key_ratios": {"FY_YYYY": {
@@ -692,7 +697,8 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "owned_fleet_teu_m": 0.0,
         "total_fleet_teu_m": 0.0,
         "total_vessels": 0,
-        "owned_pct": 0.0
+        "owned_pct": 0.0,
+        "yoy_growth_pct": 0.0
       }
     ],
     "cagr_pct": 0.0,
@@ -866,6 +872,8 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "pre_tax_income": null,
         "tax": null,
         "net_income": null,
+        "minority_interest": null,
+        "net_income_to_parent": null,
         "eps": null,
         "diluted_eps": null,
         "gross_margin_pct": null,
@@ -903,10 +911,14 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "pre_tax_income": null,
         "tax": null,
         "net_income": null,
+        "minority_interest": null,
+        "net_income_to_parent": null,
         "eps": null,
         "gross_margin_pct": null,
+        "pre_tax_margin_pct": null,
         "op_margin_pct": null,
         "ni_margin_pct": null,
+        "ebitda": null,
         "revenue_qoq_pct": null,
         "revenue_yoy_pct": null,
         "op_profit_qoq_pct": null,
@@ -940,6 +952,7 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "total_current_assets": null,
         "equity_method_investments": null,
         "ppe_net": null,
+        "intangible_assets": null,
         "other_non_current_assets": null,
         "total_assets": null,
         "accounts_payable": null,
@@ -953,6 +966,7 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "share_capital": null,
         "retained_earnings": null,
         "controlling_interest_equity": null,
+        "non_controlling_interest": null,
         "total_equity": null,
         "total_liabilities_and_equity": null
       }
@@ -1167,7 +1181,7 @@ def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> 
         SECTION_EXTRACTION_SCHEMA[n] for n in section_nos if n in SECTION_EXTRACTION_SCHEMA
     )
     doc_type_label = document_type.replace("_", " ").title()
-    text_snippet = text[:80000]
+    text_snippet = text[:400000]
     user_prompt = (
         f"Document type: {doc_type_label}\n\n"
         f"Target sections to extract: {section_nos}\n\n"
