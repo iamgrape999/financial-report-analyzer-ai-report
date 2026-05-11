@@ -835,6 +835,10 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "product_mix_notes": null,
     "revenue_geographic_mix": [
       {"region": null, "pct_of_revenue": null, "year": null}
+    ],
+    "revenue_composition_by_year": [
+      {"year": null, "freight_income_pct": null, "agency_fees_pct": null,
+       "slottage_income_pct": null, "container_construction_pct": null, "others_pct": null}
     ]
   },
   "11D_investment_thesis": {
@@ -910,7 +914,15 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "pre_tax_qoq_pct": null,
         "pre_tax_yoy_pct": null,
         "net_income_qoq_pct": null,
-        "net_income_yoy_pct": null
+        "net_income_yoy_pct": null,
+        "eps_qoq_pct": null,
+        "eps_yoy_pct": null,
+        "effective_tax_rate_pct": null,
+        "days_of_inventory": null,
+        "days_of_receivables": null,
+        "days_of_payables": null,
+        "cash_conversion_cycle": null,
+        "quarterly_free_cash_flow": null
       }
     ]
   },
@@ -967,9 +979,11 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "capital_increase": null,
         "cash_dividends_paid": null,
         "other_financing": null,
+        "fx_effect": null,
         "net_cash_change": null,
         "beginning_cash": null,
-        "ending_cash": null
+        "ending_cash": null,
+        "free_cash_flow": null
       }
     ]
   },
@@ -993,8 +1007,14 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
         "debt_ratio_pct": null,
         "debt_to_equity_pct": null,
         "current_ratio_pct": null,
+        "quick_ratio_pct": null,
+        "interest_coverage_x": null,
+        "net_debt_to_equity_pct": null,
         "inventory_days": null,
-        "ar_days": null
+        "ar_days": null,
+        "ev_ebitda_ratio": null,
+        "price_to_fcf_ratio": null,
+        "price_to_sales_ratio": null
       }
     ]
   },
@@ -1012,10 +1032,30 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "pbr_band_chart_start": null,
     "pbr_band_chart_end": null,
     "peer_comparison": [
-      {"company": null, "rating": null, "target_price": null, "pbr": null, "per": null}
+      {
+        "company": null,
+        "ticker": null,
+        "group": null,
+        "rating": null,
+        "stock_price": null,
+        "market_cap_m_usd": null,
+        "eps_by_year": [{"year": null, "eps": null, "is_forecast": null}],
+        "per_by_year": [{"year": null, "per": null, "is_forecast": null}],
+        "eps_growth_pct_by_year": [{"year": null, "growth_pct": null, "is_forecast": null}],
+        "roe_pct_by_year": [{"year": null, "roe_pct": null, "is_forecast": null}],
+        "bv_per_share_by_year": [{"year": null, "bv": null, "is_forecast": null}],
+        "pbr_by_year": [{"year": null, "pbr": null, "is_forecast": null}]
+      }
     ]
   },
   "11K_esg": {
+    "sustainalytics_total_score": null,
+    "sustainalytics_exposure_score_A": null,
+    "sustainalytics_execution_score_B": null,
+    "sustainalytics_risk_rating": null,
+    "sustainalytics_industry_rank": null,
+    "sustainalytics_assessment_date": null,
+    "key_esg_issues": [],
     "co2_reduction_target_pct": null,
     "co2_base_year": null,
     "co2_target_year": null,
