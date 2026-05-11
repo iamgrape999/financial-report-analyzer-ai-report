@@ -107,6 +107,7 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
   2B_solvency: {
     primary_repayment_source_verbatim,
     secondary_repayment_source_verbatim,
+    deal_dscr: {period_label, dscr_value, dscr_floor, notes},
     ema: {period, cash_bn_usd, total_debt_bn_usd, op_ebitda_bn_usd,
       debt_ebitda_ratio, interest_coverage, prior_year_coverage}
   },
@@ -137,6 +138,7 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
   3B_internal_ratings: {
     rows[{entity_full_name, entity_abbrev, role,
       fy2022_23, fy2023_24, fy2024, interim, current,
+      generated_rating, override_rating, final_rating,
       remarks, override_flag (bool)}],
     period_display_labels: {[json_key]: display_name}
   },
@@ -216,6 +218,13 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "fleet_detail": [
       {"vessel_name": null, "type": null, "teu": null, "dwt": null,
        "year_built": null, "flag": null, "class_society": null, "employment": null}
+    ],
+    "orderbook": [
+      {"vessel_name": null, "type": null, "teu": null, "dwt": null,
+       "builder": null, "expected_delivery": null, "financed_by": null, "notes": null}
+    ],
+    "capex_plan": [
+      {"year": null, "capex_usd_m": null, "description": null}
     ]
   },
   "4G_debt_profile": [
@@ -358,6 +367,8 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
        "max_loan_os_usd_m": null, "coverage_pct": null,
        "drawdown_usd_m": null, "cum_drawdown_usd_m": null, "status": null}
     ],
+    "lag_time_days": null,
+    "lag_time_analysis": null,
     "footnotes": null
   },
   "5C_vessel_mortgage": {
@@ -380,7 +391,8 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "ltv_cap_pct": null,
     "amortisation_schedule": [
       {"period": null, "date": null, "principal_usd_m": null, "interest_usd_m": null,
-       "total_debt_service_usd_m": null, "outstanding_balance_usd_m": null, "ltv_pct": null}
+       "total_debt_service_usd_m": null, "outstanding_balance_usd_m": null,
+       "vessel_value_usd_m": null, "acr_pct": null, "ltv_pct": null}
     ]
   },
   "5D_insurance": [
@@ -572,7 +584,9 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "quarter": null,
       "revenue": null,
       "gross_margin_pct": null,
+      "op_margin_pct": null,
       "ni_margin_pct": null,
+      "interest_coverage_x": null,
       "current_ratio_pct": null,
       "debt_ratio_pct": null
     }
@@ -615,8 +629,8 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "distinct_banking_groups": 0
     }
   },
-  "8B_other_information": "RESERVED — skip entirely"
-}""",
+}
+""",
 
     9: """Section 9 — Credit Analysis Checklist & Recommendation:
 {
@@ -636,7 +650,9 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "ongoing_covenants": [
       {"description": "Covenant description", "threshold": "e.g. ACR >= 100%", "testing": "Every 2 years | Semi-annual | Annual | Ongoing"}
     ],
-    "financial_covenants": "NIL | description if applicable"
+    "financial_covenants": [
+      {"covenant": null, "threshold": null, "testing_frequency": null}
+    ]
   },
   "9C_recommendation": {
     "decision": "APPROVE | APPROVE WITH CONDITIONS | DECLINE",
@@ -646,6 +662,8 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "key_conditions": ["condition 1", "condition 2"],
     "balloon_ltv_pct": null,
     "balloon_ltv_cap_pct": null,
+    "margin_bps": null,
+    "pricing_summary": null,
     "risk_level_changes_from_prior": "None | Improved | Deteriorated — reason"
   },
   "9D_signoff": {
