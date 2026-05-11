@@ -563,10 +563,17 @@ def _make_mock_client() -> MagicMock:
 async def run_mock_pipeline() -> int:
     section("MOCK PIPELINE — IN-PROCESS FULL AI REPORT GENERATION")
 
-    # Patch Gemini client BEFORE importing the ASGI app
+    # Patch Gemini client BEFORE importing the ASGI app.
+    # Also patch the module-level cached GEMINI_API_KEY values in already-imported
+    # modules (credit_report.config is cached at import time; if test_calculation_engine
+    # ran first, GEMINI_API_KEY would be "" without these patches).
     mock_client = _make_mock_client()
+    _mock_key = "mock-key-for-testing"
 
-    with patch("google.genai.Client", return_value=mock_client):
+    with patch("google.genai.Client", return_value=mock_client), \
+         patch("credit_report.config.GEMINI_API_KEY", _mock_key), \
+         patch("credit_report.api.generate.GEMINI_API_KEY", _mock_key), \
+         patch("credit_report.generation.claude_client.GEMINI_API_KEY", _mock_key):
         # Import app inside the patch context so it's active when lifespan runs
         from main import _safe_add_columns, _seed_admin, app  # type: ignore  # noqa: PLC0415
         from httpx import ASGITransport, AsyncClient  # noqa: PLC0415

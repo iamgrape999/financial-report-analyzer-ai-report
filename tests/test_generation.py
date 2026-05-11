@@ -274,7 +274,7 @@ async def test_pipeline_marks_error_on_claude_failure(db: AsyncSession):
         id=str(uuid.uuid4()),
         report_id=REPORT_ID,
         section_no=4,
-        input_json=json.dumps({}),
+        input_json=json.dumps({"4A_borrower": {"borrower_name": "EMA"}}),
         saved_by="user-001",
     ))
     await db.flush()
@@ -305,6 +305,19 @@ async def test_pipeline_marks_error_on_claude_failure(db: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_full_report_pipeline_generates_all_independent_sections(db: AsyncSession):
+    # Seed minimal non-empty input for all 10 sections so the pipeline's
+    # "no analyst input data" guard doesn't block any section.
+    _stub = json.dumps({"stub": True})
+    for sec_no in range(1, 11):
+        db.add(SectionInput(
+            id=str(uuid.uuid4()),
+            report_id=REPORT_ID,
+            section_no=sec_no,
+            input_json=_stub,
+            saved_by="user-001",
+        ))
+    await db.flush()
+
     with patch(
         "credit_report.generation.pipeline.generate_section_markdown", new_callable=AsyncMock
     ) as mock_gen, patch(
