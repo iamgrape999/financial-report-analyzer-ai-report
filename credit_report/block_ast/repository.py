@@ -34,6 +34,9 @@ async def save_blocks(
         else:
             db.add(ReportBlock(**bd))
 
+    # Flush so new ReportBlock rows exist in DB before FK-constrained TableCell inserts
+    await db.flush()
+
     # Delete stale cells before inserting new ones (prevents duplicates on regeneration)
     block_ids_with_cells = {c["block_id"] for c in cells}
     if block_ids_with_cells:

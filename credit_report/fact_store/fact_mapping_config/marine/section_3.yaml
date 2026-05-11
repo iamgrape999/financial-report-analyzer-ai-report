@@ -10,21 +10,21 @@ facts:
     unit: "grade"
 
   # Internal rating — primary borrower (row 0)
-  - id_template: "RATING-INTERNAL-CURRENT-{entity}-CURRENT"
+  - id_template: "RATING-INTERNAL-CURRENT-BORROW-{entity}-CURRENT"
     path: "3B_internal_ratings.rows[0].current"
     metric: "internal_rating_current"
     entity_path: "3B_internal_ratings.rows[0].entity_abbrev"
     period: "CURRENT"
     unit: "grade"
 
-  - id_template: "RATING-INTERNAL-FINAL-{entity}-CURRENT"
+  - id_template: "RATING-INTERNAL-FINAL-BORROW-{entity}-CURRENT"
     path: "3B_internal_ratings.rows[0].final_rating"
     metric: "internal_rating_final"
     entity_path: "3B_internal_ratings.rows[0].entity_abbrev"
     period: "CURRENT"
     unit: "grade"
 
-  - id_template: "RATING-INTERNAL-GENERATED-{entity}-CURRENT"
+  - id_template: "RATING-INTERNAL-GENERATED-BORROW-{entity}-CURRENT"
     path: "3B_internal_ratings.rows[0].generated_rating"
     metric: "internal_rating_generated"
     entity_path: "3B_internal_ratings.rows[0].entity_abbrev"
@@ -32,14 +32,14 @@ facts:
     unit: "grade"
 
   # Internal rating — guarantor (row 1)
-  - id_template: "RATING-INTERNAL-CURRENT-{entity}-CURRENT"
+  - id_template: "RATING-INTERNAL-CURRENT-GUART-{entity}-CURRENT"
     path: "3B_internal_ratings.rows[1].current"
     metric: "internal_rating_current"
     entity_path: "3B_internal_ratings.rows[1].entity_abbrev"
     period: "CURRENT"
     unit: "grade"
 
-  - id_template: "RATING-INTERNAL-FINAL-{entity}-CURRENT"
+  - id_template: "RATING-INTERNAL-FINAL-GUART-{entity}-CURRENT"
     path: "3B_internal_ratings.rows[1].final_rating"
     metric: "internal_rating_final"
     entity_path: "3B_internal_ratings.rows[1].entity_abbrev"

@@ -1763,10 +1763,11 @@ async function validateSection(secNo){
     if(!br.ok)throw new Error('Could not load blocks');
     const blocks=await br.json();
     if(!blocks.length){toast('No blocks yet — generate section first','warning');return;}
-    // Validate all blocks in the section
-    await Promise.all(blocks.map(b=>
-      fetch(API+'/reports/'+currentRid+'/blocks/'+b.id+'/validate',{method:'POST',headers:H()})
-    ));
+    // Validate all blocks in the section — throw on any non-2xx response
+    await Promise.all(blocks.map(async b=>{
+      const r=await fetch(API+'/reports/'+currentRid+'/blocks/'+b.id+'/validate',{method:'POST',headers:H()});
+      if(!r.ok)throw new Error(`Block ${b.id} validate failed: ${r.status}`);
+    }));
     const badge=document.getElementById('vstatus-'+secNo);
     if(badge){badge.textContent='passed';badge.className='badge bg-success';badge.style.fontSize='10px';}
     toast(`§${secNo} validated`,'success');

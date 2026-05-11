@@ -225,8 +225,11 @@ class InputFactExtractor:
         if "H2" in upper:
             return f"H2{yr}"
         if "/" in raw:
-            # FY2022/23 style
-            return f"FY{raw.strip()}"
+            # FY2022/23 style — strip any existing FY prefix to avoid "FYFY2022/23"
+            base = raw.strip()
+            if base.upper().startswith("FY"):
+                base = base[2:]
+            return f"FY{base}"
         return f"FY{yr}"
 
     @staticmethod
