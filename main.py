@@ -53,25 +53,40 @@ logger = logging.getLogger(__name__)
 
 
 async def _seed_admin() -> None:
-    email = os.getenv("ADMIN_EMAIL", "")
+    email = os.getenv("ADMIN_EMAIL", "").strip()
     password = os.getenv("ADMIN_PASSWORD", "")
     if not email or not password:
         logger.info("ADMIN_EMAIL / ADMIN_PASSWORD not set — skipping admin seed")
         return
     async with AsyncSessionLocal() as session:
+        # Exact-match first, then case-insensitive fallback
         result = await session.execute(select(User).where(User.email == email))
-        if result.scalar_one_or_none():
-            logger.info("Admin account already exists: %s", email)
-            return
-        session.add(User(
-            id=str(uuid.uuid4()),
-            email=email,
-            hashed_password=hash_password(password),
-            role="admin",
-            is_active=True,
-        ))
-        await session.commit()
-        logger.info("Seeded admin account: %s", email)
+        user = result.scalar_one_or_none()
+        if user is None:
+            result2 = await session.execute(select(User).where(User.email.ilike(email)))
+            user = result2.scalar_one_or_none()
+            if user:
+                logger.info("_seed_admin: found existing account via case-insensitive match stored=%r env=%r",
+                            user.email, email)
+
+        if user:
+            # Always sync password from env var — ensures ADMIN_PASSWORD change takes effect immediately.
+            # This is intentional: env var is the source of truth for the admin credential.
+            user.hashed_password = hash_password(password)
+            user.is_active = True
+            user.role = "admin"
+            await session.commit()
+            logger.info("_seed_admin: synced password for admin=%s from ADMIN_PASSWORD env var", user.email)
+        else:
+            session.add(User(
+                id=str(uuid.uuid4()),
+                email=email,
+                hashed_password=hash_password(password),
+                role="admin",
+                is_active=True,
+            ))
+            await session.commit()
+            logger.info("_seed_admin: created new admin account email=%s", email)
 
 
 @asynccontextmanager
