@@ -1,12 +1,13 @@
-"""DOCX export endpoint for generated credit report sections."""
+"""DOCX and PDF export endpoints for generated credit report sections."""
 from __future__ import annotations
 
 import io
 import logging
 import re
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -136,6 +137,115 @@ async def export_docx(
         media_type=(
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         ),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── PDF export ────────────────────────────────────────────────────────────────
+
+_PDF_CSS = """\
+@page {
+  size: A4;
+  margin: 2.5cm 2.8cm;
+  @top-right { content: "Cathay United Bank — CONFIDENTIAL";
+               font-size: 8pt; color: #888; }
+  @bottom-center { content: counter(page); font-size: 8pt; color: #888; }
+}
+body { font-family: Arial, sans-serif; font-size: 10pt; line-height: 1.7; color: #1a1a1a; }
+.cover { text-align: center; padding-top: 8cm; page-break-after: always; }
+.cover .bank { font-size: 11pt; color: #00703C; font-weight: bold; letter-spacing: 1px; }
+.cover .title { font-size: 22pt; font-weight: bold; margin: 24px 0 12px; }
+.cover .borrower { font-size: 14pt; color: #333; margin-bottom: 8px; }
+.cover .rdate { font-size: 10pt; color: #666; }
+h1 { font-size: 13pt; color: #00703C; border-bottom: 2pt solid #00703C;
+     padding-bottom: 4px; margin-top: 24px; page-break-after: avoid; }
+h2 { font-size: 11pt; color: #005a30; margin-top: 16px; page-break-after: avoid; }
+h3 { font-size: 10pt; color: #00703C; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 9pt; }
+th { background: #e8f5ee; font-weight: bold; padding: 5px 8px;
+     border: 1px solid #b2dfce; text-align: left; }
+td { padding: 4px 8px; border: 1px solid #d1d5db; vertical-align: top; }
+ul, ol { margin: 6px 0 6px 18px; }
+li { margin-bottom: 3px; }
+p { margin: 6px 0; }
+"""
+
+
+def _md_to_html(md_text: str) -> str:
+    """Convert Markdown to HTML, using the `markdown` library if available."""
+    try:
+        import markdown as md_lib
+        return md_lib.markdown(md_text, extensions=["tables", "fenced_code"])
+    except ImportError:
+        # Basic regex fallback
+        t = re.sub(r"^#{1,6} (.+)$", lambda m: f"<h{len(m.group(0).split()[0])}>{m.group(1)}</h{len(m.group(0).split()[0])}>", md_text, flags=re.MULTILINE)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+        t = re.sub(r"\*(.+?)\*", r"<em>\1</em>", t)
+        return "<p>" + t.replace("\n\n", "</p><p>") + "</p>"
+
+
+@router.get("/export/pdf")
+async def export_pdf(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate and stream a PDF file for all completed sections (requires weasyprint)."""
+    try:
+        from weasyprint import HTML, CSS
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="PDF export unavailable — weasyprint is not installed on this server",
+        )
+
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, current_user)
+
+    result = await db.execute(
+        select(SectionOutput)
+        .where(SectionOutput.report_id == report_id, SectionOutput.status == "done")
+        .order_by(SectionOutput.section_no)
+    )
+    outputs = list(result.scalars().all())
+
+    if not outputs:
+        raise HTTPException(status_code=404, detail="No completed sections to export")
+
+    borrower = report.borrower_name or report_id
+    report_date = datetime.now().strftime("%d %b %Y")
+
+    html_parts = [
+        f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Credit Report — {borrower}</title></head><body>
+<div class="cover">
+  <div class="bank">CATHAY UNITED BANK</div>
+  <div class="title">Credit Analysis Report</div>
+  <div class="borrower">{borrower}</div>
+  <div class="rdate">{report_date}</div>
+</div>"""
+    ]
+
+    for output in outputs:
+        sec_no = output.section_no
+        sec_name = SECTION_NAMES.get(sec_no, f"Section {sec_no}")
+        html_parts.append(f'<h1>§{sec_no} &nbsp; {sec_name}</h1>')
+        html_parts.append(_md_to_html(output.markdown or ""))
+
+    html_parts.append("</body></html>")
+    full_html = "\n".join(html_parts)
+
+    pdf_bytes = HTML(string=full_html).write_pdf(stylesheets=[CSS(string=_PDF_CSS)])
+
+    safe_name = re.sub(r"[^\w\-]", "_", borrower)[:40]
+    filename = f"credit_report_{safe_name}.pdf"
+    logger.info(
+        "export_pdf: generated filename=%r sections=%d bytes=%d report=%s user=%s",
+        filename, len(outputs), len(pdf_bytes), report_id, current_user.id,
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
