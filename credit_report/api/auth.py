@@ -79,13 +79,55 @@ async def login(
     ip = _client_ip(request)
     _check_brute_force(ip)
 
-    # form_data.username holds the email (OAuth2 standard field name)
-    result = await db.execute(select(User).where(User.email == form_data.username))
+    submitted_email = (form_data.username or "").strip()
+    submitted_pw = form_data.password or ""
+
+    logger.info(
+        "login: attempt email=%r pw_len=%d ip=%s ua=%s",
+        submitted_email, len(submitted_pw), ip,
+        request.headers.get("user-agent", "")[:80],
+    )
+
+    # Look up by exact email first, then try case-insensitive fallback
+    result = await db.execute(select(User).where(User.email == submitted_email))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+
+    if user is None:
+        # Try case-insensitive match to catch mixed-case env var vs input
+        result2 = await db.execute(
+            select(User).where(User.email.ilike(submitted_email))
+        )
+        user = result2.scalar_one_or_none()
+        if user:
+            logger.info("login: found user via case-insensitive match stored=%r submitted=%r",
+                        user.email, submitted_email)
+
+    if user is None:
+        # List all stored emails (masked) to diagnose mismatch
+        all_result = await db.execute(select(User.email))
+        all_emails = [e for (e,) in all_result.all()]
+        masked = [f"{e[:3]}***{e[e.find('@'):]}" if "@" in e else "***" for e in all_emails]
+        logger.warning(
+            "login: no user found for email=%r ip=%s — stored accounts: %s",
+            submitted_email, ip, masked,
+        )
         _record_failure(ip)
-        logger.warning("login: failed credential check email=%r ip=%s", form_data.username, ip)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"No account found for '{submitted_email}'. Check your email address.",
+        )
+
+    pw_ok = verify_password(submitted_pw, user.hashed_password)
+    logger.info("login: pw_verify=%s user=%s email=%r ip=%s", pw_ok, user.id, user.email, ip)
+
+    if not pw_ok:
+        _record_failure(ip)
+        logger.warning("login: wrong password user=%s email=%r ip=%s", user.id, user.email, ip)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password.",
+        )
+
     if not user.is_active:
         _record_failure(ip)
         logger.warning("login: inactive account user=%s ip=%s", user.id, ip)
