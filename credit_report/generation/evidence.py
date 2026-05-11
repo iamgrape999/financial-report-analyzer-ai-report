@@ -392,6 +392,35 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) 
         return ""
 
 
+# ── xlsx / xls ────────────────────────────────────────────────────────────────
+
+def _extract_text_from_xlsx(file_bytes: bytes) -> str:
+    """Convert Excel workbook sheets to Markdown tables for ETL processing."""
+    try:
+        import openpyxl
+        from io import BytesIO
+
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        parts: list[str] = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
+            parts.append(f"\n## Sheet: {sheet_name}\n")
+            headers = [str(c) if c is not None else "" for c in rows[0]]
+            parts.append("| " + " | ".join(headers) + " |")
+            parts.append("| " + " | ".join(["---"] * len(headers)) + " |")
+            for row in rows[1:50]:   # cap at 50 rows per sheet
+                cells = [str(c) if c is not None else "" for c in row]
+                parts.append("| " + " | ".join(cells) + " |")
+        wb.close()
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("[OCR] xlsx extraction failed: %s", e)
+        return ""
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
@@ -450,6 +479,9 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
     elif ext in ("tiff", "tif"):
         text = extract_text_from_image(file_bytes, "image/tiff")
         fmt = "tiff"
+    elif ext in ("xlsx", "xls"):
+        text = _extract_text_from_xlsx(file_bytes)
+        fmt = ext
     else:
         logger.info("[OCR] unknown extension %r — trying pdf then docx", ext)
         text = extract_text_from_pdf(file_bytes)

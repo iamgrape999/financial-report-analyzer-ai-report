@@ -66,6 +66,16 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 .nav-tabs .nav-link:hover{color:#005a30!important;}
 .table-light>*>tr>th,.table-light>*>tr>td,.table thead.table-light th{background-color:#e8f5ee!important;color:#1a1a1a;}
 .badge.bg-info{background-color:#0e9f6e!important;}
+/* ── Improve Paragraph panel ── */
+.improve-panel{position:fixed;right:0;top:56px;width:340px;height:calc(100vh - 56px);background:#fff;border-left:2px solid #b2dfce;padding:16px;overflow-y:auto;z-index:500;box-shadow:-3px 0 12px rgba(0,0,0,.1);transition:transform .2s;}
+.improve-panel.hidden{transform:translateX(100%);}
+.improve-original{background:#f8f9fa;border-left:3px solid #00703C;padding:8px 10px;font-size:11px;color:#555;border-radius:0 4px 4px 0;max-height:120px;overflow-y:auto;}
+.improve-suggestion{background:#f0fff4;border:1px solid #b2dfce;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto;}
+.review-content-wrap{transition:margin-right .2s;}
+.review-content-wrap.panel-open{margin-right:340px;}
+[data-block-id]{cursor:pointer;border-radius:4px;transition:background .15s;}
+[data-block-id]:hover{background:#f0fff4;}
+[data-block-id].selected{outline:2px solid #00703C;background:#e8f5ee;}
 </style>
 </head>
 <body>
@@ -164,10 +174,10 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
             <option value="other">📁 其他 / Other</option>
           </select>
           <div class="d-flex gap-2">
-            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff" class="form-control form-control-sm">
+            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.xlsx,.xls" class="form-control form-control-sm">
             <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload</button>
           </div>
-          <small class="text-muted">PDF · DOCX · PPTX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
+          <small class="text-muted">PDF · DOCX · PPTX · XLSX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
           <div id="docList"><span class="text-muted">No documents uploaded yet.</span></div>
         </div>
       </div>
@@ -342,6 +352,36 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
     </div>
   </div></div>
+</div>
+
+<!-- Improve Paragraph Panel -->
+<div id="improvePanel" class="improve-panel hidden">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <strong style="color:#00703C">Improve Paragraph</strong>
+    <button class="btn btn-sm btn-outline-secondary" onclick="closeImprovePanel()">&#x2715;</button>
+  </div>
+  <div class="mb-2">
+    <label class="form-label small fw-bold text-muted">Selected paragraph:</label>
+    <div id="improveOriginalText" class="improve-original">—</div>
+  </div>
+  <div class="mb-2">
+    <label class="form-label small fw-bold">Instruction:</label>
+    <textarea id="improveInstruction" class="form-control form-control-sm" rows="3"
+      placeholder="e.g. Rewrite in a more conservative tone&#10;Emphasize downside risks&#10;Make this paragraph more concise"></textarea>
+  </div>
+  <button id="improveSubmitBtn" class="btn btn-success btn-sm w-100 mb-3" onclick="submitImprove()">
+    <span id="improveSpin" class="spinner-border spinner-border-sm d-none me-1"></span>
+    Generate Improvement
+  </button>
+  <div id="improveSuggestionWrap" class="d-none">
+    <label class="form-label small fw-bold">AI Suggestion:</label>
+    <div id="improveSuggestionText" class="improve-suggestion mb-2"></div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary btn-sm flex-fill" onclick="applyImprovement()">Apply</button>
+      <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="discardImprovement()">Discard</button>
+    </div>
+  </div>
+  <div id="improveStatusMsg" class="small text-muted mt-2"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -974,7 +1014,7 @@ function renderReview(){
     if(o?.status==='done'&&o.markdown){
       return `<div id="rsec-${n}" class="card review-section-card">
         <div class="card-header">§${n} — ${snm(n)}</div>
-        <div class="card-body markdown-body">${marked.parse(o.markdown)}</div>
+        <div class="card-body markdown-body review-content-wrap" data-block-id="section-${n}" data-version="1" data-section="${n}">${marked.parse(o.markdown)}</div>
       </div>`;
     }
     return `<div id="rsec-${n}" class="card review-section-card border-warning">
@@ -989,6 +1029,7 @@ function renderReview(){
       </div>
     </div>`;
   }).join('');
+  attachBlockClickHandlers();
 }
 
 async function generateFromReview(secNo){
@@ -1387,24 +1428,45 @@ function exportTxt(){
   if(!outs.length){toast('No generated sections','warning');return;}
   dlBlob(outs.map(o=>`\n${'='.repeat(60)}\nSECTION ${o.section_no} — ${SNAMES[o.section_no]}\n${'='.repeat(60)}\n\n${stripMarkdown(o.markdown)}`).join('\n\n'),'credit_report.txt','text/plain');
 }
-function exportPdf(){
+async function exportPdf(){
+  if(!currentRid){toast('No report loaded','warning');return;}
+  toast('Generating PDF…','info');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/export/pdf',{headers:H()});
+    if(res.ok){
+      const blob=await res.blob();
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='credit_report.pdf';
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);URL.revokeObjectURL(a.href);
+      toast('PDF downloaded ✓','success');
+      return;
+    }
+    if(res.status===503){
+      toast('Server PDF unavailable — opening print dialog','warning');
+      _exportPdfFallback();return;
+    }
+    toast('PDF export failed ('+res.status+')','danger');
+  }catch(e){
+    toast('PDF error: '+e.message,'danger');
+    _exportPdfFallback();
+  }
+}
+function _exportPdfFallback(){
   const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
   if(!outs.length){toast('No generated sections','warning');return;}
   const body=outs.map(o=>`<h1>§${o.section_no} — ${esc(SNAMES[o.section_no])}</h1>${marked.parse(o.markdown)}`).join('<hr>');
   const win=window.open('','_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Report</title>
-<style>body{font-family:Georgia,serif;max-width:920px;margin:40px auto;padding:0 24px;line-height:1.75;color:#1a1a1a;}
-table{border-collapse:collapse;width:100%;margin:1rem 0;}th,td{border:1px solid #ccc;padding:6px 10px;}th{background:#e8f5ee;}
+<style>body{font-family:Georgia,serif;max-width:920px;margin:40px auto;padding:0 24px;line-height:1.75;}
+table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:6px 10px;}th{background:#e8f5ee;}
 h1{font-size:1.4rem;border-bottom:3px solid #00703C;padding-bottom:6px;margin-top:2.5rem;}
-h2{font-size:1.2rem;border-bottom:1px solid #b2dfce;padding-bottom:4px;}h3{color:#00703C;}
-hr{border:none;border-top:1px dashed #ccc;margin:2rem 0;}
 @media print{.noprint{display:none!important;}}
 </style></head><body>
-<div class="noprint" style="padding:12px;background:#e8f5ee;border-radius:6px;margin-bottom:20px;display:flex;gap:12px;align-items:center;">
-  <strong style="color:#00703C">📄 Credit Analysis Report</strong>
-  <button onclick="window.print()" style="margin-left:auto;padding:7px 18px;background:#00703C;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">🖨 Print / Save as PDF</button>
-</div>
-${body}</body></html>`);
+<div class="noprint" style="padding:12px;background:#e8f5ee;border-radius:6px;margin-bottom:20px;">
+<button onclick="window.print()" style="padding:7px 18px;background:#00703C;color:#fff;border:none;border-radius:4px;cursor:pointer;">🖨 Print / Save as PDF</button>
+</div>${body}</body></html>`);
   win.document.close();
 }
 function dlBlob(content,filename,mime){
@@ -1430,6 +1492,90 @@ function toast(msg,type='info'){
 }
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&document.getElementById('viewLogin').classList.contains('active'))doLogin();});
 if(token){showDashboard();}else{showView('viewLogin');}
+
+// ── Improve Paragraph Panel ───────────────────────────────────────────────────
+let _improveBlockId=null;
+let _improveVersion=null;
+let _improveSuggestedContent=null;
+
+function attachBlockClickHandlers(){
+  document.querySelectorAll('[data-block-id]').forEach(el=>{
+    el.onclick=function(e){
+      e.stopPropagation();
+      const blockId=this.dataset.blockId;
+      const version=parseInt(this.dataset.version||'1');
+      const text=this.innerText.slice(0,400);
+      openImprovePanel(blockId,version,text);
+    };
+  });
+}
+
+function openImprovePanel(blockId,version,previewText){
+  _improveBlockId=blockId;
+  _improveVersion=version;
+  _improveSuggestedContent=null;
+  document.getElementById('improveOriginalText').textContent=previewText+(previewText.length>=400?'…':'');
+  document.getElementById('improveInstruction').value='';
+  document.getElementById('improveSuggestionWrap').classList.add('d-none');
+  document.getElementById('improveStatusMsg').textContent='';
+  document.getElementById('improvePanel').classList.remove('hidden');
+  document.querySelectorAll('[data-block-id]').forEach(el=>el.classList.remove('selected'));
+  document.querySelector(`[data-block-id="${blockId}"]`)?.classList.add('selected');
+}
+
+function closeImprovePanel(){
+  document.getElementById('improvePanel').classList.add('hidden');
+  document.querySelectorAll('[data-block-id]').forEach(el=>el.classList.remove('selected'));
+  _improveBlockId=null;
+}
+
+async function submitImprove(){
+  if(!_improveBlockId){toast('Select a paragraph first','warning');return;}
+  const instruction=document.getElementById('improveInstruction').value.trim();
+  if(!instruction){toast('Please enter an improvement instruction','warning');return;}
+  const spin=document.getElementById('improveSpin');
+  spin.classList.remove('d-none');
+  document.getElementById('improveStatusMsg').textContent='Calling AI…';
+  document.getElementById('improveSuggestionWrap').classList.add('d-none');
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+_improveBlockId+'/improve',{
+      method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({instruction,expected_version:_improveVersion})
+    });
+    if(!res.ok)throw new Error((await res.json()).detail||'Request failed');
+    const data=await res.json();
+    _improveSuggestedContent=data.suggested_content;
+    _improveVersion=data.current_version;
+    document.getElementById('improveSuggestionText').textContent=data.suggested_content;
+    document.getElementById('improveSuggestionWrap').classList.remove('d-none');
+    document.getElementById('improveStatusMsg').textContent='Suggestion ready';
+  }catch(e){
+    document.getElementById('improveStatusMsg').textContent='Error: '+e.message;
+    toast('Improvement failed: '+e.message,'danger');
+  }finally{spin.classList.add('d-none');}
+}
+
+async function applyImprovement(){
+  if(!_improveSuggestedContent||!_improveBlockId)return;
+  const instruction=document.getElementById('improveInstruction').value.trim();
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+_improveBlockId,{
+      method:'PATCH',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({content:_improveSuggestedContent,reason:'AI improvement: '+instruction,expected_version:_improveVersion})
+    });
+    if(!res.ok)throw new Error((await res.json()).detail||'Patch failed');
+    toast('Paragraph updated','success');
+    document.getElementById('improveStatusMsg').textContent='Applied';
+    closeImprovePanel();
+    openReview();
+  }catch(e){toast('Apply failed: '+e.message,'danger');}
+}
+
+function discardImprovement(){
+  _improveSuggestedContent=null;
+  document.getElementById('improveSuggestionWrap').classList.add('d-none');
+  document.getElementById('improveStatusMsg').textContent='Discarded';
+}
 </script>
 </body>
 </html>
