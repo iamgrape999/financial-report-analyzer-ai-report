@@ -694,7 +694,7 @@ async def etl_document(
 
     from google import genai
     from google.genai import types as genai_types
-    from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
+    from credit_report.config import GEMINI_API_KEY, GEMINI_ETL_MODEL
 
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is not configured — cannot run ETL extraction")
@@ -706,11 +706,11 @@ async def etl_document(
         logger.info(
             "[ETL] calling Gemini model=%s max_output_tokens=65536 "
             "doc_type=%s sections=%s",
-            GEMINI_MODEL, document_type, target_sections,
+            GEMINI_ETL_MODEL, document_type, target_sections,
         )
         t_gemini = time.perf_counter()
         response = await client.aio.models.generate_content(
-            model=GEMINI_MODEL,
+            model=GEMINI_ETL_MODEL,
             contents=user_prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=system_prompt,

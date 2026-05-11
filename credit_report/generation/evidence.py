@@ -298,7 +298,7 @@ def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -
     try:
         from google import genai
         from google.genai import types as genai_types
-        from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
+        from credit_report.config import GEMINI_API_KEY, GEMINI_OCR_MODEL
 
         if not GEMINI_API_KEY:
             logger.warning("[OCR] extract_text_from_image: GEMINI_API_KEY not set — cannot OCR")
@@ -306,9 +306,9 @@ def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -
 
         t0 = time.perf_counter()
         client = genai.Client(api_key=GEMINI_API_KEY)
-        logger.info("[OCR] extract_text_from_image: calling Gemini model=%s max_tokens=32768", GEMINI_MODEL)
+        logger.info("[OCR] extract_text_from_image: calling Gemini model=%s max_tokens=32768", GEMINI_OCR_MODEL)
         response = client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=GEMINI_OCR_MODEL,
             contents=[
                 genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 genai_types.Part.from_text(_OCR_PROMPT),
@@ -350,7 +350,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) 
     try:
         from google import genai
         from google.genai import types as genai_types
-        from credit_report.config import GEMINI_API_KEY, GEMINI_MODEL
+        from credit_report.config import GEMINI_API_KEY, GEMINI_OCR_MODEL
 
         if not GEMINI_API_KEY:
             logger.warning("[OCR] extract_text_from_scanned_pdf_vision: GEMINI_API_KEY not set")
@@ -358,9 +358,9 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) 
 
         t0 = time.perf_counter()
         client = genai.Client(api_key=GEMINI_API_KEY)
-        logger.info("[OCR] calling Gemini Vision PDF OCR model=%s max_tokens=32768", GEMINI_MODEL)
+        logger.info("[OCR] calling Gemini Vision PDF OCR model=%s max_tokens=32768", GEMINI_OCR_MODEL)
         response = client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=GEMINI_OCR_MODEL,
             contents=[
                 genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
                 genai_types.Part.from_text(_OCR_PROMPT),

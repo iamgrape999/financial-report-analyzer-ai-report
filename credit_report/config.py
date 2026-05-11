@@ -19,7 +19,12 @@ AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "false" if IS_PRODUCT
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 CREDIT_REPORT_MODEL: str = os.getenv("CREDIT_REPORT_MODEL", "claude-sonnet-4-6")
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+# GEMINI_MODEL is the base default; override OCR/ETL independently via their own env vars.
+# OCR needs native PDF bytes support → keep on a capable vision model (Flash or Pro).
+# ETL is text-in/JSON-out → can use a cheaper model (e.g. gemini-2.5-flash-lite).
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_OCR_MODEL: str = os.getenv("GEMINI_OCR_MODEL", GEMINI_MODEL)
+GEMINI_ETL_MODEL: str = os.getenv("GEMINI_ETL_MODEL", GEMINI_MODEL)
 CR_SECTION_MAX_TOKENS: int = int(os.getenv("CR_SECTION_MAX_TOKENS", "8192"))
 CR_MAX_CONCURRENT_GENERATIONS: int = int(os.getenv("CR_MAX_CONCURRENT_GENERATIONS", "2"))
 DAILY_TOKEN_LIMIT: int = int(os.getenv("DAILY_TOKEN_LIMIT", "4000000"))
