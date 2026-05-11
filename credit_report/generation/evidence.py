@@ -79,17 +79,49 @@ def retrieve_evidence(
     return [chunk for chunk, score in scored[:max_chunks] if score > 0]
 
 
+def _text_quality_ok(text: str, min_meaningful_ratio: float = 0.05, min_chars: int = 80) -> bool:
+    """Return True if text contains enough real content (letters, digits, CJK characters).
+
+    Chinese brokerage PDFs often use CID fonts that pdfminer extracts as mostly whitespace
+    or unmapped glyphs even though the byte count is large. This check prevents passing
+    that garbage to ETL and ensures Vision OCR is used as fallback.
+    """
+    stripped = text.strip()
+    if not stripped or len(stripped) < min_chars:
+        return False
+    # Count CJK unified ideographs + ASCII alphanumeric
+    meaningful = sum(
+        1 for c in stripped
+        if ('一' <= c <= '鿿')   # CJK Unified Ideographs
+        or ('㐀' <= c <= '䶿')   # CJK Extension A
+        or ('豈' <= c <= '﫿')   # CJK Compatibility Ideographs
+        or c.isascii() and (c.isalpha() or c.isdigit())
+    )
+    ratio = meaningful / len(stripped)
+    if ratio < min_meaningful_ratio:
+        logger.debug("_text_quality_ok: low meaningful ratio=%.2f%% chars=%d — text likely garbled",
+                     ratio * 100, len(stripped))
+        return False
+    return True
+
+
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """Extract plain text from PDF bytes. Tries pdfminer first, then pypdf."""
+    """Extract plain text from PDF bytes. Tries pdfminer first, then pypdf.
+
+    Returns empty string if extraction fails or text quality is too low
+    (e.g. CID-font Chinese PDFs where characters are unmapped).
+    """
     # pdfminer — best for native-text PDFs
     try:
         import io
         from pdfminer.high_level import extract_text
 
         result = extract_text(io.BytesIO(pdf_bytes))
-        if result and result.strip():
+        if result and _text_quality_ok(result):
             logger.debug("extract_text_from_pdf: pdfminer succeeded, chars=%d", len(result))
             return result
+        if result and result.strip():
+            logger.info("extract_text_from_pdf: pdfminer returned low-quality text chars=%d — trying pypdf", len(result))
     except Exception as e:
         logger.debug("extract_text_from_pdf: pdfminer failed: %s", e)
 
@@ -101,13 +133,15 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
         pages = [page.extract_text() or "" for page in reader.pages]
         result = "\n\n".join(p for p in pages if p.strip())
-        if result.strip():
+        if result and _text_quality_ok(result):
             logger.debug("extract_text_from_pdf: pypdf succeeded, chars=%d", len(result))
             return result
+        if result and result.strip():
+            logger.info("extract_text_from_pdf: pypdf returned low-quality text chars=%d — will try Vision OCR", len(result))
     except Exception as e:
         logger.debug("extract_text_from_pdf: pypdf failed: %s", e)
 
-    logger.warning("extract_text_from_pdf: all parsers returned empty text — may be a scanned PDF")
+    logger.warning("extract_text_from_pdf: usable text not extracted — may be scanned or CID-font PDF")
     return ""
 
 
