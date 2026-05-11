@@ -191,6 +191,9 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
             <span id="genAllSpin" class="spinner-border spinner-sm d-none me-1"></span>⚡ Generate Full Report</button>
           <button class="btn btn-primary btn-sm" onclick="openReview()">📖 Full Report Review</button>
           <button class="btn btn-outline-secondary btn-sm" onclick="loadReportDetail(currentRid)">🔄 Refresh</button>
+          <button class="btn btn-warning btn-sm" onclick="openConflictsModal()" id="conflictsBtn" style="display:none">
+            ⚠ <span id="conflictsCount">0</span> Conflicts
+          </button>
         </div>
       </div>
     </div>
@@ -288,6 +291,8 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <button class="btn btn-sm fw-semibold" style="background:#00703C;color:#fff" onclick="exportDocx()">
         <span id="docxSpin" class="spinner-border spinner-sm d-none me-1"></span>📝 DOCX
       </button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="openFxModal()" title="Manage FX Rates">FX</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="toggleDQPanel()" title="Data Quality">DQ</button>
     </div>
   </div>
 
@@ -305,7 +310,52 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <div class="card-body" id="qualityReportContent"></div>
     </div>
   </div>
+
+  <!-- Data Quality Dashboard (Block AST stats) -->
+  <div id="dqPanel" class="container pt-2 d-none" style="max-width:960px;">
+    <div class="card mb-3 border-0 shadow-sm">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center"
+           style="background:#00703C;color:#fff;font-weight:700;">
+        <span>Block Data Quality</span>
+        <button class="btn btn-sm btn-outline-light" onclick="loadDQStats()">Refresh</button>
+      </div>
+      <div class="card-body" id="dqPanelContent">
+        <p class="text-muted small">Loading…</p>
+      </div>
+    </div>
+  </div>
+
   <div id="reviewContent" class="container py-3" style="max-width:960px;"></div>
+</div>
+
+<!-- FX Rates Modal -->
+<div class="modal fade" id="fxModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header" style="background:#1a1a1a;color:#fff;">
+      <h5 class="modal-title fw-bold">FX Rate Management</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      <div class="row g-2 mb-3 align-items-end">
+        <div class="col-3"><label class="form-label small fw-bold">From</label>
+          <input id="fxFrom" class="form-control form-control-sm" placeholder="e.g. TWD"></div>
+        <div class="col-3"><label class="form-label small fw-bold">To</label>
+          <input id="fxTo" class="form-control form-control-sm" placeholder="e.g. USD"></div>
+        <div class="col-2"><label class="form-label small fw-bold">Rate</label>
+          <input id="fxRate" class="form-control form-control-sm" type="number" step="any" placeholder="0.0000"></div>
+        <div class="col-3"><label class="form-label small fw-bold">Date</label>
+          <input id="fxDate" class="form-control form-control-sm" type="date"></div>
+        <div class="col-1">
+          <button class="btn btn-success btn-sm w-100" onclick="saveFxRate()">Save</button>
+        </div>
+      </div>
+      <div id="fxRateList"><p class="text-muted">No rates set.</p></div>
+    </div>
+    <div class="modal-footer">
+      <span class="text-muted small me-auto" id="fxModalStatus"></span>
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+  </div></div>
 </div>
 
 <!-- Create Report Modal -->
@@ -349,6 +399,23 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     </div>
     <div class="modal-footer">
       <span class="text-muted small me-auto" id="etlModalStatus"></span>
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- Conflicts Resolution Modal -->
+<div class="modal fade" id="conflictsModal" tabindex="-1">
+  <div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header" style="background:#7c3aed;color:#fff;">
+      <h5 class="modal-title fw-bold">⚠ Fact Conflicts — Resolve Before Export</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body" id="conflictsModalBody" style="max-height:70vh;overflow-y:auto;">
+      <p class="text-muted">Loading conflicts…</p>
+    </div>
+    <div class="modal-footer">
+      <span class="text-muted small me-auto" id="conflictsModalStatus"></span>
       <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
     </div>
   </div></div>
@@ -763,6 +830,7 @@ async function loadReportDetail(rid){
     uploadedDocs=docs;
     outputs.forEach(o=>sectionOutputMap[o.section_no]=o);
     inputs.forEach(i=>sectionInputMap[i.section_no]={has_data:true,saved_at:i.saved_at});
+    loadConflicts();
 
     document.getElementById('rptTitle').textContent=rpt.borrower_name?`${rpt.borrower_name} — ${rpt.report_type||rpt.industry}`:rpt.id;
     document.getElementById('rptMeta').innerHTML=`<div class="row g-1">
@@ -1013,7 +1081,14 @@ function renderReview(){
     const inp=sectionInputMap[n];
     if(o?.status==='done'&&o.markdown){
       return `<div id="rsec-${n}" class="card review-section-card">
-        <div class="card-header">§${n} — ${snm(n)}</div>
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span>§${n} — ${snm(n)}</span>
+          <div class="d-flex gap-1 align-items-center">
+            <span id="vstatus-${n}" class="badge bg-secondary" style="font-size:10px">pending</span>
+            <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px"
+              onclick="validateSection(${n})" title="Mark section as validated">✓</button>
+          </div>
+        </div>
         <div class="card-body markdown-body review-content-wrap" data-block-id="section-${n}" data-version="1" data-section="${n}">${marked.parse(o.markdown)}</div>
       </div>`;
     }
@@ -1591,6 +1666,215 @@ function discardImprovement(){
   _improveSuggestedContent=null;
   document.getElementById('improveSuggestionWrap').classList.add('d-none');
   document.getElementById('improveStatusMsg').textContent='Discarded';
+}
+
+// ── FX Rates ──────────────────────────────────────────────────────────────────
+async function openFxModal(){
+  new bootstrap.Modal(document.getElementById('fxModal')).show();
+  document.getElementById('fxDate').value=new Date().toISOString().slice(0,10);
+  await loadFxRates();
+}
+
+async function loadFxRates(){
+  if(!currentRid)return;
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/fx-rates',{headers:H()});
+    if(!res.ok)return;
+    const rates=await res.json();
+    const el=document.getElementById('fxRateList');
+    if(!rates.length){el.innerHTML='<p class="text-muted small">No rates set yet.</p>';return;}
+    el.innerHTML=`<table class="table table-sm table-hover"><thead><tr>
+      <th>From</th><th>To</th><th>Rate</th><th>Date</th><th>Source</th></tr></thead><tbody>`+
+      rates.map(r=>`<tr>
+        <td>${esc(r.from_currency)}</td><td>${esc(r.to_currency)}</td>
+        <td>${r.rate}</td><td>${esc(r.rate_date)}</td>
+        <td class="text-muted small">${esc(r.source)}</td></tr>`).join('')+
+      '</tbody></table>';
+  }catch(e){}
+}
+
+async function saveFxRate(){
+  if(!currentRid)return;
+  const from_currency=document.getElementById('fxFrom').value.trim().toUpperCase();
+  const to_currency=document.getElementById('fxTo').value.trim().toUpperCase();
+  const rate=parseFloat(document.getElementById('fxRate').value);
+  const rate_date=document.getElementById('fxDate').value;
+  if(!from_currency||!to_currency||!rate||!rate_date){
+    toast('Fill all FX rate fields','warning');return;
+  }
+  const status=document.getElementById('fxModalStatus');
+  status.textContent='Saving…';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/fx-rates',{
+      method:'PUT',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({from_currency,to_currency,rate,rate_date,source:'analyst_manual'})
+    });
+    if(!res.ok)throw new Error((await res.json()).detail||'Save failed');
+    status.textContent='Saved ✓';
+    toast(`FX rate ${from_currency}/${to_currency} = ${rate} saved`,'success');
+    await loadFxRates();
+  }catch(e){status.textContent='Error: '+e.message;toast(e.message,'danger');}
+}
+
+// ── Block Data Quality ────────────────────────────────────────────────────────
+async function toggleDQPanel(){
+  const panel=document.getElementById('dqPanel');
+  panel.classList.toggle('d-none');
+  if(!panel.classList.contains('d-none'))await loadDQStats();
+}
+
+async function loadDQStats(){
+  if(!currentRid)return;
+  const content=document.getElementById('dqPanelContent');
+  content.innerHTML='<p class="text-muted small">Loading…</p>';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/blocks/stats',{headers:H()});
+    if(!res.ok){content.innerHTML='<p class="text-danger small">Could not load stats.</p>';return;}
+    const s=await res.json();
+    const bindPct=s.binding_rate_pct||0;
+    const bindColor=bindPct>=80?'success':bindPct>=50?'warning':'danger';
+    const valPct=s.total_blocks?Math.round(s.passed/s.total_blocks*100):0;
+    const valColor=valPct>=80?'success':valPct>=50?'warning':'danger';
+    content.innerHTML=`
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="small fw-bold mb-1">Block Validation</div>
+          <div class="progress mb-1" style="height:14px;">
+            <div class="progress-bar bg-${valColor}" style="width:${valPct}%">${valPct}%</div>
+          </div>
+          <div class="small text-muted">${s.passed} passed · ${s.pending} pending · ${s.failed} failed · ${s.stale} stale / ${s.total_blocks} total</div>
+        </div>
+        <div class="col-md-6">
+          <div class="small fw-bold mb-1">Cell Fact Binding</div>
+          <div class="progress mb-1" style="height:14px;">
+            <div class="progress-bar bg-${bindColor}" style="width:${bindPct}%">${bindPct}%</div>
+          </div>
+          <div class="small text-muted">${s.bound_cells} bound · ${s.unbound_cells} unbound / ${s.total_cells} cells</div>
+        </div>
+      </div>`;
+  }catch(e){content.innerHTML=`<p class="text-danger small">${e.message}</p>`;}
+}
+
+async function validateSection(secNo){
+  if(!currentRid)return;
+  try{
+    const br=await fetch(API+'/reports/'+currentRid+'/sections/'+secNo+'/blocks',{headers:H()});
+    if(!br.ok)throw new Error('Could not load blocks');
+    const blocks=await br.json();
+    if(!blocks.length){toast('No blocks yet — generate section first','warning');return;}
+    // Validate all blocks in the section
+    await Promise.all(blocks.map(b=>
+      fetch(API+'/reports/'+currentRid+'/blocks/'+b.id+'/validate',{method:'POST',headers:H()})
+    ));
+    const badge=document.getElementById('vstatus-'+secNo);
+    if(badge){badge.textContent='passed';badge.className='badge bg-success';badge.style.fontSize='10px';}
+    toast(`§${secNo} validated`,'success');
+    if(!document.getElementById('dqPanel').classList.contains('d-none'))await loadDQStats();
+  }catch(e){toast('Validation failed: '+e.message,'danger');}
+}
+
+// ── Fact Conflicts ────────────────────────────────────────────────────────────
+let _conflicts=[];
+
+async function loadConflicts(){
+  if(!currentRid)return;
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/facts/conflicts',{headers:H()});
+    if(!res.ok)return;
+    _conflicts=await res.json();
+    const btn=document.getElementById('conflictsBtn');
+    const cnt=document.getElementById('conflictsCount');
+    if(_conflicts.length>0){
+      cnt.textContent=_conflicts.length;
+      btn.style.display='';
+    }else{
+      btn.style.display='none';
+    }
+  }catch(e){}
+}
+
+function openConflictsModal(){
+  renderConflicts();
+  new bootstrap.Modal(document.getElementById('conflictsModal')).show();
+}
+
+function renderConflicts(){
+  const body=document.getElementById('conflictsModalBody');
+  if(!_conflicts.length){
+    body.innerHTML='<div class="alert alert-success">No open conflicts — all facts are consistent.</div>';
+    return;
+  }
+  body.innerHTML=_conflicts.map(c=>`
+    <div class="card mb-3 border-warning" id="conflict-card-${c.id}">
+      <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
+        <span class="fw-bold">${esc(c.metric_name)} &nbsp;·&nbsp; ${esc(c.entity||'')} &nbsp;·&nbsp; ${esc(c.period||'')}</span>
+        <span class="badge bg-warning text-dark">open</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="card h-100 border-primary">
+              <div class="card-header small fw-bold" style="background:#e8f0fe">Source A: ${esc(c.source_a||'')}</div>
+              <div class="card-body text-center py-3">
+                <div class="fs-4 fw-bold">${esc(c.value_a||'—')}</div>
+              </div>
+              <div class="card-footer">
+                <button class="btn btn-primary btn-sm w-100"
+                  onclick="resolveConflict('${c.id}','${c.fact_a_id}','${c.fact_b_id}')">
+                  Choose Source A
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card h-100 border-success">
+              <div class="card-header small fw-bold" style="background:#e8f5ee">Source B: ${esc(c.source_b||'')}</div>
+              <div class="card-body text-center py-3">
+                <div class="fs-4 fw-bold">${esc(c.value_b||'—')}</div>
+              </div>
+              <div class="card-footer">
+                <button class="btn btn-success btn-sm w-100"
+                  onclick="resolveConflict('${c.id}','${c.fact_b_id}','${c.fact_a_id}')">
+                  Choose Source B
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-2">
+          <input type="text" id="reason-${c.id}" class="form-control form-control-sm"
+            placeholder="Resolution reason (optional)">
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+async function resolveConflict(conflictId, chosenId, rejectedId){
+  const reason=document.getElementById('reason-'+conflictId)?.value||'Manual resolution';
+  const status=document.getElementById('conflictsModalStatus');
+  status.textContent='Resolving…';
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/facts/conflicts/'+conflictId+'/resolve',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({chosen_fact_id:chosenId,rejected_fact_ids:[rejectedId],resolution_reason:reason})
+    });
+    if(!res.ok)throw new Error((await res.json()).detail||'Resolve failed');
+    document.getElementById('conflict-card-'+conflictId)?.remove();
+    _conflicts=_conflicts.filter(c=>c.id!==conflictId);
+    document.getElementById('conflictsCount').textContent=_conflicts.length;
+    if(!_conflicts.length){
+      document.getElementById('conflictsBtn').style.display='none';
+      document.getElementById('conflictsModalBody').innerHTML=
+        '<div class="alert alert-success">All conflicts resolved.</div>';
+    }
+    status.textContent='Resolved ✓';
+    toast('Conflict resolved','success');
+  }catch(e){
+    status.textContent='Error: '+e.message;
+    toast('Resolve failed: '+e.message,'danger');
+  }
 }
 </script>
 </body>
