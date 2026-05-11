@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.block_ast.models import BlockVersion, ReportBlock, TableCell
@@ -18,7 +18,12 @@ async def save_blocks(
     blocks: list[dict],
     cells: list[dict],
 ) -> None:
-    """Persist Block AST dicts to DB (upsert by block_id)."""
+    """Persist Block AST dicts to DB (upsert by block_id).
+
+    Cells are replaced atomically: existing cells for any block being re-processed
+    are deleted before inserting the fresh set. This prevents duplicate TableCells
+    when a section is regenerated.
+    """
     for bd in blocks:
         existing = await db.get(ReportBlock, bd["id"])
         if existing:
@@ -28,6 +33,13 @@ async def save_blocks(
                     setattr(existing, k, v)
         else:
             db.add(ReportBlock(**bd))
+
+    # Delete stale cells before inserting new ones (prevents duplicates on regeneration)
+    block_ids_with_cells = {c["block_id"] for c in cells}
+    if block_ids_with_cells:
+        await db.execute(
+            sql_delete(TableCell).where(TableCell.block_id.in_(block_ids_with_cells))
+        )
 
     for cd in cells:
         db.add(TableCell(**cd))
