@@ -15,8 +15,14 @@ body{background:#f5f5f5;font-family:'Segoe UI',system-ui,sans-serif;color:#1a1a1
 .card{border:none;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);}
 .card-header{border-radius:12px 12px 0 0!important;font-weight:600;}
 #loginCard{max-width:420px;margin:4rem auto;}
-#loginCard .card-body{border-top:4px solid #00703C;border-radius:0 0 12px 12px;}
-#loginErr{font-size:0.95rem;font-weight:500;padding:0.75rem 1rem;}
+#loginCard .card-body{border-top:4px solid #00703C;border-radius:0 0 12px 12px;padding:2rem;}
+#loginErr{font-size:1rem;font-weight:600;padding:0.85rem 1rem;border-radius:8px;}
+@keyframes shake{0%,100%{transform:translateX(0)}15%,45%,75%{transform:translateX(-7px)}30%,60%,90%{transform:translateX(7px)}}
+.login-shake{animation:shake .45s ease-in-out;}
+.login-field-err{font-size:0.9rem;font-weight:600;color:#dc2626;margin-top:0.35rem;}
+#loginCard .form-control.is-invalid{border-color:#dc2626;box-shadow:0 0 0 0.2rem rgba(220,38,38,.2);}
+#loginCard .form-control:focus{border-color:#00703C;box-shadow:0 0 0 0.2rem rgba(0,112,60,.2);}
+#loginHint{font-size:0.82rem;color:#6b7280;text-align:center;margin-top:1rem;}
 .view{display:none;}.view.active{display:block;}
 .report-row{cursor:pointer;transition:background .12s;}.report-row:hover{background:#e8f5ee;}
 .sec-badge{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;}
@@ -79,15 +85,30 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 
 <!-- ══════════ LOGIN ══════════ -->
 <div id="viewLogin" class="view active container">
-  <div id="loginCard" class="card p-4">
-    <h4 class="text-center mb-4 fw-bold text-primary">Sign In</h4>
-    <div id="loginErr" class="alert alert-danger d-none"></div>
-    <div class="mb-3"><label class="form-label fw-semibold">Email</label>
-      <input id="loginEmail" type="email" class="form-control form-control-lg" autocomplete="username" autofocus></div>
-    <div class="mb-4"><label class="form-label fw-semibold">Password</label>
-      <input id="loginPw" type="password" class="form-control form-control-lg" autocomplete="current-password"></div>
-    <button id="loginBtn" class="btn btn-primary w-100 fw-semibold py-2 fs-5" onclick="doLogin()">
-      <span id="loginSpin" class="spinner-border spinner-border-sm d-none me-2"></span>Sign In</button>
+  <div id="loginCard" class="card">
+    <div class="card-body">
+      <h4 class="text-center mb-4 fw-bold text-primary">Sign In</h4>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Email</label>
+        <input id="loginEmail" type="email" class="form-control form-control-lg" autocomplete="username" autofocus
+               oninput="loginClearErr('email')">
+        <div id="loginEmailErr" class="login-field-err d-none"></div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Password</label>
+        <div class="input-group">
+          <input id="loginPw" type="password" class="form-control form-control-lg" autocomplete="current-password"
+                 oninput="loginClearErr('pw')">
+          <button class="btn btn-outline-secondary" type="button" id="togglePwBtn" onclick="loginTogglePw()" tabindex="-1"
+                  title="顯示/隱藏密碼" style="border-color:#ced4da;font-size:1.1rem;padding:0 0.8rem;">👁</button>
+        </div>
+        <div id="loginPwErr" class="login-field-err d-none"></div>
+      </div>
+      <div id="loginErr" class="alert alert-danger d-none mb-3" role="alert"></div>
+      <button id="loginBtn" class="btn btn-primary w-100 fw-semibold py-2 fs-5" onclick="doLogin()">
+        <span id="loginSpin" class="spinner-border spinner-border-sm d-none me-2"></span>Sign In</button>
+      <div id="loginHint">登入問題？請聯絡系統管理員重設密碼</div>
+    </div>
   </div>
 </div>
 
@@ -541,15 +562,62 @@ function syncFormToJson(){
 function H(){return{'Authorization':'Bearer '+token};}
 function HJ(){return{'Authorization':'Bearer '+token,'Content-Type':'application/json'};}
 
-async function doLogin(){
-  const email=document.getElementById('loginEmail').value.trim();
-  const pw=document.getElementById('loginPw').value;
+function loginClearErr(field){
+  if(field==='email'){
+    document.getElementById('loginEmail').classList.remove('is-invalid');
+    document.getElementById('loginEmailErr').classList.add('d-none');
+  }else{
+    document.getElementById('loginPw').classList.remove('is-invalid');
+    document.getElementById('loginPwErr').classList.add('d-none');
+  }
+  document.getElementById('loginErr').classList.add('d-none');
+}
+function loginTogglePw(){
+  const pw=document.getElementById('loginPw');
+  const btn=document.getElementById('togglePwBtn');
+  if(pw.type==='password'){pw.type='text';btn.textContent='🙈';}
+  else{pw.type='password';btn.textContent='👁';}
+  pw.focus();
+}
+function _loginShake(){
+  const card=document.getElementById('loginCard');
+  card.classList.remove('login-shake');
+  void card.offsetWidth;
+  card.classList.add('login-shake');
+  card.addEventListener('animationend',()=>card.classList.remove('login-shake'),{once:true});
+}
+function _loginShowFieldErr(field, msg){
+  if(field==='email'){
+    const el=document.getElementById('loginEmail');
+    el.classList.add('is-invalid');
+    const e=document.getElementById('loginEmailErr');
+    e.textContent=msg;e.classList.remove('d-none');
+    el.focus();el.select();
+  }else{
+    const el=document.getElementById('loginPw');
+    el.classList.add('is-invalid');
+    const e=document.getElementById('loginPwErr');
+    e.textContent=msg;e.classList.remove('d-none');
+    el.value='';el.focus();
+  }
+  _loginShake();
+}
+function _loginShowGeneralErr(msg){
   const err=document.getElementById('loginErr');
+  err.textContent=msg;err.classList.remove('d-none');
+  _loginShake();
+}
+async function doLogin(){
+  const emailEl=document.getElementById('loginEmail');
+  const pwEl=document.getElementById('loginPw');
+  const email=emailEl.value.trim();
+  const pw=pwEl.value;
+  loginClearErr('email');loginClearErr('pw');
+  if(!email){_loginShowFieldErr('email','請輸入電子郵件地址。 / Please enter your email.');return;}
+  if(!pw){_loginShowFieldErr('pw','請輸入密碼。 / Please enter your password.');return;}
   const sp=document.getElementById('loginSpin');
-  if(!email){err.textContent='Please enter your email address.';err.classList.remove('d-none');return;}
-  if(!pw){err.textContent='Please enter your password.';err.classList.remove('d-none');return;}
-  err.classList.add('d-none');sp.classList.remove('d-none');
-  const btn=document.getElementById('loginBtn');btn.disabled=true;
+  const btn=document.getElementById('loginBtn');
+  sp.classList.remove('d-none');btn.disabled=true;
   try{
     let res,d;
     try{
@@ -559,19 +627,37 @@ async function doLogin(){
         body:new URLSearchParams({username:email,password:pw}).toString(),
       });
     }catch(netErr){
-      throw new Error('Network error — cannot reach server. Check your connection.');
+      _loginShowGeneralErr('網路錯誤，無法連線至伺服器。請確認網路連線後重試。\nNetwork error — cannot reach server.');
+      return;
     }
-    try{d=await res.json();}catch(_){d={};}
+    let bodyText='';
+    try{bodyText=await res.text();}catch(_){}
+    try{d=JSON.parse(bodyText);}catch(_){d={};}
     if(!res.ok){
-      const msg=d.detail||(res.status===401?'Invalid email or password.':res.status===429?'Too many login attempts — try again in 15 minutes.':'Login failed ('+res.status+').');
-      throw new Error(msg);
+      const detail=(d.detail||'').toString();
+      if(res.status===429){
+        _loginShowGeneralErr('登入失敗次數過多，請 15 分鐘後再試。\nToo many attempts — try again in 15 minutes.');
+      }else if(res.status===403){
+        _loginShowGeneralErr('帳號已停用，請聯絡管理員。\nAccount inactive — contact your admin.');
+      }else if(res.status===401){
+        const lower=detail.toLowerCase();
+        if(lower.includes('no account')||lower.includes('email')||lower.includes('found for')){
+          _loginShowFieldErr('email','找不到此電子郵件帳號，請確認地址是否正確。\n'+detail);
+        }else if(lower.includes('password')||lower.includes('incorrect')){
+          _loginShowFieldErr('pw','密碼錯誤，請重新輸入。\nIncorrect password — please try again.');
+        }else{
+          _loginShowGeneralErr('電子郵件或密碼錯誤。\nInvalid email or password.\n'+(detail||''));
+        }
+      }else{
+        _loginShowGeneralErr('登入失敗 (HTTP '+res.status+')。\n'+(detail||'Please try again.'));
+      }
+      return;
     }
     token=d.access_token;currentRole=d.role;currentEmail=email;
     localStorage.setItem('token',token);localStorage.setItem('role',currentRole);localStorage.setItem('email',currentEmail);
     showDashboard();
   }catch(e){
-    err.textContent=e.message||'Login failed. Please try again.';
-    err.classList.remove('d-none');
+    _loginShowGeneralErr(e.message||'登入失敗，請再試一次。 / Login failed, please try again.');
   }finally{sp.classList.add('d-none');btn.disabled=false;}
 }
 function logout(){localStorage.clear();token=null;currentRole=null;currentEmail=null;currentRid=null;showView('viewLogin');document.getElementById('navUser').classList.add('d-none');}
