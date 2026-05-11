@@ -233,6 +233,7 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "alliance_membership": null,
     "imo_regulatory_notes": null,
     "tariff_risk_notes": null,
+    "freight_rate_spot_date": null,
     "freight_rate_by_route": {
       "far_east_north_america_usd_teu": null,
       "far_east_europe_usd_teu": null,
@@ -243,6 +244,10 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "scfi_quarterly_history": [
       {"period": null, "scfi": null, "fe_us_west": null, "fe_us_east": null,
        "fe_europe": null, "fe_mediterranean": null}
+    ],
+    "scfi_event_log": [
+      {"date": null, "scfi_level": null, "change_pct": null,
+       "wave_direction": null, "event_trigger": null}
     ],
     "fuel_cost_pct_of_cogs": [
       {"period": null, "fuel_pct": null}
@@ -275,7 +280,15 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
        "capacity_growth_pct": null, "throughput_growth_pct": null}
     ],
     "key_market_drivers": [],
-    "geopolitical_risk_narrative": null
+    "geopolitical_risk_narrative": null,
+    "seasonal_cargo_profile": {
+      "peak_months": [],
+      "trough_months": [],
+      "peak_season_desc": null,
+      "trough_season_desc": null,
+      "special_distortion_year": null,
+      "special_distortion_notes": null
+    }
   },
   "4M_alliance_history": {
     "alliance_name": null,
@@ -291,6 +304,9 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       "route": null,
       "volume_unit": null,
       "annual_yoy_pct": null,
+      "annual_data": [
+        {"year": null, "volume_wan_teu": null, "yoy_pct": null}
+      ],
       "quarterly_data": [
         {"period": null, "period_type": null,
          "volume_prior_year": null, "volume_current_year": null, "yoy_pct": null}
@@ -997,7 +1013,11 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "key_market_indicators": [
       {"name": null, "value": null, "unit": null, "date": null}
     ],
-    "industry_theme_verbatim": null
+    "industry_theme_verbatim": null,
+    "market_watch_points": [
+      {"theme": null, "detail": null, "impact": null}
+    ],
+    "forward_outlook_narrative": null
   },
   "11M_quarterly_forecast_comparison": [
     {
