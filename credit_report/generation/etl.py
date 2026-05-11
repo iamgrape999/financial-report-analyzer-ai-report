@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
     "annual_report":         [4, 7, 3, 2, 10, 1],
     "financial_statement":   [7, 4, 2, 10, 5],
-    "analyst_presentation":  [11, 4, 7, 2, 3, 10, 1],
+    "analyst_presentation":  [4, 7, 2, 3, 10, 1],   # company IR to analysts — NO §11
     "interim_report":        [7, 4, 2, 3],
     "valuation_report":      [5, 10, 6],
     "charter_agreement":     [1, 6, 5],
     "shipbuilding_contract": [6, 1, 5],
     "kyc_document":          [9, 1, 4],
     "legal_document":        [8, 1, 9],
-    "external_report":       [11, 3, 4, 7, 2],
+    "external_report":       [11, 3, 4, 7, 2],      # broker/analyst research report — §11
     "other":                 [4, 7, 1],
 }
 
@@ -183,7 +183,12 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "operational_model": null,
     "years_in_operation": null,
     "global_ranking": null,
-    "market_share_pct": null
+    "market_share_pct": null,
+    "countries_served": null,
+    "subsidiaries_and_agents": null,
+    "terminals_owned": null,
+    "annual_cargo_volume_m_teu": null,
+    "global_service_routes": null
   },
   "4E_financials": {
     "currency": null,
@@ -193,14 +198,18 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "ebitda": null,
     "ebitda_margin_pct": null,
     "net_income": null,
+    "net_income_attributable_to_parent": null,
     "net_cash_debt": null,
     "net_debt_ebitda": null,
     "fx_rate_to_usd": null,
-    "revenue_breakdown": [{"segment": null, "amount": null, "pct_of_total": null}]
+    "revenue_breakdown": [{"segment": null, "amount": null, "pct_of_total": null}],
+    "cogs_breakdown": [{"cost_item": null, "pct_of_total": null}]
   },
   "4F_fleet": {
     "total_owned_teu": null,
     "total_fleet_teu": null,
+    "total_fleet_teu_m": null,
+    "total_vessels": null,
     "fleet_breakdown": [
       {"category": null, "vessel_count": null, "total_teu": null, "total_dwt": null, "notes": null}
     ],
@@ -459,6 +468,16 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     "rows": [{"variable": null, "base_case": null, "stress": null,
       "dscr_min_impact": null, "cash_trough_impact": null, "conclusion": null}]
   },
+  "7I_quarterly_kpis": [
+    {
+      "quarter": null,
+      "revenue": null,
+      "gross_margin_pct": null,
+      "ni_margin_pct": null,
+      "current_ratio_pct": null,
+      "debt_ratio_pct": null
+    }
+  ],
   "industry_index": {"ccfi_level": null, "scfi_level": null, "year": null},
   "fx_exposure": null, "off_balance_sheet": null, "accounting_notes": null
 }""",
@@ -626,7 +645,21 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
       {"item": "DSCR", "value": 0.0, "is_dscr": true}
     ],
     "worse_case_commentary": "Under Worse Case, DSCR declines to minimum [X]x in [year] but remains above 1.0x..."
-  }
+  },
+  "10D_monthly_shipping_ops": [
+    {
+      "month": null,
+      "volume_wan_teu": null,
+      "avg_freight_rate_usd_teu": null,
+      "fuel_cost_usd_ton": null
+    }
+  ],
+  "10E_quarterly_revenue_by_year": [
+    {
+      "quarter": null,
+      "years": {}
+    }
+  ]
 }""",
 
     11: """Section 11 — Analyst / Broker Research Report:
