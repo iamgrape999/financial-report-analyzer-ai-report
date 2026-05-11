@@ -48,56 +48,124 @@ class InputFactExtractor:
         facts: list[dict] = []
         for mapping in self.config.get("facts", []):
             try:
-                value = self._resolve_path(input_json, mapping.get("path", ""))
-                if value is None:
-                    continue
-
-                entity_raw = (
-                    self._resolve_path(input_json, mapping["entity_path"])
-                    if "entity_path" in mapping
-                    else mapping.get("entity", "UNKNOWN")
-                )
-                period_raw = (
-                    self._resolve_path(input_json, mapping["period_path"])
-                    if "period_path" in mapping
-                    else mapping.get("period", "")
-                )
-
-                entity = self._normalize_entity(str(entity_raw or "UNKNOWN"))
-                period = self._normalize_period(str(period_raw or ""))
-                fact_id = mapping["id_template"].format(entity=entity, period=period)
-
-                float_value: Optional[float] = None
-                try:
-                    float_value = float(str(value).replace(",", "").replace("%", ""))
-                except (ValueError, TypeError):
-                    pass
-
-                display = mapping.get("display_template", "").format(value=value) if mapping.get("display_template") else str(value)
-
-                facts.append(
-                    {
-                        "id": fact_id,
-                        "report_id": report_id,
-                        "metric_name": mapping["metric"],
-                        "entity": entity,
-                        "period": period,
-                        "value": float_value,
-                        "value_text": str(value) if float_value is None else None,
-                        "currency": mapping.get("currency"),
-                        "unit": mapping.get("unit"),
-                        "display": display,
-                        "state": "validated",
-                        "source_type": "analyst_input_json",
-                        "source_priority": 1,
-                        "source_section_no": self.section_no,
-                    }
-                )
+                if "iterate_path" in mapping:
+                    facts.extend(self._extract_iterate(report_id, input_json, mapping))
+                else:
+                    fact = self._extract_single(report_id, input_json, mapping)
+                    if fact:
+                        facts.append(fact)
             except Exception as exc:
                 logger.debug("Fact mapping failed for %s: %s", mapping.get("id_template", "?"), exc)
                 continue
-
         return facts
+
+    def _extract_single(self, report_id: str, input_json: dict, mapping: dict) -> Optional[dict]:
+        """Extract one fact from a static dot-notation path."""
+        value = self._resolve_path(input_json, mapping.get("path", ""))
+        if value is None:
+            return None
+        entity_raw = (
+            self._resolve_path(input_json, mapping["entity_path"])
+            if "entity_path" in mapping
+            else mapping.get("entity", "UNKNOWN")
+        )
+        period_raw = (
+            self._resolve_path(input_json, mapping["period_path"])
+            if "period_path" in mapping
+            else mapping.get("period", "")
+        )
+        entity = self._normalize_entity(str(entity_raw or "UNKNOWN"))
+        period = self._normalize_period(str(period_raw or ""))
+        return self._build_fact(report_id, mapping, entity, period, value)
+
+    def _extract_iterate(self, report_id: str, input_json: dict, mapping: dict) -> list[dict]:
+        """Iterate over all year-keys in a dict, emitting one fact per key.
+
+        YAML directive: iterate_path points to a dict keyed by fiscal-year strings
+        (e.g. "FY2024", "FY2025F"). The 'field' sub-key selects a value inside each entry.
+        currency and unit can be resolved from a sibling path via currency_path / unit_path.
+
+        Example YAML:
+          iterate_path: 7A_borrower_financials.income_statement
+          field: revenue
+          metric: revenue
+          entity: BORROWER
+          id_template: "FIN-REVENUE-{entity}-{period}"
+          currency_path: 7A_borrower_financials.reporting_currency
+          unit_path: 7A_borrower_financials.unit
+        """
+        container = self._resolve_path(input_json, mapping["iterate_path"])
+        if not isinstance(container, dict):
+            return []
+
+        currency = mapping.get("currency") or str(
+            self._resolve_path(input_json, mapping.get("currency_path", "")) or ""
+        ) or None
+        unit = mapping.get("unit") or str(
+            self._resolve_path(input_json, mapping.get("unit_path", "")) or ""
+        ) or None
+
+        entity_raw = (
+            self._resolve_path(input_json, mapping["entity_path"])
+            if "entity_path" in mapping
+            else mapping.get("entity", "BORROWER")
+        )
+        entity = self._normalize_entity(str(entity_raw or "BORROWER"))
+
+        field = mapping.get("field")
+        facts: list[dict] = []
+        for key, sub_obj in container.items():
+            if not isinstance(sub_obj, dict):
+                continue
+            value = sub_obj.get(field) if field else sub_obj
+            if value is None:
+                continue
+            period = self._normalize_period(str(key))
+            override = {"currency": currency, "unit": unit}
+            fact = self._build_fact(report_id, mapping, entity, period, value, override)
+            facts.append(fact)
+        return facts
+
+    def _build_fact(
+        self,
+        report_id: str,
+        mapping: dict,
+        entity: str,
+        period: str,
+        value: Any,
+        override: Optional[dict] = None,
+    ) -> dict:
+        """Assemble a CanonicalFact dict from resolved components."""
+        template_id = mapping["id_template"].format(entity=entity, period=period)
+        # Prefix with report_id shard so the same template doesn't collide across reports
+        fact_id = f"{report_id[:8]}-{template_id}"
+        float_value: Optional[float] = None
+        try:
+            float_value = float(str(value).replace(",", "").replace("%", ""))
+        except (ValueError, TypeError):
+            pass
+        display = (
+            mapping.get("display_template", "").format(value=value)
+            if mapping.get("display_template")
+            else str(value)
+        )
+        overrides = override or {}
+        return {
+            "id": fact_id,
+            "report_id": report_id,
+            "metric_name": mapping["metric"],
+            "entity": entity,
+            "period": period,
+            "value": float_value,
+            "value_text": str(value) if float_value is None else None,
+            "currency": overrides.get("currency") or mapping.get("currency"),
+            "unit": overrides.get("unit") or mapping.get("unit"),
+            "display": display,
+            "state": "validated",
+            "source_type": "analyst_input_json",
+            "source_priority": 1,
+            "source_section_no": self.section_no,
+        }
 
     def _resolve_path(self, obj: Any, path: str) -> Optional[Any]:
         """
