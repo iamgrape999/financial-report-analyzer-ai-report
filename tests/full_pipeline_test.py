@@ -927,7 +927,7 @@ def run_full_pipeline():
                 headers=H, timeout=30)
             sc = r.status_code
             if sc == 503:
-                ok(f"§{sec_no} → 503 (no API key — correct error message)")
+                warn(f"§{sec_no} → 503 (no API key — generation skipped in mock mode)")
             elif sc == 409:
                 detail = r.json().get("detail", "") if r.status_code < 600 else ""
                 warn(f"§{sec_no} → 409 (hard dependency unmet)", detail[:60])

@@ -270,12 +270,12 @@ async def etl_document_endpoint(
     except ValueError as exc:
         logger.warning("etl_document_endpoint: config error doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
-        await db.flush()
+        await db.commit()  # commit before raise — get_db rolls back on exception
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         logger.exception("etl_document_endpoint: ETL failed doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
-        await db.flush()
+        await db.commit()  # commit before raise — get_db rolls back on exception
         raise HTTPException(status_code=500, detail=f"ETL extraction failed: {exc}")
 
     doc.etl_status = "done"

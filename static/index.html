@@ -757,13 +757,19 @@ async function loadSectionOutput(sec){
 
 async function generateCurrentSection(){
   const sec=currentPanelSec;if(!sec)return;
-  // Enforce 90% completeness gate before generation
-  const raw=document.getElementById('jsonEd').value.trim();
-  if(raw){
-    let parsed={};try{parsed=JSON.parse(raw);}catch(e){}
-    const{pct,missing}=getCompleteness(sec,parsed);
+  // Enforce 90% completeness gate using cached data (not the editor, which may show
+  // a different section's JSON when the Output tab is opened directly).
+  let cachedData=sectionInputDataMap[sec];
+  if(!cachedData){
+    // Fetch and cache so we validate the actual saved input, not stale editor state.
+    try{const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{headers:H()});
+      if(r.ok){const d=await r.json();cachedData=d.input_json;sectionInputDataMap[sec]=cachedData;}
+    }catch(e){}
+  }
+  if(cachedData){
+    const{pct,missing}=getCompleteness(sec,cachedData);
     if(pct<90){
-      renderCompleteness(sec,parsed);
+      renderCompleteness(sec,cachedData);
       toast(`§${sec} is ${pct}% complete — need ≥90% before generating. Fill in missing fields.`,'warning');
       switchTab('input');return;
     }
@@ -882,8 +888,14 @@ function renderReview(){
 }
 
 async function generateFromReview(secNo){
-  // Enforce 90% completeness gate before generation
-  const data=sectionInputDataMap[secNo];
+  // Enforce 90% completeness gate before generation.
+  // Always fetch from server when not cached — openReview() prefetch is best-effort.
+  let data=sectionInputDataMap[secNo];
+  if(!data && sectionInputMap[secNo]?.has_data){
+    try{const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{headers:H()});
+      if(r.ok){const d=await r.json();data=d.input_json;sectionInputDataMap[secNo]=data;}
+    }catch(e){}
+  }
   if(data){
     const{pct}=getCompleteness(secNo,data);
     if(pct<90){

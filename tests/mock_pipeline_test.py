@@ -538,8 +538,8 @@ def _make_mock_client() -> MagicMock:
 
     async def _async_generate(model, contents, config=None):
         text = str(contents)
-        # ETL prompt detection
-        if "extract structured JSON" in text or "Extract ALL text" in text:
+        # ETL detection: user_prompt contains these unique markers (see etl.py _build_etl_prompt)
+        if "---DOCUMENT TEXT START---" in text or "Return ONLY valid JSON" in text:
             return _mock_response(json.dumps(ETL_MOCK_DATA), tokens=600)
         # Section detection by unique input keys
         sec_no = _detect_section(text)
@@ -549,7 +549,7 @@ def _make_mock_client() -> MagicMock:
 
     def _sync_generate(model, contents, config=None):
         text = str(contents)
-        if "extract structured JSON" in text or "Extract ALL text" in text:
+        if "---DOCUMENT TEXT START---" in text or "Return ONLY valid JSON" in text:
             return _mock_response(json.dumps(ETL_MOCK_DATA), tokens=600)
         return _mock_response("Extracted text.", tokens=300)
 
@@ -568,8 +568,16 @@ async def run_mock_pipeline() -> int:
 
     with patch("google.genai.Client", return_value=mock_client):
         # Import app inside the patch context so it's active when lifespan runs
-        from main import app  # type: ignore  # noqa: PLC0415
+        from main import _safe_add_columns, _seed_admin, app  # type: ignore  # noqa: PLC0415
         from httpx import ASGITransport, AsyncClient  # noqa: PLC0415
+
+        # Explicitly run lifespan setup — ASGITransport does not send ASGI lifespan
+        # events, so tables and the admin account may not exist on a fresh database.
+        from credit_report.database import Base, engine  # noqa: PLC0415
+        async with engine.begin() as _conn:
+            await _conn.run_sync(Base.metadata.create_all)
+            await _safe_add_columns(_conn)
+        await _seed_admin()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -1039,6 +1047,11 @@ async def run_mock_pipeline() -> int:
 
 def run_mock_pipeline_sync() -> int:
     return asyncio.run(run_mock_pipeline())
+
+
+def test_mock_pipeline():
+    """pytest-discoverable entry point for the in-process mock pipeline."""
+    assert run_mock_pipeline_sync() == 0
 
 
 if __name__ == "__main__":
