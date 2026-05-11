@@ -18,6 +18,30 @@ from credit_report.generation.prompt_builder import build_section_prompt
 MAX_CONTINUATION_ROUNDS = 3
 
 
+async def call_gemini_raw(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 2048,
+    api_key: Optional[str] = None,
+    model_id: Optional[str] = None,
+) -> str:
+    """Single-turn Gemini call for ad-hoc tasks (paragraph improvement, QA, etc.)."""
+    key = api_key or GEMINI_API_KEY
+    if not key:
+        raise ValueError("GEMINI_API_KEY is not configured.")
+    model = model_id or GEMINI_MODEL
+    client = genai.Client(api_key=key)
+    response = await client.aio.models.generate_content(
+        model=model,
+        contents=user_prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=max_tokens,
+        ),
+    )
+    return (response.text or "").strip()
+
+
 def _detect_continuation_token(text: str, section_no: int) -> bool:
     token = CONTINUATION_END_TOKENS.get(section_no)
     return bool(token and token in text)
