@@ -1,0 +1,63 @@
+# Section 3 — Credit Risk Assessment: fact extraction mappings
+# Mostly qualitative; captures rating grades as value_text facts for traceability.
+facts:
+  # MAS 612 classification
+  - id_template: "RATING-MAS612-{entity}-CURRENT"
+    path: "3C_mas_612.grade"
+    metric: "mas612_grade"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "grade"
+
+  # Internal rating — primary borrower (row 0)
+  - id_template: "RATING-INTERNAL-CURRENT-{entity}-CURRENT"
+    path: "3B_internal_ratings.rows[0].current"
+    metric: "internal_rating_current"
+    entity_path: "3B_internal_ratings.rows[0].entity_abbrev"
+    period: "CURRENT"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-FINAL-{entity}-CURRENT"
+    path: "3B_internal_ratings.rows[0].final_rating"
+    metric: "internal_rating_final"
+    entity_path: "3B_internal_ratings.rows[0].entity_abbrev"
+    period: "CURRENT"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-GENERATED-{entity}-CURRENT"
+    path: "3B_internal_ratings.rows[0].generated_rating"
+    metric: "internal_rating_generated"
+    entity_path: "3B_internal_ratings.rows[0].entity_abbrev"
+    period: "CURRENT"
+    unit: "grade"
+
+  # Internal rating — guarantor (row 1)
+  - id_template: "RATING-INTERNAL-CURRENT-{entity}-CURRENT"
+    path: "3B_internal_ratings.rows[1].current"
+    metric: "internal_rating_current"
+    entity_path: "3B_internal_ratings.rows[1].entity_abbrev"
+    period: "CURRENT"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-FINAL-{entity}-CURRENT"
+    path: "3B_internal_ratings.rows[1].final_rating"
+    metric: "internal_rating_final"
+    entity_path: "3B_internal_ratings.rows[1].entity_abbrev"
+    period: "CURRENT"
+    unit: "grade"
+
+  # S&P external rating — primary borrower
+  - id_template: "RATING-SP-{entity}-CURRENT"
+    path: "3A_external_ratings.ratings[0].sp"
+    metric: "sp_rating"
+    entity_path: "3A_external_ratings.ratings[0].entity_abbrev"
+    period: "CURRENT"
+    unit: "grade"
+
+  # Moody's external rating — primary borrower
+  - id_template: "RATING-MOODYS-{entity}-CURRENT"
+    path: "3A_external_ratings.ratings[0].moodys"
+    metric: "moodys_rating"
+    entity_path: "3A_external_ratings.ratings[0].entity_abbrev"
+    period: "CURRENT"
+    unit: "grade"
