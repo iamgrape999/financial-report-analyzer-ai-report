@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 from fastapi.security import OAuth2PasswordRequestForm
@@ -194,3 +195,76 @@ async def update_user_role(
         after=role,
     )
     return target
+
+
+@router.get("/status", tags=["auth"])
+async def auth_status(db: AsyncSession = Depends(get_db)):
+    """Diagnostic endpoint — returns whether any user accounts exist.
+
+    Safe to expose publicly: reveals no credentials, only a count.
+    Helps diagnose 'cannot login' issues when env vars were not set.
+    """
+    result = await db.execute(select(User).where(User.is_active == True))
+    users = result.scalars().all()
+    admin_count = sum(1 for u in users if u.role == "admin")
+    return {
+        "total_active_users": len(users),
+        "admin_accounts": admin_count,
+        "login_possible": admin_count > 0,
+        "hint": (
+            "No admin account exists. POST /auth/setup to create one."
+            if admin_count == 0
+            else "Admin account exists — use your configured credentials to log in."
+        ),
+    }
+
+
+class SetupRequest(BaseModel):
+    email: str
+    password: str
+    setup_key: str
+
+
+@router.post("/setup", tags=["auth"], status_code=status.HTTP_201_CREATED)
+async def first_run_setup(
+    payload: SetupRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create the very first admin account when no users exist.
+
+    Requires SETUP_KEY env var to match payload.setup_key.
+    Disabled once any user exists — subsequent calls return 409.
+    """
+    import os  # noqa: PLC0415
+    setup_key = os.getenv("SETUP_KEY", "")
+    if not setup_key:
+        raise HTTPException(
+            status_code=503,
+            detail="SETUP_KEY environment variable is not configured on this server.",
+        )
+    if payload.setup_key != setup_key:
+        raise HTTPException(status_code=403, detail="Invalid setup key.")
+
+    result = await db.execute(select(User).limit(1))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="Setup already complete — an account already exists. Use /login.",
+        )
+
+    if not payload.email or "@" not in payload.email:
+        raise HTTPException(status_code=400, detail="Valid email required.")
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    admin = User(
+        id=str(uuid.uuid4()),
+        email=payload.email.strip().lower(),
+        hashed_password=hash_password(payload.password),
+        role="admin",
+        is_active=True,
+    )
+    db.add(admin)
+    await db.flush()
+    logger.info("first_run_setup: created admin email=%r", admin.email)
+    return {"message": f"Admin account created for {admin.email}. You can now log in."}

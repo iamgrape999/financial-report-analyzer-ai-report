@@ -21,6 +21,10 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      # One-time setup key for creating the first admin via POST /api/credit-report/auth/setup
+      # Set any secret string here, use it once, then remove it.
+      - key: SETUP_KEY
+        sync: false
       - key: ENVIRONMENT
         value: production
       - key: DAILY_TOKEN_LIMIT
