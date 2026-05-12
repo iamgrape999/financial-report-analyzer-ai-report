@@ -264,7 +264,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
         <button class="btn btn-primary btn-sm" onclick="saveFormInput()">💾 Save Form</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="syncFormToJson()">↔ Sync to JSON</button>
-        <small class="text-muted">Fill in each field below and click Save. ✗ fields are required for 90% completeness.</small>
+        <small class="text-muted">Fill in each field below and click Save. ✗ fields contribute to completeness (50% target for draft generation).</small>
       </div>
       <div id="formFields" class="row g-2"></div>
     </div>
@@ -691,12 +691,12 @@ function renderCompleteness(secNo,data){
   if(!data||typeof data!=='object'||Object.keys(data).length===0){panel.style.display='none';return;}
   const{filled,total,pct,missing}=getCompleteness(secNo,data);
   const allFields=REQUIRED_FIELDS[secNo]||[];if(!allFields.length){panel.style.display='none';return;}
-  const barColor=pct>=90?'#00703C':pct>=70?'#f59e0b':'#dc2626';
-  const badgeCls=pct>=90?'bg-success':pct>=70?'bg-warning text-dark':'bg-secondary';
+  const barColor=pct>=50?'#00703C':pct>=30?'#f59e0b':'#dc2626';
+  const badgeCls=pct>=50?'bg-success':pct>=30?'bg-warning text-dark':'bg-secondary';
   panel.style.display='block';
   panel.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-1">
     <strong style="font-size:12px">欄位完整度 Field Completeness: ${filled}/${total} (${pct}%)</strong>
-    <span class="badge ${badgeCls}">${pct>=90?'✓ All fields filled':pct+'% filled (ETL fields not counted)'}</span>
+    <span class="badge ${badgeCls}">${pct>=50?'✓ Ready to generate':pct+'% filled (ETL fields not counted)'}</span>
   </div>
   <div class="completeness-bar"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width .3s;"></div></div>
   <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(data,f.p);
@@ -1154,8 +1154,8 @@ async function generateCurrentSection(){
   if(cachedData){
     const{pct}=getCompleteness(sec,cachedData);
     // Completeness is informational only — ETL data uses different key names so pct may read 0%
-    if(pct>0&&pct<90){
-      toast(`§${sec} completeness is ${pct}% — generating with available data (ETL fields not counted in completeness score).`,'info');
+    if(pct>0&&pct<50){
+      toast(`§${sec} completeness is ${pct}% — generating draft with available data (ETL fields not counted in completeness score).`,'info');
     }
   }
   const sp=document.getElementById('secGenSpin');sp.classList.remove('d-none');
@@ -1367,8 +1367,8 @@ async function generateFromReview(secNo){
   if(data){
     const{pct}=getCompleteness(secNo,data);
     // Completeness is informational only — ETL data uses different key names so pct may read 0%
-    if(pct>0&&pct<90){
-      toast(`§${secNo} completeness is ${pct}% — generating with available data.`,'info');
+    if(pct>0&&pct<50){
+      toast(`§${secNo} completeness is ${pct}% — generating draft with available data.`,'info');
     }
   } else if(!sectionInputMap[secNo]?.has_data){
     // No data at all — proceed anyway, AI will use uploaded evidence
@@ -1476,7 +1476,7 @@ function renderQualityReport(){
 
     const issues=[];
     if(!hasInput)issues.push({sev:'danger',msg:'No analyst input data — section output will contain hallucinations'});
-    if(hasInput&&compPct!==null&&compPct<90)issues.push({sev:'danger',msg:`Input only ${compPct}% complete (need ≥90%) — re-save with all fields filled`});
+    if(hasInput&&compPct!==null&&compPct<50)issues.push({sev:'warning',msg:`Input only ${compPct}% complete — draft report may have gaps; ETL fields not counted in score`});
     if(hasInput&&!hasOutput)issues.push({sev:'warning',msg:'Input ready but section not yet generated'});
     if(hasOutput)issues.push(...redTeamCheck(n,inputData,out.markdown));
     totalIssues+=issues.length;
@@ -1485,7 +1485,7 @@ function renderQualityReport(){
     const statusCls=hasDanger?'danger':issues.length?'warning':'success';
     const statusLabel=hasDanger?'⚠ Issues':issues.length?'⚡ Review':'✓ OK';
     const compBadge=compPct===null?'<span class="text-muted small">—</span>'
-      :`<span class="badge ${compPct>=90?'bg-success':compPct>=70?'bg-warning text-dark':'bg-danger'}">${compPct}%</span>`;
+      :`<span class="badge ${compPct>=50?'bg-success':compPct>=30?'bg-warning text-dark':'bg-secondary'}">${compPct}%</span>`;
     return `<tr>
       <td class="ps-2"><strong>§${n}</strong></td>
       <td class="small">${esc(snm(n))}</td>
