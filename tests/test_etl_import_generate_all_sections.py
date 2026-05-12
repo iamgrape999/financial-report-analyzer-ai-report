@@ -808,7 +808,7 @@ async def test_save_section_input_upsert_merges_correctly(db, section_no):
 # ── 16. Section input validates section_no bounds ────────────────────────────
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_section_no", [0, 11, -1, 100])
+@pytest.mark.parametrize("bad_section_no", [0, 12, -1, 100])
 async def test_save_section_input_rejects_invalid_section_no(db, bad_section_no):
     """PUT /inputs/{section_no} must return 400 for section_no outside 1-10."""
     from fastapi import HTTPException

@@ -34,6 +34,7 @@ SECTION_NAMES = {
     8: "Legal Documentation & Charges",
     9: "Compliance Checklist",
     10: "Appendix",
+    11: "Analyst / External Research Report",
 }
 
 # Cathay Financial green

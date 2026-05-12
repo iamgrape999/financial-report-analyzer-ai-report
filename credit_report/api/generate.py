@@ -343,8 +343,8 @@ async def import_section_json(
     report = await _require_report(db, report_id)
     _assert_can_view(report, current_user)
 
-    if section_no < 1 or section_no > 10:
-        raise HTTPException(status_code=400, detail="section_no must be 1-10")
+    if section_no < 1 or section_no > 11:
+        raise HTTPException(status_code=400, detail="section_no must be 1-11")
 
     raw = await file.read()
     try:

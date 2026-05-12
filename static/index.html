@@ -625,8 +625,8 @@ let allOutputs=[];
 let uploadedDocs=[];        // cached document list for duplicate detection
 let lang=localStorage.getItem('lang')||'en';
 
-const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix'};
-const SNAMES_ZH={1:'融資結構與主要條款',2:'綜合評述',3:'信用風險評估',4:'借款人背景',5:'擔保品評估',6:'船舶融資概覽',7:'財務分析',8:'法律文件與抵押',9:'法規遵循清單',10:'附錄'};
+const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix',11:'Analyst / External Research Report'};
+const SNAMES_ZH={1:'融資結構與主要條款',2:'綜合評述',3:'信用風險評估',4:'借款人背景',5:'擔保品評估',6:'船舶融資概覽',7:'財務分析',8:'法律文件與抵押',9:'法規遵循清單',10:'附錄',11:'外部研究報告參考資料'};
 function snm(n){return lang==='zh'?(SNAMES_ZH[n]||SNAMES[n]):SNAMES[n];}
 
 const DOC_TYPE_LABELS={

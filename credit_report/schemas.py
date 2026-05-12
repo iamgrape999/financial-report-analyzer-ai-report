@@ -64,7 +64,7 @@ class UpdateReportStatusRequest(BaseModel):
 
 
 class SectionInputPayload(BaseModel):
-    section_no: int = Field(..., ge=1, le=10)
+    section_no: int = Field(..., ge=1, le=11)
     input_json: dict[str, Any]
 
 

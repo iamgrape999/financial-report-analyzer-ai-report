@@ -204,8 +204,8 @@ async def save_section_input(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
-    if section_no < 1 or section_no > 10:
-        raise HTTPException(status_code=400, detail="section_no must be 1-10")
+    if section_no < 1 or section_no > 11:
+        raise HTTPException(status_code=400, detail="section_no must be 1-11")
 
     result = await db.execute(
         select(Report).where(Report.id == report_id, Report.is_deleted == False)
