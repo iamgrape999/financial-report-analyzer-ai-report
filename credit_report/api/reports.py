@@ -339,3 +339,179 @@ async def list_section_inputs(
         {"section_no": si.section_no, "saved_at": si.saved_at}
         for si in inputs
     ]
+
+
+# ── Semantic status transition endpoints ──────────────────────────────────────
+
+async def _get_live_report(db: AsyncSession, report_id: str) -> Report:
+    result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_deleted == False)
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
+@router.post("/{report_id}/submit-for-review", response_model=ReportResponse)
+async def submit_for_review(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Transition report from draft/validated → review_in_progress.
+
+    Requires at least one section with status='done'. Only the report owner or admin may submit.
+    """
+    from credit_report.models import SectionOutput
+
+    report = await _get_live_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+
+    if report.status not in ("draft", "validated"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot submit for review from status '{report.status}'. Report must be in draft or validated state.",
+        )
+
+    done_result = await db.execute(
+        select(SectionOutput).where(
+            SectionOutput.report_id == report_id,
+            SectionOutput.status == "done",
+        )
+    )
+    done_sections = done_result.scalars().all()
+    if not done_sections:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot submit for review — no sections have been generated yet.",
+        )
+
+    old_status = report.status
+    report.status = "review_in_progress"
+    await write_event(
+        db,
+        action="report.submitted_for_review",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="report",
+        target_id=report_id,
+        before=old_status,
+        after="review_in_progress",
+    )
+    logger.info(
+        "submit_for_review: report=%s %r → review_in_progress user=%s sections_done=%d",
+        report_id, old_status, current_user.id, len(done_sections),
+    )
+    return report
+
+
+@router.post("/{report_id}/approve", response_model=ReportResponse)
+async def approve_report(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Transition report to approved. Only approvers and admins may approve."""
+    if current_user.role not in ("approver", "admin"):
+        raise HTTPException(status_code=403, detail="Only approvers and admins can approve reports")
+
+    report = await _get_live_report(db, report_id)
+
+    if report.status not in ("review_in_progress", "validated"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot approve from status '{report.status}'. Report must be under review.",
+        )
+
+    old_status = report.status
+    report.status = "approved"
+    await write_event(
+        db,
+        action="report.approved",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="report",
+        target_id=report_id,
+        before=old_status,
+        after="approved",
+    )
+    logger.info("approve_report: report=%s %r → approved user=%s", report_id, old_status, current_user.id)
+    return report
+
+
+@router.post("/{report_id}/recall", response_model=ReportResponse)
+async def recall_report(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Recall a report from review back to draft. Owner or admin only."""
+    report = await _get_live_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+
+    if report.status not in ("review_in_progress",):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot recall from status '{report.status}'. Only reports under review can be recalled.",
+        )
+
+    old_status = report.status
+    report.status = "draft"
+    await write_event(
+        db,
+        action="report.recalled",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="report",
+        target_id=report_id,
+        before=old_status,
+        after="draft",
+    )
+    logger.info("recall_report: report=%s %r → draft user=%s", report_id, old_status, current_user.id)
+    return report
+
+
+@router.get("/{report_id}/review-progress")
+async def get_review_progress(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return section generation counts and block validation progress."""
+    from credit_report.models import SectionOutput
+    from credit_report.block_ast.models import ReportBlock
+
+    report = await _get_live_report(db, report_id)
+    _assert_can_view_report(report, current_user)
+
+    output_result = await db.execute(
+        select(SectionOutput).where(SectionOutput.report_id == report_id)
+    )
+    outputs = output_result.scalars().all()
+    sections_done = sum(1 for o in outputs if o.status == "done")
+    sections_error = sum(1 for o in outputs if o.status == "error")
+
+    block_result = await db.execute(
+        select(ReportBlock).where(ReportBlock.report_id == report_id, ReportBlock.is_stale == False)
+    )
+    blocks = block_result.scalars().all()
+    blocks_total = len(blocks)
+    blocks_passed = sum(1 for b in blocks if b.validation_status == "passed")
+    blocks_conflict = sum(1 for b in blocks if b.validation_status == "conflict")
+
+    return {
+        "report_id": report_id,
+        "report_status": report.status,
+        "sections_total": 10,
+        "sections_done": sections_done,
+        "sections_error": sections_error,
+        "blocks_total": blocks_total,
+        "blocks_passed": blocks_passed,
+        "blocks_conflict": blocks_conflict,
+        "ready_for_review": sections_done > 0 and report.status in ("draft", "validated"),
+        "ready_to_approve": report.status == "review_in_progress",
+    }
