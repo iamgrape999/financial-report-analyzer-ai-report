@@ -365,11 +365,11 @@ async def import_section_json(
 
     if existing:
         try:
-            current_data: dict = json.loads(existing.data or "{}")
+            current_data: dict = json.loads(existing.input_json or "{}")
         except Exception:
             current_data = {}
         current_data.update(payload)
-        existing.data = json.dumps(current_data, ensure_ascii=False)
+        existing.input_json = json.dumps(current_data, ensure_ascii=False)
         await db.flush()
         logger.info(
             "import_section_json: merged section=%d fields=%d report=%s user=%s",
@@ -379,7 +379,7 @@ async def import_section_json(
         db.add(SectionInput(
             report_id=report_id,
             section_no=section_no,
-            data=json.dumps(payload, ensure_ascii=False),
+            input_json=json.dumps(payload, ensure_ascii=False),
         ))
         await db.flush()
         logger.info(
