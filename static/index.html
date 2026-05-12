@@ -745,7 +745,7 @@ function renderFieldForm(secNo){
     else if(f.t==='bool')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">—</option><option value="true">Yes / True</option><option value="false">No / False</option></select>`;
     else if(f.t==='select')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">— Select —</option>${(f.opts||[]).map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
     const req=REQUIRED_FIELDS[secNo]?.some(r=>r.p===f.p);
-    return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${f.l}${req?'<span class="text-danger ms-1" title="Required for 90%">*</span>':''}</label>${inp}</div>`;
+    return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${f.l}${req?'<span class="text-danger ms-1" title="Required for 50%">*</span>':''}</label>${inp}</div>`;
   }).join('');
 }
 
