@@ -277,7 +277,6 @@ async def compute_ltv_acr(
     from credit_report.calculation_engine.ltv_acr import (
         build_ltv_table,
         balloon_ltv_summary,
-        acr_from_ltv,
     )
 
     schedule = [{"year": e.year, "outstanding_pct": e.outstanding_pct} for e in payload.amortization_schedule]

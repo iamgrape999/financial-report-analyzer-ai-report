@@ -8,7 +8,6 @@ from credit_report.database import get_db
 from credit_report.fact_store import repository as repo
 from credit_report.fact_store.repository import OptimisticLockError
 from credit_report.schemas import (
-    ConflictResponse,
     FactApproveRequest,
     FactOverrideRequest,
     FactResponse,
