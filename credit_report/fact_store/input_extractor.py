@@ -216,8 +216,7 @@ class InputFactExtractor:
             return upper
 
         # Already canonical: FY2024, FY2025F (forecast), FY2025E (estimate), etc.
-        import re as _re
-        if _re.match(r'^FY\d{4}[A-Z]?$', upper):
+        if re.match(r'^FY\d{4}[A-Z]?$', upper):
             return upper
 
         m = _PERIOD_RE.search(raw)

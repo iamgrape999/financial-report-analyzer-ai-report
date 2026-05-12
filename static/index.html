@@ -2020,10 +2020,15 @@ async function computeLtvAcr(){
   const balloon=balloonRaw?parseFloat(balloonRaw):null;
   if(!facility||!assetVal){toast('Enter facility and asset value','warning');return;}
   const schedText=document.getElementById('ltvSchedule').value;
-  const schedule=schedText.split('/').map(s=>s.trim()).filter(Boolean).map(s=>{
-    const[yr,pct]=s.split(',').map(Number);
-    return{year:yr,outstanding_pct:pct};
-  });
+  let schedule;
+  try{
+    schedule=schedText.split('/').map(s=>s.trim()).filter(Boolean).map(s=>{
+      const parts=s.split(',').map(Number);
+      if(parts.length!==2||isNaN(parts[0])||isNaN(parts[1]))
+        throw new Error(`Invalid amortization row: "${s}" — expected "year,pct"`);
+      return{year:parts[0],outstanding_pct:parts[1]};
+    });
+  }catch(e){toast(e.message,'warning');return;}
   if(!schedule.length){toast('Enter at least one amortization row','warning');return;}
   const spin=document.getElementById('ltvSpin');
   spin.classList.remove('d-none');
@@ -2080,7 +2085,10 @@ async function openFactInspector(){
     if(!res.ok)throw new Error('Could not load facts');
     _allFacts=await res.json();
   }catch(e){
+    _allFacts=[];
+    _factFilter='all';
     document.getElementById('factsTableBody').innerHTML=`<tr><td colspan="9" class="text-danger">${esc(e.message)}</td></tr>`;
+    document.getElementById('factsCount').textContent='Error';
     return;
   }
   filterFacts('all');
@@ -2119,21 +2127,28 @@ function renderFactsTable(){
       <td><span class="badge bg-${stateClass[f.state]||'secondary'}">${esc(f.state)}</span></td>
       <td>
         ${f.state!=='deprecated'?`<button class="btn btn-outline-secondary btn-sm py-0 px-1"
-          style="font-size:10px" onclick="overrideFact('${f.id}')">Override</button>`:''}
+          style="font-size:10px" onclick="overrideFact('${f.id}',${f.version||1})">Override</button>`:''}
       </td>
     </tr>`).join('');
   document.getElementById('factsCount').textContent=`${facts.length} / ${_allFacts.length} facts`;
 }
 
-async function overrideFact(factId){
+async function overrideFact(factId, currentVersion){
   const newVal=prompt('Enter override value:');
   if(newVal===null)return;
   const reason=prompt('Reason for override (optional):')||'Manual analyst override';
+  const numericVal=parseFloat(newVal);
+  const body={reason, expected_version:currentVersion||1};
+  if(!isNaN(numericVal)){
+    body.value=numericVal;
+  } else {
+    body.display=newVal;
+  }
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/facts/'+factId+'/override',{
       method:'POST',
       headers:{...H(),'Content-Type':'application/json'},
-      body:JSON.stringify({override_value:newVal,reason})
+      body:JSON.stringify(body)
     });
     if(!res.ok)throw new Error((await res.json()).detail||'Override failed');
     toast('Fact overridden ✓','success');

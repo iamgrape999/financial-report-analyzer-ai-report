@@ -90,6 +90,7 @@ class FactResponse(BaseModel):
     state: str
     source_type: str
     source_priority: int
+    source_section_no: Optional[int]
     version: int
     last_edited_by: Optional[str]
     override_reason: Optional[str]
