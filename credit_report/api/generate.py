@@ -16,7 +16,7 @@ from fastapi import Form
 
 from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, GEMINI_API_KEY
 from credit_report.database import get_db
-from credit_report.generation.evidence import extract_text_from_file, save_document_text
+from credit_report.generation.evidence import extract_text_from_file, save_document_binary, save_document_text
 from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
 from credit_report.generation.models import SectionDocument
 from credit_report.generation.pipeline import (
@@ -205,6 +205,7 @@ async def upload_document(
     loop = asyncio.get_event_loop()
     text, detected_fmt = await loop.run_in_executor(None, partial(extract_text_from_file, file_bytes, fname))
     save_document_text(report_id, doc_id, text)
+    save_document_binary(report_id, doc_id, file_bytes, fname)
     logger.info("upload_document: saved doc=%s fmt=%s chars=%d report=%s user=%s", doc_id, detected_fmt, len(text), report_id, current_user.id)
 
     doc = SectionDocument(
@@ -250,7 +251,7 @@ async def etl_document_endpoint(
     Returns extracted field values per section so the UI can show them and let the
     analyst review/save them as section inputs.
     """
-    from credit_report.generation.evidence import load_document_texts
+    from credit_report.generation.evidence import load_document_texts, save_document_text
     from pathlib import Path
     from credit_report.config import CREDIT_REPORTS_ROOT
 
@@ -268,10 +269,32 @@ async def etl_document_endpoint(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Load extracted text from filesystem
-    txt_path = CREDIT_REPORTS_ROOT / report_id / f"{doc_id}.txt"
+    # Load extracted text — if .txt is missing, re-extract from stored binary (server restart recovery)
+    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    txt_path = doc_dir / f"{doc_id}.txt"
     if not txt_path.exists():
-        raise HTTPException(status_code=422, detail="Document text not found — re-upload the file")
+        bin_path = doc_dir / f"{doc_id}.bin"
+        if bin_path.exists():
+            fname_path = doc_dir / f"{doc_id}.fname"
+            stored_fname = (
+                fname_path.read_text(encoding="utf-8")
+                if fname_path.exists()
+                else (doc.original_filename or "upload.pdf")
+            )
+            logger.info(
+                "etl_document_endpoint: .txt missing, re-extracting from binary doc=%s file=%r report=%s",
+                doc_id, stored_fname, report_id,
+            )
+            loop = asyncio.get_event_loop()
+            reextracted_text, _ = await loop.run_in_executor(
+                None, partial(extract_text_from_file, bin_path.read_bytes(), stored_fname)
+            )
+            save_document_text(report_id, doc_id, reextracted_text)
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="Document file not found on server — please delete and re-upload this document",
+            )
 
     text = txt_path.read_text(encoding="utf-8")
     if not text.strip():

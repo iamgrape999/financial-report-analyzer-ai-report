@@ -38,6 +38,14 @@ def save_document_text(report_id: str, doc_id: str, text: str) -> None:
     (doc_dir / f"{doc_id}.txt").write_text(text, encoding="utf-8")
 
 
+def save_document_binary(report_id: str, doc_id: str, file_bytes: bytes, filename: str) -> None:
+    """Persist the original uploaded file bytes so ETL can be re-run without re-uploading."""
+    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    (doc_dir / f"{doc_id}.bin").write_bytes(file_bytes)
+    (doc_dir / f"{doc_id}.fname").write_text(filename, encoding="utf-8")
+
+
 def load_document_texts(report_id: str) -> list[str]:
     """Load all extracted document texts for a report from the filesystem."""
     doc_dir = CREDIT_REPORTS_ROOT / report_id
