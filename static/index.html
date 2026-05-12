@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#00703C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Financial Report Analyzer</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -39,7 +42,7 @@ body{background:#f5f5f5;font-family:'Segoe UI',system-ui,sans-serif;color:#1a1a1
 .markdown-body h2{font-size:1.2rem;margin-top:1.5rem;border-bottom:2px solid #00703C;padding-bottom:5px;}
 .markdown-body h3{font-size:1.05rem;margin-top:1.1rem;color:#00703C;}
 .markdown-body pre{background:#f4f4f5;padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;}
-#toast-cont{position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;}
+#toast-cont{position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;max-width:calc(100vw - 2rem);}
 .spinner-sm{width:14px;height:14px;border-width:2px;}
 .section-panel{border-top:3px solid #00703C;}
 textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:vertical;}
@@ -67,7 +70,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 .table-light>*>tr>th,.table-light>*>tr>td,.table thead.table-light th{background-color:#e8f5ee!important;color:#1a1a1a;}
 .badge.bg-info{background-color:#0e9f6e!important;}
 /* ── Improve Paragraph panel ── */
-.improve-panel{position:fixed;right:0;top:56px;width:340px;height:calc(100vh - 56px);background:#fff;border-left:2px solid #b2dfce;padding:16px;overflow-y:auto;z-index:500;box-shadow:-3px 0 12px rgba(0,0,0,.1);transition:transform .2s;}
+.improve-panel{position:fixed;right:0;top:56px;width:340px;height:calc(100vh - 56px);height:calc(100dvh - 56px);background:#fff;border-left:2px solid #b2dfce;padding:16px;overflow-y:auto;-webkit-overflow-scrolling:touch;z-index:500;box-shadow:-3px 0 12px rgba(0,0,0,.1);transition:transform .2s;}
 .improve-panel.hidden{transform:translateX(100%);}
 .improve-original{background:#f8f9fa;border-left:3px solid #00703C;padding:8px 10px;font-size:11px;color:#555;border-radius:0 4px 4px 0;max-height:120px;overflow-y:auto;}
 .improve-suggestion{background:#f0fff4;border:1px solid #b2dfce;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto;}
@@ -81,6 +84,14 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 [data-block-id]{cursor:pointer;border-radius:4px;transition:background .15s;}
 [data-block-id]:hover{background:#f0fff4;}
 [data-block-id].selected{outline:2px solid #00703C;background:#e8f5ee;}
+/* ── Mobile / iPhone responsive ── */
+@media(max-width:540px){
+  .improve-panel{width:100vw;border-left:none;border-top:2px solid #b2dfce;}
+  .review-content-wrap.panel-open{margin-right:0;}
+  #toast-cont .alert{min-width:auto;max-width:calc(100vw - 2rem);font-size:12px;}
+  .navbar-brand small{display:none;}
+  .section-panel .d-flex.gap-2{flex-wrap:wrap;}
+}
 </style>
 </head>
 <body>
@@ -179,7 +190,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
             <option value="other">📁 其他 / Other</option>
           </select>
           <div class="d-flex gap-2">
-            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.xlsx" class="form-control form-control-sm">
+            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.tif,.xlsx,.xls" class="form-control form-control-sm">
             <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()">Upload</button>
           </div>
           <small class="text-muted">PDF · DOCX · PPTX · XLSX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
@@ -1777,10 +1788,7 @@ async function exportDocx(){
       const blob=await res.blob();
       const cd=res.headers.get('Content-Disposition')||'';
       const fname=(cd.match(/filename="([^"]+)"/)||[])[1]||'credit_report.docx';
-      const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob);a.download=fname;
-      document.body.appendChild(a);a.click();
-      document.body.removeChild(a);URL.revokeObjectURL(a.href);
+      _dlBlobSafe(blob,fname);
       toast('DOCX downloaded ✓ (server-generated)','success');
       return;
     }
@@ -1829,10 +1837,7 @@ async function exportDocx(){
     </head><body>${body}</body></html>`;
 
     const blob=htmlDocx.asBlob(html,{orientation:'portrait',margins:{top:720,right:720,bottom:720,left:1080}});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);a.download='credit_report.docx';
-    document.body.appendChild(a);a.click();
-    document.body.removeChild(a);URL.revokeObjectURL(a.href);
+    _dlBlobSafe(blob,'credit_report.docx');
     toast('DOCX downloaded ✓ (client-side fallback)','success');
   }catch(e){toast('DOCX fallback failed: '+e.message,'danger');}
   finally{sp.classList.add('d-none');}
@@ -1861,11 +1866,7 @@ async function exportPdf(){
     const res=await fetch(API+'/reports/'+currentRid+'/export/pdf',{headers:H()});
     if(res.ok){
       const blob=await res.blob();
-      const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob);
-      a.download='credit_report.pdf';
-      document.body.appendChild(a);a.click();
-      document.body.removeChild(a);URL.revokeObjectURL(a.href);
+      _dlBlobSafe(blob,'credit_report.pdf');
       toast('PDF downloaded ✓','success');
       return;
     }
@@ -1895,11 +1896,26 @@ h1{font-size:1.4rem;border-bottom:3px solid #00703C;padding-bottom:6px;margin-to
 </div>${body}</body></html>`);
   win.document.close();
 }
+function _isIOS(){
+  return/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+}
+function _dlBlobSafe(blob,filename){
+  const url=URL.createObjectURL(blob);
+  if(_isIOS()){
+    // iOS Safari: a.download is ignored — open in new tab so user can Share → Save to Files
+    const win=window.open(url,'_blank');
+    if(!win)toast('Pop-up blocked — allow pop-ups to download files','warning');
+    else toast(`Tap Share → Save to Files to save ${filename}`,'info');
+    setTimeout(()=>URL.revokeObjectURL(url),90000);
+  }else{
+    const a=document.createElement('a');
+    a.href=url;a.download=filename;
+    document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(url);
+  }
+}
 function dlBlob(content,filename,mime){
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([content],{type:mime}));
-  a.download=filename;document.body.appendChild(a);a.click();
-  document.body.removeChild(a);URL.revokeObjectURL(a.href);
+  _dlBlobSafe(new Blob([content],{type:mime}),filename);
   toast(`Downloaded ${filename}`,'success');
 }
 
