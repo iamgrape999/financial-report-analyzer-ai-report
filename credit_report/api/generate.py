@@ -402,16 +402,12 @@ async def generate_section(
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
-    # Require analyst input data before allowing generation
+    # Load section input — generation proceeds even if empty (AI uses uploaded evidence)
     input_data = await _load_section_input(db, report_id, section_no)
     if not input_data:
-        logger.warning("generate_section: no input data section=%d report=%s user=%s", section_no, report_id, current_user.id)
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Section {section_no} has no analyst input data. "
-                "Fill in and save the section input JSON before generating."
-            ),
+        logger.info(
+            "generate_section: no structured input section=%d report=%s user=%s — proceeding with evidence-only generation",
+            section_no, report_id, current_user.id,
         )
 
     missing = await check_hard_dependencies(db, report_id, section_no)
@@ -466,27 +462,39 @@ async def generate_full_report(
 ):
     """Trigger AI generation for all 10 sections in dependency order.
 
-    All 10 sections must have analyst input data saved before this can run.
-    Returns 422 with a list of sections that are still missing input data.
+    Sections without saved input data are skipped (AI uses uploaded evidence for those with data).
+    Returns 422 only if NO sections have any input data at all.
     """
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
-    # Pre-flight: all 10 sections must have non-empty input data
-    missing_inputs: list[int] = []
+    # Count sections with data — skip empty ones rather than blocking
+    sections_with_data: list[int] = []
+    sections_without_data: list[int] = []
     for sec_no in range(1, 11):
         data = await _load_section_input(db, report_id, sec_no)
-        if not data:
-            missing_inputs.append(sec_no)
+        if data:
+            sections_with_data.append(sec_no)
+        else:
+            sections_without_data.append(sec_no)
 
-    if missing_inputs:
-        logger.warning("generate_full_report: preflight failed missing_sections=%s report=%s user=%s", missing_inputs, report_id, current_user.id)
+    if not sections_with_data:
+        logger.warning(
+            "generate_full_report: no input data for any section report=%s user=%s",
+            report_id, current_user.id,
+        )
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Cannot generate: sections {missing_inputs} have no analyst input data. "
-                "Save input JSON for every section before running the full report."
+                "No sections have saved input data. "
+                "Run ETL on uploaded documents or fill in section data manually before generating."
             ),
+        )
+
+    if sections_without_data:
+        logger.info(
+            "generate_full_report: skipping %d sections without input data=%s report=%s user=%s",
+            len(sections_without_data), sections_without_data, report_id, current_user.id,
         )
 
     if not GEMINI_API_KEY:

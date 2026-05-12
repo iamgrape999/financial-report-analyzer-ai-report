@@ -86,10 +86,9 @@ async def run_section_generation(
     input_json: dict = json.loads(si.input_json) if si and si.input_json else {}
 
     if not input_json:
-        logger.error("run_section_generation: no input_json section=%d report=%s", section_no, report_id)
-        raise ValueError(
-            f"Section {section_no} has no analyst input data. "
-            "Save section input JSON before triggering AI generation."
+        logger.info(
+            "run_section_generation: no structured input section=%d report=%s — generating from evidence only",
+            section_no, report_id,
         )
 
     evidence_chunks = retrieve_evidence(report_id, section_no)
