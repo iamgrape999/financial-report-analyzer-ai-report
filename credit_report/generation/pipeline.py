@@ -91,6 +91,21 @@ async def run_section_generation(
             section_no, report_id,
         )
 
+    # §7 Financial Analysis: enrich with pre-computed ratios from the calculation engine.
+    # This prevents the AI from re-deriving DSCR/LTV/ACR and introduces hallucination risk.
+    if section_no == 7:
+        try:
+            from credit_report.api.calculations import get_calc_results_for_prompt
+            calc_context = await get_calc_results_for_prompt(db, report_id)
+            if calc_context:
+                input_json = {**input_json, "__calc_results": calc_context}
+                logger.info(
+                    "[Calc] injected %d calc results into §7 prompt report=%s",
+                    len(calc_context), report_id,
+                )
+        except Exception as _ce:
+            logger.warning("[Calc] failed to load calc results for §7 report=%s: %s", report_id, _ce)
+
     evidence_chunks = retrieve_evidence(report_id, section_no)
     logger.info("run_section_generation: starting section=%d report=%s user=%s evidence_chunks=%d preceding=%s", section_no, report_id, actor_user_id, len(evidence_chunks), list(preceding_outputs.keys()) if preceding_outputs else [])
 

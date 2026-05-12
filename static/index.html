@@ -73,6 +73,11 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 .improve-suggestion{background:#f0fff4;border:1px solid #b2dfce;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto;}
 .review-content-wrap{transition:margin-right .2s;}
 .review-content-wrap.panel-open{margin-right:340px;}
+.block-unit{border-radius:4px;padding:1px 4px;margin:2px 0;transition:background .15s;cursor:pointer;}
+.block-unit:hover{background:#f0fff4;}
+.block-unit.selected{outline:2px solid #00703C;background:#e8f5ee;}
+.block-unit.b-stale{border-left:3px solid #f59e0b;padding-left:6px;}
+.block-unit.b-passed{border-left:3px solid #16a34a;padding-left:6px;}
 [data-block-id]{cursor:pointer;border-radius:4px;transition:background .15s;}
 [data-block-id]:hover{background:#f0fff4;}
 [data-block-id].selected{outline:2px solid #00703C;background:#e8f5ee;}
@@ -303,6 +308,30 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <strong>⚠ Section 2 (Overall Comments) may be outdated</strong> — one or more other sections were generated after §2 was written. §2 should be regenerated so it reflects the complete report.
     <button class="btn btn-sm btn-warning ms-3" onclick="regenSec2()">🔄 Regenerate §2 Overall Comments (with full context)</button>
     <span id="regenSpin" class="spinner-border spinner-sm d-none ms-2"></span>
+  </div>
+
+  <!-- Review progress + lifecycle bar -->
+  <div id="reviewProgressBar" class="container pt-2" style="max-width:960px;">
+    <div class="card mb-2 border-0 bg-light">
+      <div class="card-body py-2 d-flex flex-wrap gap-3 align-items-center">
+        <span class="text-muted small fw-bold">REPORT STATUS:</span>
+        <span id="rpStatus" class="badge bg-secondary">—</span>
+        <span class="text-muted small">Sections:</span>
+        <span id="rpSections" class="small">—</span>
+        <span class="text-muted small">Blocks validated:</span>
+        <span id="rpBlocks" class="small">—</span>
+        <span id="rpConflict" class="small text-warning d-none"></span>
+        <div class="ms-auto d-flex gap-2">
+          <button id="rpSubmitBtn" class="btn btn-sm btn-outline-primary d-none" onclick="submitForReview()">
+            <span id="rpSubmitSpin" class="spinner-border spinner-sm d-none me-1"></span>Submit for Review
+          </button>
+          <button id="rpRecallBtn" class="btn btn-sm btn-outline-secondary d-none" onclick="recallReport()">Recall</button>
+          <button id="rpApproveBtn" class="btn btn-sm btn-success d-none" onclick="approveReport()">
+            <span id="rpApproveSpin" class="spinner-border spinner-sm d-none me-1"></span>Approve Report
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Field completeness & quality report -->
@@ -580,6 +609,7 @@ let currentPanelSec=null;
 let sectionInputMap={};     // {n: {has_data, saved_at}}
 let sectionInputDataMap={}; // {n: parsed input_json object} — cached for quality checks
 let sectionOutputMap={};    // {n: output_obj}
+let sectionBlocksMap={};    // {n: ReportBlock[]} — real block IDs for improve panel
 let allOutputs=[];
 let uploadedDocs=[];        // cached document list for duplicate detection
 let lang=localStorage.getItem('lang')||'en';
@@ -923,7 +953,7 @@ async function createReport(){
 
 // ── Report detail ─────────────────────────────────────────────────────────────
 async function loadReportDetail(rid){
-  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};allOutputs=[];uploadedDocs=[];closePanel();
+  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];uploadedDocs=[];closePanel();
   showView('viewReport');
   document.getElementById('rptMeta').innerHTML='<span class="text-muted">Loading…</span>';
   document.getElementById('secTable').innerHTML='<tr><td colspan="7" class="text-center py-3 text-muted">Loading…</td></tr>';
@@ -1079,6 +1109,37 @@ async function loadSectionOutput(sec){
   }catch(e){el.innerHTML=`<p class="text-danger">${esc(e.message)}</p>`;}
 }
 
+// ── Generation polling helpers ─────────────────────────────────────────────────
+async function _pollGenerationTask(taskId, secNo, maxWaitMs=300000){
+  const interval=3000, start=Date.now();
+  while(Date.now()-start<maxWaitMs){
+    await new Promise(r=>setTimeout(r,interval));
+    try{
+      const r=await fetch(API+'/reports/'+currentRid+'/generate/status/'+taskId,{headers:H()});
+      if(!r.ok)throw new Error('Status check failed');
+      const t=await r.json();
+      if(t.status==='done'){return t;}
+      if(t.status==='error'){throw new Error(t.detail||'Generation error');}
+    }catch(e){throw e;}
+  }
+  throw new Error('Generation timed out after '+(maxWaitMs/1000)+'s — check server logs');
+}
+
+async function _pollFullReportTask(taskId, maxWaitMs=900000){
+  const interval=5000, start=Date.now();
+  while(Date.now()-start<maxWaitMs){
+    await new Promise(r=>setTimeout(r,interval));
+    try{
+      const r=await fetch(API+'/reports/'+currentRid+'/generate/status/'+taskId,{headers:H()});
+      if(!r.ok)throw new Error('Status check failed');
+      const t=await r.json();
+      if(t.status==='done'){return t;}
+      if(t.status==='error'){throw new Error(t.detail||'Generation error');}
+    }catch(e){throw e;}
+  }
+  throw new Error('Full report generation timed out after '+(maxWaitMs/1000)+'s');
+}
+
 async function generateCurrentSection(){
   const sec=currentPanelSec;if(!sec)return;
   // Enforce 90% completeness gate using cached data (not the editor, which may show
@@ -1102,7 +1163,10 @@ async function generateCurrentSection(){
     const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
-    toast(`§${sec} generated — ${(d.tokens_used||0).toLocaleString()} tokens`,'success');
+    // 202: background task — poll until done
+    toast(`§${sec} generation started…`,'info');
+    const result=await _pollGenerationTask(d.task_id,sec);
+    toast(`§${sec} generated — ${(result.tokens_used||0).toLocaleString()} tokens`,'success');
     const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
     if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
     renderSectionsTable();await loadSectionOutput(sec);
@@ -1142,7 +1206,10 @@ async function generateAll(){
     const res=await fetch(API+'/reports/'+currentRid+'/generate',{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
-    const ss=Object.entries(d.sections).map(([k,v])=>`§${k}:${v.split(':')[0]}`).join(' ');
+    // 202: background task — poll until done
+    const result=await _pollFullReportTask(d.task_id);
+    const sections=result.sections||{};
+    const ss=Object.entries(sections).map(([k,v])=>`§${k}:${v.split(':')[0]}`).join(' ');
     toast('Generation complete. '+ss,'success');
     await loadReportDetail(currentRid);
   }catch(e){toast(e.message,'danger');}
@@ -1160,15 +1227,82 @@ function checkSection2Stale(){
 }
 
 async function openReview(){
-  // Pre-fetch all 10 section inputs in parallel so quality check has real data
-  await Promise.all(Array.from({length:10},(_,i)=>i+1).map(async n=>{
-    if(sectionInputDataMap[n])return; // already cached
-    try{
-      const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+n,{headers:H()});
-      if(res.ok){const d=await res.json();sectionInputDataMap[n]=d.input_json;}
-    }catch(e){}
-  }));
+  // Pre-fetch section inputs AND blocks in parallel for review + improve panel
+  await Promise.all([
+    ...Array.from({length:10},(_,i)=>i+1).map(async n=>{
+      if(sectionInputDataMap[n])return;
+      try{
+        const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+n,{headers:H()});
+        if(res.ok){const d=await res.json();sectionInputDataMap[n]=d.input_json;}
+      }catch(e){}
+    }),
+    ...Array.from({length:10},(_,i)=>i+1).map(async n=>{
+      if(sectionBlocksMap[n])return;
+      try{
+        const r=await fetch(API+'/reports/'+currentRid+'/sections/'+n+'/blocks',{headers:H()});
+        if(r.ok){const bl=await r.json();if(bl.length)sectionBlocksMap[n]=bl;}
+      }catch(e){}
+    }),
+  ]);
   renderReview();renderQualityReport();showView('viewReview');
+  loadReviewProgress();
+}
+
+async function loadReviewProgress(){
+  if(!currentRid)return;
+  try{
+    const r=await fetch(API+'/reports/'+currentRid+'/review-progress',{headers:H()});
+    if(!r.ok)return;
+    const d=await r.json();
+    const statusBadge=document.getElementById('rpStatus');
+    const statusColors={draft:'secondary',validated:'info',review_in_progress:'primary',approved:'success'};
+    statusBadge.className='badge bg-'+(statusColors[d.report_status]||'secondary');
+    statusBadge.textContent=d.report_status;
+    document.getElementById('rpSections').textContent=`${d.sections_done}/10 done`;
+    document.getElementById('rpBlocks').textContent=`${d.blocks_passed}/${d.blocks_total}`;
+    const cfEl=document.getElementById('rpConflict');
+    if(d.blocks_conflict>0){
+      cfEl.textContent=`⚠ ${d.blocks_conflict} conflict${d.blocks_conflict>1?'s':''}`;
+      cfEl.classList.remove('d-none');
+    }else{cfEl.classList.add('d-none');}
+    document.getElementById('rpSubmitBtn').classList.toggle('d-none',!d.ready_for_review);
+    document.getElementById('rpApproveBtn').classList.toggle('d-none',!d.ready_to_approve);
+    document.getElementById('rpRecallBtn').classList.toggle('d-none',d.report_status!=='review_in_progress');
+  }catch(e){}
+}
+
+async function submitForReview(){
+  const sp=document.getElementById('rpSubmitSpin');sp.classList.remove('d-none');
+  try{
+    const r=await fetch(API+'/reports/'+currentRid+'/submit-for-review',{method:'POST',headers:H()});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Submit failed');
+    toast('Report submitted for review ✓','success');
+    await loadReviewProgress();
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+async function approveReport(){
+  const sp=document.getElementById('rpApproveSpin');sp.classList.remove('d-none');
+  try{
+    const r=await fetch(API+'/reports/'+currentRid+'/approve',{method:'POST',headers:H()});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Approve failed');
+    toast('Report approved ✓','success');
+    await loadReviewProgress();
+  }catch(e){toast(e.message,'danger');}
+  finally{sp.classList.add('d-none');}
+}
+
+async function recallReport(){
+  try{
+    const r=await fetch(API+'/reports/'+currentRid+'/recall',{method:'POST',headers:H()});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Recall failed');
+    toast('Report recalled to draft','info');
+    await loadReviewProgress();
+  }catch(e){toast(e.message,'danger');}
 }
 
 function renderReview(){
@@ -1189,16 +1323,21 @@ function renderReview(){
     const o=sectionOutputMap[n];
     const inp=sectionInputMap[n];
     if(o?.status==='done'&&o.markdown){
+      const sBlocks=sectionBlocksMap[n]||[];
+      const bodyHtml=sBlocks.length>0
+        ? sBlocks.map(b=>`<div data-block-id="${b.id}" data-version="${b.version}" data-section="${n}" class="block-unit${b.is_stale?' b-stale':''}${b.validation_status==='passed'?' b-passed':''}" title="${esc(b.block_type)}">${marked.parse(b.content||'')}</div>`).join('')
+        : `<div data-block-id="section-${n}" data-version="1" data-section="${n}" class="block-unit">${marked.parse(o.markdown)}</div>`;
       return `<div id="rsec-${n}" class="card review-section-card">
         <div class="card-header d-flex justify-content-between align-items-center">
           <span>§${n} — ${snm(n)}</span>
           <div class="d-flex gap-1 align-items-center">
+            ${sBlocks.length>0?`<span class="text-muted" style="font-size:10px">${sBlocks.filter(b=>b.validation_status==='passed').length}/${sBlocks.length} blocks ✓</span>`:''}
             <span id="vstatus-${n}" class="badge bg-secondary" style="font-size:10px">pending</span>
             <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px"
-              onclick="validateSection(${n})" title="Mark section as validated">✓</button>
+              onclick="validateSection(${n})" title="Mark section as validated">✓ Validate all</button>
           </div>
         </div>
-        <div class="card-body markdown-body review-content-wrap" data-block-id="section-${n}" data-version="1" data-section="${n}">${marked.parse(o.markdown)}</div>
+        <div class="card-body markdown-body review-content-wrap">${bodyHtml}</div>
       </div>`;
     }
     return `<div id="rsec-${n}" class="card review-section-card border-warning">
@@ -1240,9 +1379,17 @@ async function generateFromReview(secNo){
     const res=await fetch(API+'/reports/'+currentRid+'/generate/'+secNo,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
-    toast(`§${secNo} generated ✓`,'success');
+    // 202: background task — poll until done
+    toast(`§${secNo} generation started…`,'info');
+    const result=await _pollGenerationTask(d.task_id,secNo);
+    toast(`§${secNo} generated ✓ — ${(result.tokens_used||0).toLocaleString()} tokens`,'success');
     const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
     if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
+    // Reload blocks for the newly generated section so improve panel has real IDs
+    delete sectionBlocksMap[secNo];
+    try{const br=await fetch(API+'/reports/'+currentRid+'/sections/'+secNo+'/blocks',{headers:H()});
+      if(br.ok){const bl=await br.json();if(bl.length)sectionBlocksMap[secNo]=bl;}
+    }catch(e){}
     renderSectionsTable();renderReview();
   }catch(e){toast(e.message,'danger');}
   finally{if(sp)sp.classList.add('d-none');}
@@ -1809,20 +1956,18 @@ async function submitImprove(){
   document.getElementById('improveStatusMsg').textContent='Calling AI…';
   document.getElementById('improveSuggestionWrap').classList.add('d-none');
   try{
-    // Resolve synthetic "section-N" IDs to real block IDs from the DB
+    // If clicked on a synthetic fallback ID (no blocks parsed yet), resolve it now
     let effectiveBlockId=_improveBlockId;
     let effectiveVersion=_improveVersion;
     if(_improveBlockId.startsWith('section-')){
-      const secNo=_improveBlockId.replace('section-','');
-      const br=await fetch(API+'/reports/'+currentRid+'/sections/'+secNo+'/blocks',{headers:H()});
-      if(!br.ok)throw new Error('Could not load blocks for this section');
-      const blocks=await br.json();
-      const textBlock=blocks.find(b=>b.block_type==='paragraph')||blocks.find(b=>b.block_type==='heading')||blocks[0];
-      if(!textBlock){
-        throw new Error('No AI-parsed blocks found — regenerate the section first, then try again');
+      const secNo=parseInt(_improveBlockId.replace('section-',''));
+      const cached=sectionBlocksMap[secNo]||[];
+      const textBlock=cached.find(b=>b.block_type==='paragraph')||cached.find(b=>b.block_type==='heading')||cached[0];
+      if(textBlock){
+        effectiveBlockId=textBlock.id;effectiveVersion=textBlock.version;
+      } else {
+        throw new Error('No AI-parsed blocks found — generate the section first so blocks are available');
       }
-      effectiveBlockId=textBlock.id;
-      effectiveVersion=textBlock.version;
     }
     const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+effectiveBlockId+'/improve',{
       method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
@@ -1854,6 +1999,9 @@ async function applyImprovement(){
     toast('Paragraph updated','success');
     document.getElementById('improveStatusMsg').textContent='Applied';
     closeImprovePanel();
+    // Clear cached blocks for that section so renderReview picks up new content
+    const _sec=document.querySelector(`[data-block-id="${_improveBlockId}"]`)?.dataset.section;
+    if(_sec)delete sectionBlocksMap[parseInt(_sec)];
     openReview();
   }catch(e){toast('Apply failed: '+e.message,'danger');}
 }
