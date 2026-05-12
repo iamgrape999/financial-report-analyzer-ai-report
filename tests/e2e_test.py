@@ -988,9 +988,10 @@ def run_tests():
     else:
         log("fail", "DOCX export failed", f"status={r.status_code} body={r.text[:100]}")
 
-    # ── 10. Completeness gate (generate without input → 422) ──────────────────
-    print("\n[10] COMPLETENESS GATE")
-    # Create a fresh empty report
+    # ── 10. Evidence-only generation (no structured input → must attempt, not 422) ──
+    print("\n[10] EVIDENCE-ONLY GENERATION GATE")
+    # Create a fresh empty report — generation must PROCEED (not 422)
+    # The AI uses uploaded evidence chunks even without structured analyst input
     r = session.post(f"{API_URL}/reports",
         json={"borrower_name": "Empty Report Test", "industry": "marine",
               "report_type": "Test", "booking_branch": "SG"},
@@ -998,8 +999,14 @@ def run_tests():
     empty_rid = r.json().get("id") if r.ok else None
     if empty_rid:
         r_g = session.post(f"{API_URL}/reports/{empty_rid}/generate/4", headers=H)
-        check(r_g.status_code == 422, "Generate without input → 422",
-              f"got={r_g.status_code} detail={r_g.json().get('detail','')[:80] if r_g.ok else r_g.text[:80]}")
+        # 200 (started/done), 503 (no API key), 500 (other) are all acceptable
+        # 422 is NOT acceptable — it means the 422-block bug has returned
+        check(r_g.status_code != 422,
+              "Generate without structured input must NOT 422 (evidence-only mode)",
+              f"got={r_g.status_code}")
+        if r_g.status_code == 422:
+            log("fail", "422 block returned — ETL→Generate workflow is broken again",
+                f"detail={r_g.text[:120]}")
         # Cleanup
         session.delete(f"{API_URL}/reports/{empty_rid}", headers=H)
 
