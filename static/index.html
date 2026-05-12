@@ -1603,17 +1603,10 @@ async function etlDocument(docId,filename){
       st.textContent='No data extracted';
       return;
     }
-    // Store extracted data by section number — never pass JSON through onclick attributes
-    // (JSON containing " breaks HTML attribute parsing, silently killing the onclick handler)
-    _etlExtractedData = {};
-    d.sections_extracted.forEach(n=>{
-      const sec=parseInt(n)||n;
-      _etlExtractedData[sec]=d.data[String(sec)]||{};
-    });
-
+    // Build rows using raw d.data directly (never pass JSON through onclick attributes)
     const rows=d.sections_extracted.map(n=>{
       const sec=parseInt(n)||n;
-      const data=_etlExtractedData[sec];
+      const data=d.data[String(sec)]||{};
       const fcount=Object.keys(data).length;
       const preview=JSON.stringify(data,null,2).slice(0,800);
       return`<div class="card mb-3">
@@ -1634,7 +1627,13 @@ async function etlDocument(docId,filename){
     }).join('');
     body.innerHTML=`<div class="alert alert-success m-3 py-2"><strong>✓ AI ETL Complete</strong> — ${d.sections_extracted.length} section(s) extracted from <em>${esc(filename)}</em><br><small class="text-muted">Review extracted data below. Click "Apply to §N" to save fields as section input (merges with existing data).</small></div>${rows}`;
     st.textContent=`${d.sections_extracted.length} sections extracted`;
-    await loadReportDetail(currentRid); // refresh etl_status badge
+    await loadReportDetail(currentRid); // refresh etl_status badge — this resets _etlExtractedData
+    // Re-populate AFTER loadReportDetail so Apply buttons have data when the user clicks them
+    _etlExtractedData = {};
+    d.sections_extracted.forEach(n=>{
+      const sec=parseInt(n)||n;
+      _etlExtractedData[sec]=d.data[String(sec)]||{};
+    });
   }catch(e){
     body.innerHTML=`<div class="alert alert-danger m-3"><strong>ETL Failed:</strong> ${esc(e.message)}</div>`;
     st.textContent='Error';
