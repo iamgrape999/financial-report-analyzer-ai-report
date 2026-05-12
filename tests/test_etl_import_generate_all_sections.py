@@ -831,3 +831,95 @@ async def test_save_section_input_rejects_invalid_section_no(db, bad_section_no)
 
     assert exc_info.value.status_code == 400, \
         f"section_no={bad_section_no}: expected 400, got={exc_info.value.status_code}"
+
+
+# ── 17. Savepoint isolation: upsert_facts failure must NOT corrupt the session ─
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("section_no", list(range(1, 11)))
+async def test_save_section_input_succeeds_even_when_upsert_facts_raises(db, section_no):
+    """Regression for PostgreSQL InFailedSQLTransaction bug.
+
+    When upsert_facts() raises an exception, save_section_input() must still
+    commit the core SectionInput row and return a valid 200 response.
+    Previously, an unrolled exception from a non-blocking helper left the
+    PostgreSQL connection in error state, making subsequent flush() calls fail
+    with HTTP 500 for all sections except those already saved.
+    """
+    from credit_report.api.reports import save_section_input
+    from credit_report.schemas import SectionInputPayload
+    from credit_report.models import SectionInput
+    from sqlalchemy import select
+
+    rid = str(uuid.uuid4())
+    await _seed_report(db, rid)
+    user = _make_user()
+
+    payload = SectionInputPayload(section_no=section_no, input_json=ETL_DATA[section_no])
+
+    # Simulate upsert_facts() raising — e.g., a DB constraint on PostgreSQL
+    with patch("credit_report.api.reports.upsert_facts",
+               new_callable=AsyncMock, side_effect=RuntimeError("DB constraint")), \
+         patch("credit_report.api.reports.write_event", new_callable=AsyncMock), \
+         patch("credit_report.api.calculations._run_recalculate_core",
+               new_callable=AsyncMock, return_value=(0, [])):
+        # Must NOT raise — the savepoint absorbs the upsert_facts failure
+        result = await save_section_input(
+            report_id=rid,
+            section_no=section_no,
+            payload=payload,
+            db=db,
+            current_user=user,
+        )
+
+    assert result.section_no == section_no, \
+        f"§{section_no}: returned wrong section_no after upsert_facts failure"
+    assert result.input_json == ETL_DATA[section_no], \
+        f"§{section_no}: input_json not returned correctly after upsert_facts failure"
+    assert result.saved_at is not None, \
+        f"§{section_no}: saved_at must not be None (PostgreSQL server_default regression)"
+
+    # Verify the core SectionInput row WAS persisted despite the helper failure
+    q = await db.execute(
+        select(SectionInput).where(
+            SectionInput.report_id == rid,
+            SectionInput.section_no == section_no,
+        )
+    )
+    si = q.scalar_one_or_none()
+    assert si is not None, f"§{section_no}: SectionInput row must exist after partial failure"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("section_no", list(range(1, 11)))
+async def test_save_section_input_succeeds_even_when_recalculate_raises(db, section_no):
+    """Regression: _run_recalculate_core failure must not corrupt the DB session.
+
+    On PostgreSQL, an unrolled exception in _run_recalculate_core leaves the
+    connection in InFailedSQLTransaction — causing the subsequent write_event()
+    and flush() to also fail with HTTP 500. The savepoint wrapper prevents this.
+    """
+    from credit_report.api.reports import save_section_input
+    from credit_report.schemas import SectionInputPayload
+
+    rid = str(uuid.uuid4())
+    await _seed_report(db, rid)
+    user = _make_user()
+
+    payload = SectionInputPayload(section_no=section_no, input_json=ETL_DATA[section_no])
+
+    with patch("credit_report.api.reports.upsert_facts", new_callable=AsyncMock), \
+         patch("credit_report.api.reports.write_event", new_callable=AsyncMock), \
+         patch("credit_report.api.calculations._run_recalculate_core",
+               new_callable=AsyncMock, side_effect=RuntimeError("calc engine failure")):
+        result = await save_section_input(
+            report_id=rid,
+            section_no=section_no,
+            payload=payload,
+            db=db,
+            current_user=user,
+        )
+
+    assert result.section_no == section_no
+    assert result.saved_at is not None, \
+        f"§{section_no}: saved_at must not be None after recalculate failure"

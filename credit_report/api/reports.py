@@ -236,33 +236,40 @@ async def save_section_input(
         )
         db.add(si)
 
-    # Auto-extract facts from analyst JSON. Extraction failures never block input save.
+    # Auto-extract facts from analyst JSON.
+    # IMPORTANT: wrapped in begin_nested() (SAVEPOINT) so that any DB error raised by
+    # upsert_facts() or the inner write_event() is rolled back to the savepoint — NOT
+    # the outer transaction.  On PostgreSQL, an unrolled exception leaves the connection
+    # in InFailedSQLTransaction state, causing every subsequent statement to also fail.
     try:
-        extractor = InputFactExtractor(section_no)
-        cleaned = _strip_instruction_keys(payload.input_json)
-        facts_data = extractor.extract(report_id, cleaned)
-        if facts_data:
-            await upsert_facts(db, facts_data)
-            logger.debug("save_section_input: extracted %d facts section=%d report=%s", len(facts_data), section_no, report_id)
-            await write_event(
-                db,
-                action="facts.extracted_from_input",
-                actor_user_id=current_user.id,
-                actor_role=current_user.role,
-                report_id=report_id,
-                target_type="section_input",
-                target_id=f"{report_id}/{section_no}",
-                after=f"{len(facts_data)} facts extracted",
-            )
+        async with db.begin_nested():
+            extractor = InputFactExtractor(section_no)
+            cleaned = _strip_instruction_keys(payload.input_json)
+            facts_data = extractor.extract(report_id, cleaned)
+            if facts_data:
+                await upsert_facts(db, facts_data)
+                logger.debug("save_section_input: extracted %d facts section=%d report=%s", len(facts_data), section_no, report_id)
+                await write_event(
+                    db,
+                    action="facts.extracted_from_input",
+                    actor_user_id=current_user.id,
+                    actor_role=current_user.role,
+                    report_id=report_id,
+                    target_type="section_input",
+                    target_id=f"{report_id}/{section_no}",
+                    after=f"{len(facts_data)} facts extracted",
+                )
     except Exception:
         logger.warning("save_section_input: fact extraction failed (non-blocking) section=%d report=%s", section_no, report_id, exc_info=True)
 
-    # Auto-recalculate derived ratios from accumulated facts (non-blocking)
+    # Auto-recalculate derived ratios from accumulated facts (non-blocking).
+    # Also wrapped in a savepoint so a calculation failure cannot corrupt the outer session.
     try:
-        from credit_report.api.calculations import _run_recalculate_core
-        n_calcs, _ = await _run_recalculate_core(db, report_id)
-        if n_calcs:
-            logger.debug("save_section_input: recalculated %d calcs section=%d report=%s", n_calcs, section_no, report_id)
+        async with db.begin_nested():
+            from credit_report.api.calculations import _run_recalculate_core
+            n_calcs, _ = await _run_recalculate_core(db, report_id)
+            if n_calcs:
+                logger.debug("save_section_input: recalculated %d calcs section=%d report=%s", n_calcs, section_no, report_id)
     except Exception:
         logger.warning("save_section_input: recalculate failed (non-blocking) section=%d report=%s", section_no, report_id, exc_info=True)
 
@@ -276,6 +283,9 @@ async def save_section_input(
         target_id=f"{report_id}/{section_no}",
     )
     await db.flush()
+    # Refresh to load server-generated timestamp (server_default=func.now() is not
+    # reflected on the Python object after flush() on PostgreSQL with asyncpg).
+    await db.refresh(si)
     logger.info("save_section_input: saved section=%d report=%s user=%s", section_no, report_id, current_user.id)
 
     return SectionInputResponse(
