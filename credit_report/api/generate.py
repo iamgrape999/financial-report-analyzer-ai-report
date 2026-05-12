@@ -7,7 +7,7 @@ import uuid
 from functools import partial
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,6 +95,20 @@ class GenerateOneResult(BaseModel):
 
 class GenerateAllResult(BaseModel):
     sections: dict[str, str]
+
+
+class GenerateTaskResult(BaseModel):
+    task_id: str
+    status: str           # "running" | "done" | "error"
+    section_no: Optional[int] = None
+    tokens_used: Optional[int] = None
+    sections: Optional[dict[str, str]] = None  # for full-report tasks
+    detail: Optional[str] = None
+
+
+# In-memory task registry — acceptable for single-instance deployments.
+# Entries are never evicted; memory usage is bounded by restart cadence.
+_generation_tasks: dict[str, dict] = {}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -384,17 +398,31 @@ async def delete_document(
 
 # ── Section generation ────────────────────────────────────────────────────────
 
-@router.post("/generate/{section_no}", response_model=GenerateOneResult)
+@router.get("/generate/status/{task_id}", response_model=GenerateTaskResult)
+async def generation_task_status(
+    report_id: str,
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Poll the status of a background generation task."""
+    task = _generation_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found or server was restarted")
+    return GenerateTaskResult(task_id=task_id, **task)
+
+
+@router.post("/generate/{section_no}", status_code=202, response_model=GenerateTaskResult)
 async def generate_section(
     report_id: str,
     section_no: int,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
-    """Trigger AI generation for a single section.
+    """Trigger AI generation for a single section (runs as background task).
 
-    Requires section input data to be saved first (422 if missing).
-    Returns 409 if hard dependencies are not yet generated.
+    Returns 202 immediately with a task_id. Poll GET /generate/status/{task_id}
+    for completion. Returns 409 if hard dependencies are not yet generated.
     """
     if section_no < 1 or section_no > 10:
         raise HTTPException(status_code=400, detail="section_no must be 1–10")
@@ -402,14 +430,7 @@ async def generate_section(
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
-    # Load section input — generation proceeds even if empty (AI uses uploaded evidence)
-    input_data = await _load_section_input(db, report_id, section_no)
-    if not input_data:
-        logger.info(
-            "generate_section: no structured input section=%d report=%s user=%s — proceeding with evidence-only generation",
-            section_no, report_id, current_user.id,
-        )
-
+    # Fast preflight: dependency check (uses request session for immediate 409 response)
     missing = await check_hard_dependencies(db, report_id, section_no)
     if missing:
         logger.info("generate_section: blocked on hard deps=%s section=%d report=%s", missing, section_no, report_id)
@@ -418,65 +439,84 @@ async def generate_section(
             detail=f"Hard dependencies not yet generated: sections {missing}",
         )
 
-    # Pass all already-generated sections as context (critical for §2 Overall Comments)
-    preceding: dict[int, str] = {}
-    for n in range(1, 11):
-        if n == section_no:
-            continue
-        ctx = await get_section_output(db, report_id, n)
-        if ctx and ctx.status == "done" and ctx.markdown:
-            preceding[n] = ctx.markdown
+    task_id = str(uuid.uuid4())
+    _generation_tasks[task_id] = {"status": "running", "section_no": section_no}
+    user_id, user_role = current_user.id, current_user.role
 
-    logger.info("generate_section: starting section=%d report=%s user=%s preceding_sections=%s", section_no, report_id, current_user.id, list(preceding.keys()))
-    try:
-        output = await run_section_generation(
-            db=db,
-            report_id=report_id,
-            section_no=section_no,
-            actor_user_id=current_user.id,
-            actor_role=current_user.role,
-            preceding_outputs=preceding or None,
-        )
-    except ValueError as exc:
-        logger.warning("generate_section: config error section=%d report=%s: %s", section_no, report_id, exc)
-        await db.commit()
-        raise HTTPException(status_code=503, detail=str(exc))
-    except Exception as exc:
-        logger.exception("generate_section: generation failed section=%d report=%s: %s", section_no, report_id, exc)
-        await db.commit()
-        raise HTTPException(status_code=500, detail=f"Generation failed: {exc}")
+    async def _bg_generate_section():
+        from credit_report.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                # Reload preceding outputs in background context for freshest data
+                preceding: dict[int, str] = {}
+                for n in range(1, 11):
+                    if n == section_no:
+                        continue
+                    ctx = await get_section_output(bg_db, report_id, n)
+                    if ctx and ctx.status == "done" and ctx.markdown:
+                        preceding[n] = ctx.markdown
 
-    logger.info("generate_section: done section=%d report=%s status=%s tokens=%s", section_no, report_id, output.status, output.tokens_used)
-    return GenerateOneResult(
-        section_no=section_no,
-        status=output.status,
-        tokens_used=output.tokens_used,
-    )
+                logger.info(
+                    "generate_section[bg]: starting section=%d report=%s user=%s preceding=%s",
+                    section_no, report_id, user_id, list(preceding.keys()),
+                )
+                output = await run_section_generation(
+                    db=bg_db,
+                    report_id=report_id,
+                    section_no=section_no,
+                    actor_user_id=user_id,
+                    actor_role=user_role,
+                    preceding_outputs=preceding or None,
+                )
+                await bg_db.commit()
+                _generation_tasks[task_id].update({
+                    "status": output.status,
+                    "tokens_used": output.tokens_used,
+                })
+                logger.info(
+                    "generate_section[bg]: done section=%d report=%s status=%s tokens=%s",
+                    section_no, report_id, output.status, output.tokens_used,
+                )
+            except Exception as exc:
+                try:
+                    await bg_db.rollback()
+                except Exception:
+                    pass
+                _generation_tasks[task_id].update({
+                    "status": "error",
+                    "detail": str(exc)[:500],
+                })
+                logger.exception(
+                    "generate_section[bg]: error section=%d report=%s: %s",
+                    section_no, report_id, exc,
+                )
+
+    background_tasks.add_task(_bg_generate_section)
+    logger.info("generate_section: queued task=%s section=%d report=%s user=%s", task_id, section_no, report_id, user_id)
+    return GenerateTaskResult(task_id=task_id, status="running", section_no=section_no)
 
 
-@router.post("/generate", response_model=GenerateAllResult)
+@router.post("/generate", status_code=202, response_model=GenerateTaskResult)
 async def generate_full_report(
     report_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
-    """Trigger AI generation for all 10 sections in dependency order.
+    """Trigger AI generation for all 10 sections in dependency order (background task).
 
-    Sections without saved input data are skipped (AI uses uploaded evidence for those with data).
-    Returns 422 only if NO sections have any input data at all.
+    Returns 202 immediately with a task_id. Poll GET /generate/status/{task_id} for completion.
+    Sections without saved input data are skipped; returns 422 only if NO sections have data.
     """
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
-    # Count sections with data — skip empty ones rather than blocking
+    # Preflight data check — fast, in request context before 202 is returned
     sections_with_data: list[int] = []
-    sections_without_data: list[int] = []
     for sec_no in range(1, 11):
         data = await _load_section_input(db, report_id, sec_no)
         if data:
             sections_with_data.append(sec_no)
-        else:
-            sections_without_data.append(sec_no)
 
     if not sections_with_data:
         logger.warning(
@@ -491,27 +531,60 @@ async def generate_full_report(
             ),
         )
 
-    if sections_without_data:
-        logger.info(
-            "generate_full_report: skipping %d sections without input data=%s report=%s user=%s",
-            len(sections_without_data), sections_without_data, report_id, current_user.id,
-        )
-
     if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=503,
             detail="GEMINI_API_KEY is not configured. Set it in Render environment variables to enable AI generation.",
         )
 
-    logger.info("generate_full_report: starting full pipeline report=%s user=%s", report_id, current_user.id)
-    results = await run_full_report_generation(
-        db=db,
-        report_id=report_id,
-        actor_user_id=current_user.id,
-        actor_role=current_user.role,
+    task_id = str(uuid.uuid4())
+    _generation_tasks[task_id] = {"status": "running"}
+    user_id, user_role = current_user.id, current_user.role
+
+    async def _bg_generate_full_report():
+        from credit_report.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                logger.info(
+                    "generate_full_report[bg]: starting report=%s user=%s task=%s",
+                    report_id, user_id, task_id,
+                )
+                results = await run_full_report_generation(
+                    db=bg_db,
+                    report_id=report_id,
+                    actor_user_id=user_id,
+                    actor_role=user_role,
+                )
+                await bg_db.commit()
+                done = sum(1 for v in results.values() if v == "done")
+                _generation_tasks[task_id].update({
+                    "status": "done",
+                    "sections": {str(k): v for k, v in results.items()},
+                })
+                logger.info(
+                    "generate_full_report[bg]: complete report=%s task=%s done=%d/%d",
+                    report_id, task_id, done, len(results),
+                )
+            except Exception as exc:
+                try:
+                    await bg_db.rollback()
+                except Exception:
+                    pass
+                _generation_tasks[task_id].update({
+                    "status": "error",
+                    "detail": str(exc)[:500],
+                })
+                logger.exception(
+                    "generate_full_report[bg]: error report=%s task=%s: %s",
+                    report_id, task_id, exc,
+                )
+
+    background_tasks.add_task(_bg_generate_full_report)
+    logger.info(
+        "generate_full_report: queued task=%s report=%s user=%s sections_with_data=%s",
+        task_id, report_id, user_id, sections_with_data,
     )
-    logger.info("generate_full_report: complete report=%s results=%s", report_id, results)
-    return GenerateAllResult(sections={str(k): v for k, v in results.items()})
+    return GenerateTaskResult(task_id=task_id, status="running")
 
 
 # ── Section output retrieval ──────────────────────────────────────────────────

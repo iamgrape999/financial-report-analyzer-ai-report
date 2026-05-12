@@ -199,19 +199,23 @@ async def test_api_generate_section_etl_keys_no_422(db):
         tokens_used=300,
     )
 
+    from fastapi import BackgroundTasks
+    bg = BackgroundTasks()
     with patch("credit_report.api.generate.run_section_generation",
                new_callable=AsyncMock) as mock_run:
         mock_run.return_value = mock_output
         result = await generate_section(
             report_id=rid,
             section_no=4,
+            background_tasks=bg,
             db=db,
             current_user=mock_user,
         )
 
-    # Must succeed — no HTTPException raised
+    # 202: must return running task immediately — not raise 422
     assert result.section_no == 4
-    assert result.status == "done"
+    assert result.status == "running"
+    assert result.task_id is not None
 
 
 # ── 5. generate.py API: POST /generate/{sec} proceeds even with no SectionInput ──
@@ -250,17 +254,22 @@ async def test_api_generate_section_no_input_no_422(db):
         tokens_used=150,
     )
 
+    from fastapi import BackgroundTasks
+    bg = BackgroundTasks()
     with patch("credit_report.api.generate.run_section_generation",
                new_callable=AsyncMock) as mock_run:
         mock_run.return_value = mock_output
         result = await generate_section(
             report_id=rid,
             section_no=1,
+            background_tasks=bg,
             db=db,
             current_user=mock_user,
         )
 
-    assert result.status == "done"
+    # 202: returns running task immediately — not raise 422
+    assert result.status == "running"
+    assert result.task_id is not None
 
 
 # ── 6. generate.py API: generate_full_report skips missing, doesn't block all ────
@@ -294,15 +303,20 @@ async def test_api_generate_full_report_partial_data_proceeds(db):
 
     mock_results = {n: "done" for n in range(1, 11)}
 
+    from fastapi import BackgroundTasks
+    bg = BackgroundTasks()
     with patch("credit_report.api.generate.run_full_report_generation",
                new_callable=AsyncMock) as mock_run, \
          patch("credit_report.api.generate.GEMINI_API_KEY", "mock-key"):
         mock_run.return_value = mock_results
-        result = await generate_full_report(report_id=rid, db=db, current_user=mock_user)
+        result = await generate_full_report(
+            report_id=rid, background_tasks=bg, db=db, current_user=mock_user
+        )
 
-    # Must return GenerateAllResult, not raise 422
+    # 202: must return running task immediately — not raise 422
     assert result is not None
-    assert "1" in result.sections or 1 in result.sections
+    assert result.status == "running"
+    assert result.task_id is not None
 
 
 # ── 7. generate.py API: generate_full_report still 422 if ALL sections empty ─────
@@ -333,9 +347,13 @@ async def test_api_generate_full_report_all_empty_still_422(db):
     mock_user = User(id="analyst-test", email="a@test.com", role="analyst",
                      hashed_password="x", is_active=True)
 
+    from fastapi import BackgroundTasks
+    bg = BackgroundTasks()
     with pytest.raises(HTTPException) as exc_info:
         with patch("credit_report.api.generate.GEMINI_API_KEY", "mock-key"):
-            await generate_full_report(report_id=rid, db=db, current_user=mock_user)
+            await generate_full_report(
+                report_id=rid, background_tasks=bg, db=db, current_user=mock_user
+            )
 
     assert exc_info.value.status_code == 422
     assert "No sections have saved input data" in exc_info.value.detail
