@@ -953,7 +953,7 @@ async function createReport(){
 
 // ── Report detail ─────────────────────────────────────────────────────────────
 async function loadReportDetail(rid){
-  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];uploadedDocs=[];closePanel();
+  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];uploadedDocs=[];_etlExtractedData={};closePanel();
   showView('viewReport');
   document.getElementById('rptMeta').innerHTML='<span class="text-muted">Loading…</span>';
   document.getElementById('secTable').innerHTML='<tr><td colspan="7" class="text-center py-3 text-muted">Loading…</td></tr>';
@@ -1603,9 +1603,17 @@ async function etlDocument(docId,filename){
       st.textContent='No data extracted';
       return;
     }
+    // Store extracted data by section number — never pass JSON through onclick attributes
+    // (JSON containing " breaks HTML attribute parsing, silently killing the onclick handler)
+    _etlExtractedData = {};
+    d.sections_extracted.forEach(n=>{
+      const sec=parseInt(n)||n;
+      _etlExtractedData[sec]=d.data[String(sec)]||{};
+    });
+
     const rows=d.sections_extracted.map(n=>{
       const sec=parseInt(n)||n;
-      const data=d.data[String(sec)]||{};
+      const data=_etlExtractedData[sec];
       const fcount=Object.keys(data).length;
       const preview=JSON.stringify(data,null,2).slice(0,800);
       return`<div class="card mb-3">
@@ -1613,8 +1621,8 @@ async function etlDocument(docId,filename){
           <span class="fw-bold">§${sec} — ${esc(snm(sec))}</span>
           <div class="d-flex align-items-center gap-2">
             <span class="badge bg-success">${fcount} field${fcount!==1?'s':''} extracted</span>
-            <button class="btn btn-sm btn-primary" onclick="previewEtlMerge(${sec},${JSON.stringify(JSON.stringify(data))})">
-              Review &amp; Apply to §${sec}</button>
+            <button class="btn btn-sm btn-primary" onclick="previewEtlMerge(${sec})">
+              Apply to §${sec}</button>
           </div>
         </div>
         <div class="card-body p-2">
@@ -1637,10 +1645,11 @@ async function etlDocument(docId,filename){
 let _etlMergeSecNo=null;
 let _etlMergeNewData=null;
 let _etlMergeExisting=null;
+let _etlExtractedData={};  // {section_no: data_object} — populated after ETL, read by previewEtlMerge
 
-async function previewEtlMerge(secNo,dataJson){
-  let newData;
-  try{newData=JSON.parse(dataJson);}catch(e){toast('Invalid extraction data','danger');return;}
+async function previewEtlMerge(secNo){
+  const newData=_etlExtractedData[secNo];
+  if(!newData||typeof newData!=='object'){toast('No extracted data found for §'+secNo,'danger');return;}
   _etlMergeSecNo=secNo;
   _etlMergeNewData=newData;
   _etlMergeExisting={};

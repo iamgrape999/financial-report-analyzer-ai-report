@@ -1,36 +1,51 @@
+# ── Web framework ────────────────────────────────────────────────────────────
 fastapi
 uvicorn[standard]
-requests
 pydantic
-python-dotenv
-google-genai
-boto3
-botocore
-cerebras-cloud-sdk
-mistralai
+python-multipart
+itsdangerous>=2.0
 
-# Credit Report AI Pipeline — Sprint 1
-anthropic>=0.43.0
+# ── AI / LLM ──────────────────────────────────────────────────────────────────
+# NOTE: The generation module uses Google Gemini (google-genai), not Claude.
+# anthropic, cerebras-cloud-sdk, mistralai, boto3/botocore were removed —
+# they are never imported anywhere in the codebase.
+google-genai
+
+# ── Document extraction ───────────────────────────────────────────────────────
 pdfminer.six
 pypdf>=4.0.0
-python-multipart
-markdown
-sqlalchemy>=2.0
-alembic
-asyncpg
-aiosqlite
-httpx
-itsdangerous>=2.0
-passlib>=1.7
-jsonpath-ng
-pyyaml
-pytest-asyncio
 python-docx>=1.1.0
 python-pptx>=1.0.0
-Pillow>=10.0.0
-cffi>=1.16.0
 openpyxl>=3.1.0
-# weasyprint is intentionally excluded: it requires libpango/libcairo/libgdk-pixbuf
-# system libraries unavailable on Render's Python runtime. The PDF export endpoint
-# returns HTTP 503 gracefully when weasyprint is absent. Install manually if needed:
-#   apt-get install -y libpango-1.0-0 libcairo2 libgdk-pixbuf2.0-0 && pip install weasyprint>=62.0
+markdown
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy>=2.0
+alembic
+aiosqlite
+# asyncpg is the async driver for PostgreSQL (used when DATABASE_URL is set on Render).
+# It requires libpq system libraries, which Render provides in its Python runtime.
+asyncpg
+
+# ── Auth / security ───────────────────────────────────────────────────────────
+passlib>=1.7
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+httpx
+jsonpath-ng
+pyyaml
+requests
+
+# ── Test ──────────────────────────────────────────────────────────────────────
+pytest-asyncio
+
+# ── Excluded packages (DO NOT ADD BACK without Render validation) ─────────────
+# weasyprint>=62.0  → needs libpango/libcairo/libgdk-pixbuf; unavailable on Render
+#                     Python runtime. PDF export returns HTTP 503 gracefully.
+# Pillow>=10.0.0    → needs libjpeg/libpng/libfreetype; never imported in codebase.
+# cffi>=1.16.0      → C extension; never imported; installs as transitive dep if needed.
+# anthropic         → never imported; app uses Gemini (google-genai).
+# boto3/botocore    → AWS SDK; never imported.
+# cerebras-cloud-sdk → never imported.
+# mistralai         → never imported.
+# python-dotenv     → never imported; app uses os.getenv() directly.
