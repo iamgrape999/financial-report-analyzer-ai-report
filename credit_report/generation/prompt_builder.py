@@ -1342,6 +1342,23 @@ def build_section_prompt(
             parts.append(f"### Section {sec_no} preview\n{preview}\n…")
         preceding_block = "\n\n".join(parts)
 
+    # Extract pre-computed calculation results injected by the pipeline (§7 only).
+    # Remove from input_json so they don't appear as raw JSON — render them as a
+    # dedicated block instead so the AI uses them directly without re-deriving.
+    calc_results: list[dict] = input_json.pop("__calc_results", [])
+    calc_block = ""
+    if calc_results:
+        lines = [
+            f"- {c['metric']} | {c['entity']} | {c['period']}: **{c['value']}** "
+            f"(formula: {c['formula']})"
+            for c in calc_results
+        ]
+        calc_block = (
+            "\n\n## Pre-Computed Financial Ratios\n"
+            "USE THESE VALUES EXACTLY — do not re-derive or override:\n\n"
+            + "\n".join(lines)
+        )
+
     if is_continuation and continuation_resume_token:
         user_prompt = (
             f"{continuation_resume_token}\n\n"
@@ -1353,6 +1370,7 @@ def build_section_prompt(
         user_prompt = (
             f"{instructions}\n\n"
             f"## Analyst Input Data\n\n```json\n{input_text}\n```"
+            f"{calc_block}"
             f"{evidence_block}"
             f"{preceding_block}\n\n"
             f"{OUTPUT_INSTRUCTIONS}"

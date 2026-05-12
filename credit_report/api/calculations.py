@@ -29,6 +29,32 @@ from credit_report.security.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
+
+async def get_calc_results_for_prompt(
+    db: AsyncSession, report_id: str
+) -> list[dict]:
+    """Return non-stale CalculationResults formatted for prompt injection into §7."""
+    result = await db.execute(
+        select(CalculationResult)
+        .where(
+            CalculationResult.report_id == report_id,
+            CalculationResult.is_stale == False,  # noqa: E712
+        )
+        .order_by(CalculationResult.entity, CalculationResult.period, CalculationResult.metric_name)
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "metric": r.metric_name,
+            "entity": r.entity,
+            "period": r.period,
+            "value": round(r.value, 4) if r.value is not None else None,
+            "formula": r.formula,
+        }
+        for r in rows
+        if r.value is not None
+    ]
+
 router = APIRouter(prefix="/reports/{report_id}", tags=["calculations"])
 
 
