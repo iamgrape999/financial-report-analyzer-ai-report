@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.fact_store.models import (
@@ -16,6 +17,10 @@ from credit_report.fact_store.models import (
 )
 from credit_report.fact_store.state_machine import validate_transition
 
+logger = logging.getLogger(__name__)
+
+# Numeric disagreement threshold: values differ by more than 2% of the larger magnitude
+_CONFLICT_THRESHOLD_PCT = 0.02
 
 # ── Fact CRUD ──────────────────────────────────────────────────────────────────────────────
 
@@ -145,7 +150,76 @@ async def upsert_facts(db: AsyncSession, facts_data: list[dict]) -> list[Canonic
     for fd in facts_data:
         f = await upsert_fact(db, fd)
         results.append(f)
+        # Detect cross-source conflicts (non-blocking — never raises)
+        if f.state not in ("conflicted", "deprecated"):
+            try:
+                await _detect_and_create_conflicts(db, fd["report_id"], f)
+            except Exception:
+                logger.warning(
+                    "conflict detection failed for fact %s: %s",
+                    f.id, "see traceback", exc_info=True,
+                )
     return results
+
+
+def _values_disagree(a: CanonicalFact, b: CanonicalFact) -> bool:
+    """Return True if two facts have meaningfully different values (> 2% for numeric)."""
+    if a.value is not None and b.value is not None:
+        denom = max(abs(a.value), abs(b.value))
+        if denom == 0:
+            return False
+        return abs(a.value - b.value) / denom > _CONFLICT_THRESHOLD_PCT
+    if a.value_text and b.value_text:
+        return a.value_text.strip().lower() != b.value_text.strip().lower()
+    return False
+
+
+async def _detect_and_create_conflicts(
+    db: AsyncSession,
+    report_id: str,
+    new_fact: CanonicalFact,
+) -> None:
+    """
+    After upserting a fact, find existing facts with the same metric key but a
+    different source_type whose value disagrees.  Creates a FactConflict row and
+    transitions both facts to 'conflicted' if no open conflict already exists for
+    the pair.
+    """
+    peer_result = await db.execute(
+        select(CanonicalFact).where(
+            CanonicalFact.report_id == report_id,
+            CanonicalFact.metric_name == new_fact.metric_name,
+            CanonicalFact.entity == new_fact.entity,
+            CanonicalFact.period == new_fact.period,
+            CanonicalFact.source_type != new_fact.source_type,
+            CanonicalFact.state.notin_(["deprecated", "conflicted"]),
+        )
+    )
+    peers = peer_result.scalars().all()
+
+    for peer in peers:
+        if not _values_disagree(new_fact, peer):
+            continue
+        # Check whether an open conflict already exists for this pair
+        dup_result = await db.execute(
+            select(FactConflict).where(
+                FactConflict.report_id == report_id,
+                FactConflict.metric_name == new_fact.metric_name,
+                FactConflict.status == "open",
+                or_(
+                    and_(FactConflict.fact_a_id == new_fact.id, FactConflict.fact_b_id == peer.id),
+                    and_(FactConflict.fact_a_id == peer.id, FactConflict.fact_b_id == new_fact.id),
+                ),
+            )
+        )
+        if dup_result.scalar_one_or_none() is not None:
+            continue
+        await create_conflict(db, report_id, new_fact, peer)
+        logger.info(
+            "conflict created: metric=%s entity=%s period=%s src_a=%s src_b=%s",
+            new_fact.metric_name, new_fact.entity, new_fact.period,
+            new_fact.source_type, peer.source_type,
+        )
 
 
 async def update_fact_state(
@@ -232,6 +306,7 @@ async def update_fact_value(
     fact.override_reason = reason
 
     await _mark_dependents_stale(db, fact_id)
+    await _mark_calc_results_stale(db, fact.report_id, fact_id)
 
     return fact
 
@@ -243,6 +318,26 @@ async def _mark_dependents_stale(db: AsyncSession, fact_id: str) -> None:
     deps = result.scalars().all()
     for dep in deps:
         dep.is_stale = True
+
+
+async def _mark_calc_results_stale(db: AsyncSession, report_id: str, fact_id: str) -> None:
+    """Mark CalculationResult rows stale when one of their input facts changes."""
+    import json as _json
+    from credit_report.calculation_engine.models import CalculationResult
+    result = await db.execute(
+        select(CalculationResult).where(
+            CalculationResult.report_id == report_id,
+            CalculationResult.is_stale == False,  # noqa: E712
+        )
+    )
+    calcs = result.scalars().all()
+    for calc in calcs:
+        try:
+            ids = _json.loads(calc.input_fact_ids or "[]")
+        except Exception:
+            ids = []
+        if fact_id in ids:
+            calc.is_stale = True
 
 
 # ── Fact existence check ──────────────────────────────────────────────────────────────────────

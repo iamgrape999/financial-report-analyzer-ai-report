@@ -477,6 +477,26 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
   </div></div>
 </div>
 
+<!-- ETL Merge Diff Preview Modal -->
+<div class="modal fade" id="etlMergeModal" tabindex="-1">
+  <div class="modal-dialog modal-xl"><div class="modal-content">
+    <div class="modal-header py-2" style="background:#1a1a1a;color:#fff;">
+      <h5 class="modal-title">📋 Review ETL Merge — §<span id="etlMergeSecNo"></span></h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body p-0" id="etlMergeBody" style="max-height:72vh;overflow-y:auto;"></div>
+    <div class="modal-footer py-2 justify-content-between">
+      <span class="text-muted small" id="etlMergeStatus"></span>
+      <div class="d-flex gap-2">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="etlMergeConfirmBtn" onclick="confirmEtlMerge()">
+          ✅ Apply Merge
+        </button>
+      </div>
+    </div>
+  </div></div>
+</div>
+
 <!-- Fact Inspector Modal -->
 <div class="modal fade" id="factInspectorModal" tabindex="-1">
   <div class="modal-dialog modal-xl"><div class="modal-content">
@@ -1453,8 +1473,8 @@ async function etlDocument(docId,filename){
           <span class="fw-bold">§${sec} — ${esc(snm(sec))}</span>
           <div class="d-flex align-items-center gap-2">
             <span class="badge bg-success">${fcount} field${fcount!==1?'s':''} extracted</span>
-            <button class="btn btn-sm btn-primary" onclick="saveExtractedToSection(${sec},${JSON.stringify(JSON.stringify(data))})">
-              Apply to §${sec}</button>
+            <button class="btn btn-sm btn-primary" onclick="previewEtlMerge(${sec},${JSON.stringify(JSON.stringify(data))})">
+              Review &amp; Apply to §${sec}</button>
           </div>
         </div>
         <div class="card-body p-2">
@@ -1473,24 +1493,111 @@ async function etlDocument(docId,filename){
   }
 }
 
-async function saveExtractedToSection(secNo,dataJson){
+// ── ETL Merge Diff Preview ────────────────────────────────────────────────────
+let _etlMergeSecNo=null;
+let _etlMergeNewData=null;
+let _etlMergeExisting=null;
+
+async function previewEtlMerge(secNo,dataJson){
   let newData;
   try{newData=JSON.parse(dataJson);}catch(e){toast('Invalid extraction data','danger');return;}
-  // Merge with existing section input if any
-  let merged=newData;
+  _etlMergeSecNo=secNo;
+  _etlMergeNewData=newData;
+  _etlMergeExisting={};
+  // Fetch existing
   try{
     const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{headers:H()});
-    if(r.ok){const ex=await r.json();merged=Object.assign({},ex.input_json||{},newData);}
+    if(r.ok){const ex=await r.json();_etlMergeExisting=ex.input_json||{};}
   }catch(e){}
+
+  const existing=_etlMergeExisting;
+  const allKeys=new Set([...Object.keys(existing),...Object.keys(newData)]);
+  const conflicts=[],newFields=[],unchanged=[];
+  for(const k of allKeys){
+    const hasOld=k in existing, hasNew=k in newData;
+    if(hasOld&&hasNew){
+      const oldStr=JSON.stringify(existing[k]);
+      const newStr=JSON.stringify(newData[k]);
+      if(oldStr!==newStr) conflicts.push({key:k,old:existing[k],nw:newData[k]});
+      else unchanged.push({key:k,val:existing[k]});
+    }else if(hasNew){
+      newFields.push({key:k,val:newData[k]});
+    }
+  }
+
+  // Build diff HTML
+  const secLabel=`§${secNo} — ${esc(snm(secNo))}`;
+  document.getElementById('etlMergeSecNo').textContent=`${secNo} — ${snm(secNo)}`;
+
+  let html='<div class="p-3">';
+  // Summary bar
+  html+=`<div class="d-flex gap-3 mb-3 flex-wrap">
+    <span class="badge bg-success fs-6">${newFields.length} new field${newFields.length!==1?'s':''}</span>
+    <span class="badge bg-warning text-dark fs-6">${conflicts.length} conflict${conflicts.length!==1?'s':''}</span>
+    <span class="badge bg-secondary fs-6">${unchanged.length} unchanged</span>
+  </div>`;
+
+  if(conflicts.length){
+    html+=`<h6 class="text-warning">⚠ Conflicts — extracted value will overwrite existing</h6>
+    <table class="table table-sm table-bordered mb-3" style="font-size:12px;">
+      <thead class="table-warning"><tr><th>Field</th><th>Existing Value</th><th>→ New Value</th></tr></thead><tbody>`;
+    conflicts.forEach(c=>{
+      html+=`<tr>
+        <td class="fw-bold">${esc(c.key)}</td>
+        <td class="text-danger" style="text-decoration:line-through;">${esc(JSON.stringify(c.old))}</td>
+        <td class="text-success fw-bold">${esc(JSON.stringify(c.nw))}</td>
+      </tr>`;
+    });
+    html+='</tbody></table>';
+  }
+  if(newFields.length){
+    html+=`<h6 class="text-success">✚ New Fields</h6>
+    <table class="table table-sm table-bordered mb-3" style="font-size:12px;">
+      <thead class="table-success"><tr><th>Field</th><th>Value</th></tr></thead><tbody>`;
+    newFields.forEach(f=>{
+      html+=`<tr><td class="fw-bold">${esc(f.key)}</td><td>${esc(JSON.stringify(f.val))}</td></tr>`;
+    });
+    html+='</tbody></table>';
+  }
+  if(unchanged.length){
+    html+=`<details><summary class="text-muted small" style="cursor:pointer">${unchanged.length} unchanged field${unchanged.length!==1?'s':''} (click to expand)</summary>
+    <table class="table table-sm table-bordered mt-2" style="font-size:11px;">
+      <thead class="table-secondary"><tr><th>Field</th><th>Value</th></tr></thead><tbody>`;
+    unchanged.forEach(f=>{
+      html+=`<tr><td>${esc(f.key)}</td><td>${esc(JSON.stringify(f.val))}</td></tr>`;
+    });
+    html+='</tbody></table></details>';
+  }
+  html+='</div>';
+
+  document.getElementById('etlMergeBody').innerHTML=html;
+  document.getElementById('etlMergeStatus').textContent=
+    `Merging ${Object.keys(newData).length} extracted fields into §${secNo}`;
+  new bootstrap.Modal(document.getElementById('etlMergeModal')).show();
+}
+
+async function confirmEtlMerge(){
+  if(_etlMergeSecNo===null||!_etlMergeNewData)return;
+  const secNo=_etlMergeSecNo;
+  const merged=Object.assign({},_etlMergeExisting,_etlMergeNewData);
+  document.getElementById('etlMergeConfirmBtn').disabled=true;
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:secNo,input_json:merged})});
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,
+      {method:'PUT',headers:HJ(),body:JSON.stringify({section_no:secNo,input_json:merged})});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Save failed');
     sectionInputMap[secNo]={has_data:true,saved_at:d.saved_at};
     sectionInputDataMap[secNo]=merged;
     renderSectionsTable();
-    toast(`§${secNo} updated with ${Object.keys(newData).length} extracted fields ✓`,'success');
-  }catch(e){toast(e.message,'danger');}
+    bootstrap.Modal.getInstance(document.getElementById('etlMergeModal'))?.hide();
+    toast(`§${secNo} updated with ${Object.keys(_etlMergeNewData).length} extracted fields ✓`,'success');
+    _etlMergeSecNo=null;_etlMergeNewData=null;_etlMergeExisting=null;
+  }catch(e){
+    toast(e.message,'danger');
+    document.getElementById('etlMergeStatus').textContent='Error: '+e.message;
+  }finally{
+    document.getElementById('etlMergeConfirmBtn').disabled=false;
+  }
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -1966,24 +2073,32 @@ async function loadCalculations(){
       content.innerHTML='<p class="text-muted small p-3">No calculations yet — click ↻ Recalculate to derive ratios from saved facts.</p>';
       return;
     }
+    // Stale banner
+    const staleCount=calcs.filter(c=>c.is_stale).length;
+    const staleBanner=staleCount>0
+      ?`<div class="alert alert-warning alert-sm d-flex align-items-center gap-2 mx-2 mt-2 mb-0 py-1 px-2" style="font-size:12px;">
+          <span>⚠ ${staleCount} ratio${staleCount>1?'s':''} are stale — a fact was updated after last recalculation.</span>
+          <button class="btn btn-warning btn-sm py-0 ms-auto" onclick="runRecalculate()">↻ Recalculate now</button>
+        </div>`
+      :'';
     // Group by entity
     const byEntity={};
     calcs.forEach(c=>{(byEntity[c.entity]||(byEntity[c.entity]=[])).push(c);});
     const stateColor=s=>s?'text-warning':'text-success';
     const rows=Object.entries(byEntity).map(([entity,items])=>{
       const itemRows=items.map(c=>`
-        <tr>
+        <tr${c.is_stale?' class="table-warning"':''}>
           <td><span class="badge bg-light text-dark">${esc(c.metric_name)}</span></td>
           <td>${esc(c.period)}</td>
           <td class="fw-bold">${c.value!=null?c.value.toFixed(3):'—'}</td>
           <td><span title="${esc(c.formula||'')}" style="cursor:help;border-bottom:1px dotted #888;"
             class="small text-muted">${(c.formula||'').slice(0,40)}${(c.formula||'').length>40?'…':''}</span></td>
-          <td><span class="${stateColor(c.is_stale)}">${c.is_stale?'stale':'✓'}</span></td>
+          <td><span class="${stateColor(c.is_stale)}">${c.is_stale?'⚠ stale':'✓'}</span></td>
         </tr>`).join('');
       return `<tr class="table-light fw-bold"><td colspan="5" style="background:#e8f5ee">
         <small>${esc(entity)}</small></td></tr>${itemRows}`;
     }).join('');
-    content.innerHTML=`
+    content.innerHTML=staleBanner+`
       <table class="table table-sm table-hover mb-0" style="font-size:12px;">
         <thead class="table-light"><tr>
           <th>Metric</th><th>Period</th><th>Value</th>

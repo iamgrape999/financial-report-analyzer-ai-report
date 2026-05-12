@@ -4,7 +4,7 @@ from credit_report.fact_store.models import FACT_STATES
 
 # Valid transitions: from_state -> set of allowed to_states
 _TRANSITIONS: dict[str, set[str]] = {
-    "extracted": {"normalized", "deprecated"},
+    "extracted": {"normalized", "conflicted", "deprecated"},
     "normalized": {"validated", "conflicted", "deprecated"},
     "validated": {"conflicted", "user_overridden", "approved", "deprecated"},
     "conflicted": {"validated", "user_overridden", "approved", "deprecated"},

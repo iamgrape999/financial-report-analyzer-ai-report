@@ -8,11 +8,13 @@ from credit_report.database import get_db
 from credit_report.fact_store import repository as repo
 from credit_report.fact_store.repository import OptimisticLockError
 from credit_report.schemas import (
+    ConflictResponse,
     FactApproveRequest,
     FactOverrideRequest,
     FactResponse,
     FactStateResponse,
     FactUpdateRequest,
+    ResolveConflictRequest,
 )
 from credit_report.security.auth import get_current_user, require_analyst, require_reviewer
 from credit_report.security.models import User
@@ -37,6 +39,45 @@ async def list_conflicts(
     current_user: User = Depends(get_current_user),
 ):
     return await repo.get_open_conflicts(db, report_id)
+
+
+@router.post("/conflicts/{conflict_id}/resolve")
+async def resolve_conflict(
+    report_id: str,
+    conflict_id: str,
+    payload: ResolveConflictRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Resolve a fact conflict: approve the chosen fact, deprecate the rejected ones."""
+    try:
+        conflict = await repo.resolve_conflict(
+            db,
+            conflict_id=conflict_id,
+            chosen_fact_id=payload.chosen_fact_id,
+            rejected_fact_ids=payload.rejected_fact_ids,
+            resolution_reason=payload.resolution_reason,
+            resolved_by=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    await write_event(
+        db,
+        action="fact.conflict_resolved",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="fact_conflict",
+        target_id=conflict_id,
+        after=f"chosen={payload.chosen_fact_id} reason={payload.resolution_reason}",
+    )
+    return {
+        "conflict_id": conflict_id,
+        "status": "resolved",
+        "chosen_fact_id": payload.chosen_fact_id,
+        "rejected_fact_ids": payload.rejected_fact_ids,
+    }
 
 
 @router.get("/{fact_id}", response_model=FactResponse)

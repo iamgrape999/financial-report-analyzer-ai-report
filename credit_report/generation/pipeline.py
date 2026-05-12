@@ -17,6 +17,7 @@ from credit_report.config import (
     CR_MAX_CONCURRENT_GENERATIONS,
     GEMINI_MODEL,
     GENERATION_ORDER,
+    LLM_TIMEOUT_SECONDS,
     SECTION_HARD_DEPENDENCIES,
 )
 from credit_report.generation.claude_client import generate_section_markdown
@@ -158,6 +159,21 @@ async def run_section_generation(
             target_id=f"{report_id}/{section_no}",
             after=f"tokens={tokens_used} model={GEMINI_MODEL}",
         )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        output.status = "error"
+        timeout_msg = f"LLM timeout after {LLM_TIMEOUT_SECONDS}s — please retry or contact support"
+        logger.error("run_section_generation: timeout section=%d report=%s", section_no, report_id)
+        await write_event(
+            db,
+            action="section.generation_error",
+            actor_user_id=actor_user_id,
+            actor_role="system",
+            report_id=report_id,
+            target_type="section_output",
+            target_id=f"{report_id}/{section_no}",
+            after=timeout_msg,
+        )
+        raise TimeoutError(timeout_msg) from exc
     except Exception as exc:
         output.status = "error"
         logger.exception("run_section_generation: error section=%d report=%s: %s", section_no, report_id, exc)

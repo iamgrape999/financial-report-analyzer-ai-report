@@ -312,6 +312,40 @@ async def compute_ltv_acr(
             last.asset_value_20yr,
         )
 
+    # ── Persist LTV rows to CalculationResult ────────────────────────────────
+    for raw_row in rows:
+        yr_period = f"YR{int(raw_row.year)}"
+        formula_base = (
+            f"loan={raw_row.loan_outstanding:.2f} / asset25={raw_row.asset_value_25yr:.2f}"
+        )
+        await _upsert_calculation(
+            db, report_id, "facility", yr_period,
+            "ltv_25yr_pct", raw_row.ltv_25yr_pct,
+            formula_base, [],
+        )
+        await _upsert_calculation(
+            db, report_id, "facility", yr_period,
+            "ltv_20yr_pct", raw_row.ltv_20yr_pct,
+            formula_base, [],
+        )
+    if balloon:
+        await _upsert_calculation(
+            db, report_id, "facility", "balloon",
+            "balloon_ltv_25yr_pct", balloon.get("ltv_25yr_pct"),
+            f"balloon={payload.balloon_amount}", [],
+        )
+        await _upsert_calculation(
+            db, report_id, "facility", "balloon",
+            "balloon_ltv_20yr_pct", balloon.get("ltv_20yr_pct"),
+            f"balloon={payload.balloon_amount}", [],
+        )
+    await db.commit()
+    logger.info(
+        "compute_ltv_acr: persisted %d LTV rows%s report=%s",
+        len(rows), " + balloon" if balloon else "", report_id,
+    )
+    # ─────────────────────────────────────────────────────────────────────────
+
     return {
         "facility_amount": payload.facility_amount,
         "initial_asset_value": payload.initial_asset_value,

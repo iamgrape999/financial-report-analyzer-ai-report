@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Optional
 
 from google import genai
@@ -11,11 +13,14 @@ from credit_report.config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
     CR_SECTION_MAX_TOKENS,
+    LLM_TIMEOUT_SECONDS,
     SECTION_MAX_OUTPUT_TOKENS,
 )
 from credit_report.generation.prompt_builder import build_section_prompt
 
 MAX_CONTINUATION_ROUNDS = 3
+
+logger = logging.getLogger(__name__)
 
 
 async def call_gemini_raw(
@@ -31,14 +36,22 @@ async def call_gemini_raw(
         raise ValueError("GEMINI_API_KEY is not configured.")
     model = model_id or GEMINI_MODEL
     client = genai.Client(api_key=key)
-    response = await client.aio.models.generate_content(
-        model=model,
-        contents=user_prompt,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=max_tokens,
-        ),
+    cfg = genai_types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        max_output_tokens=max_tokens,
     )
+    try:
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=model,
+                contents=user_prompt,
+                config=cfg,
+            ),
+            timeout=LLM_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.error("call_gemini_raw: timeout after %ds", LLM_TIMEOUT_SECONDS)
+        raise TimeoutError(f"Gemini API did not respond within {LLM_TIMEOUT_SECONDS}s")
     return (response.text or "").strip()
 
 
@@ -91,14 +104,25 @@ async def generate_section_markdown(
             continuation_resume_token=resume_token,
         )
 
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=user_prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=max_tokens,
-            ),
+        cfg = genai_types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=max_tokens,
         )
+        try:
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(
+                    model=model,
+                    contents=user_prompt,
+                    config=cfg,
+                ),
+                timeout=LLM_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "generate_section_markdown: timeout section=%d round=%d after %ds",
+                section_no, round_no, LLM_TIMEOUT_SECONDS,
+            )
+            raise
 
         text = response.text or ""
         usage = response.usage_metadata
