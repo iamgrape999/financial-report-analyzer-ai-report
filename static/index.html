@@ -907,7 +907,7 @@ const REQUIRED_FIELDS={
   1:[{p:'report_type',l:'Report Type'},{p:'facility_summary.rows',l:'Facility Rows Table (1A)'},{p:'regulatory_compliance.compliance_status',l:'Regulatory Compliance Status (1B)'},{p:'purpose_and_recommendation.recommendation',l:'Recommendation — APPROVE/DECLINE (1C)'},{p:'terms_and_conditions.borrower',l:'Borrower Name (1D)'},{p:'account_strategy.wallet.bank_market',l:'Account Strategy — Wallet NII (1F)'}],
   2:[{p:'2A_credit_overview.bullets',l:'Credit Overview Bullets (T1)'},{p:'2B_solvency.primary_repayment_source_verbatim',l:'Primary Repayment Source (T2)'},{p:'2C_guarantor.guarantor_name_abbrev',l:'Guarantor Name Abbreviation (T3)'},{p:'2D_collateral.pre_delivery.issuer_full_name',l:'Pre-Delivery RG Issuer (T4)'},{p:'2E_risk_and_mitigants.risk_1_title',l:'Risk 1 Title (2E)'}],
   3:[{p:'3C_mas_612.grade',l:'MAS 612 Loan Grade (3C)'},{p:'3C_mas_612.para_1_msr_mapping_verbatim',l:'MAS 612 Para 1 — MSR Mapping (3C)'},{p:'3B_internal_ratings.borrower_entity_full_name',l:'Borrower Name in MSR Table (3B)'},{p:'3B_internal_ratings.borrower_fy2024',l:'Borrower Current MSR Rating (3B)'}],
-  4:[{p:'4A_borrower.company_name_en',l:'Company Name English (4A)'},{p:'4B_ownership.shareholders',l:'Shareholders Table (4B)'},{p:'4C_management',l:'Key Management Table (4C)'},{p:'4D_business.primary_business',l:'Primary Business (4D)'},{p:'4E_financials.revenue',l:'Revenue Latest FY (4E)'},{p:'4F_fleet.fleet_breakdown',l:'Fleet Breakdown Table (4F)'},{p:'4J_peer_comparison',l:'Peer Comparison Table (4J)'}],
+  4:[{p:'4A_borrower.company_name_en',l:'Company Name English (4A)'},{p:'4B_ownership.shareholders',l:'Shareholders (4B)'},{p:'4C_management.ceo_name',l:'CEO Name (4C)'},{p:'4D_business.primary_business',l:'Primary Business (4D)'},{p:'4E_financials.revenue',l:'Revenue Latest FY (4E)'},{p:'4F_fleet.owned_vessel_count',l:'Owned Fleet Count (4F)'},{p:'4J_peer_comparison',l:'Peer Comparison (4J)'}],
   5:[{p:'5A_security_overview.is_secured',l:'Facility Secured? (5A)'},{p:'5C_vessel_mortgage.loan_amount_usd_m',l:'Vessel Mortgage Loan Amount (5C)'},{p:'5E_value_maintenance_clause.acr_covenant_pct',l:'ACR Covenant Level (5E)'}],
   6:[{p:'6A_project.hull_number',l:'Hull Number (6A)'},{p:'6B_builder.name',l:'Builder Name (6B)'},{p:'6C_contract.contract_date',l:'Contract Date (6C)'},{p:'6D_milestones.m1_name',l:'Milestone 1 Name (6D)'},{p:'6E_rg_mechanism.issuer_full_name',l:'RG Issuer Full Name (6E)'},{p:'6A_project.delivery_date',l:'Expected Delivery Date (6A)'}],
   7:[{p:'entities_to_analyze.borrower_name',l:'Borrower Legal Name (Entities)'},{p:'7A_borrower_financials.reporting_entity',l:'Reporting Entity (7A)'},{p:'7B_key_ratios.fy2024_dscr',l:'DSCR FY2024 (7B)'}],
@@ -1122,10 +1122,15 @@ const FIELD_DEFS={
     {p:'4A_borrower.incorporation_date',l:'4A — Incorporation Date',t:'text',h:'YYYY-MM-DD'},
     {p:'4A_borrower.fiscal_year_end',l:'4A — Fiscal Year End',t:'text',h:'e.g. Dec-31'},
     {p:'4A_borrower.group_auditor',l:'4A — Group Auditor',t:'text',h:'e.g. Deloitte'},
-    {p:'4B_ownership.shareholders',l:'4B — Shareholders Table',t:'json',h:'[{"name":"Parent Corp","stake_percent":100,"country":"TW","notes":"TSE Listed"}]'},
+    {p:'4B_ownership.shareholders',l:'4B — Shareholders (one per line: Name|Stake%|Country)',t:'lines',h:'Parent Corp|100|TW\nMinority Investor|0|SG'},
     {p:'4B_ownership.ultimate_beneficial_owner',l:'4B — Ultimate Beneficial Owner (UBO)',t:'text'},
     {p:'4B_ownership.ubo_stake_pct',l:'4B — UBO Effective Stake (%)',t:'number'},
-    {p:'4C_management',l:'4C — Key Management Table',t:'json',h:'[{"name":"CEO Name","title":"CEO","years_experience":20,"background":"20 years in shipping"}]'},
+    {p:'4C_management.ceo_name',l:'4C — CEO Name',t:'text'},
+    {p:'4C_management.ceo_title',l:'4C — CEO Title',t:'text',h:'e.g. Chief Executive Officer'},
+    {p:'4C_management.ceo_background',l:'4C — CEO Background Summary',t:'textarea',h:'e.g. 20 years in container shipping, joined EMC in 2005'},
+    {p:'4C_management.cfo_name',l:'4C — CFO Name',t:'text'},
+    {p:'4C_management.cfo_title',l:'4C — CFO Title',t:'text',h:'e.g. Chief Financial Officer'},
+    {p:'4C_management.cfo_background',l:'4C — CFO Background Summary',t:'textarea',h:'e.g. 15 years in shipping finance, CPA qualified'},
     {p:'4D_business.primary_business',l:'4D — Primary Business Description',t:'textarea'},
     {p:'4D_business.trade_routes',l:'4D — Key Trade Routes / Markets',t:'text',h:'e.g. Asia-Europe, Trans-Pacific'},
     {p:'4D_business.operational_model',l:'4D — Operational Model',t:'text',h:'e.g. Owner-operator with time-chartered capacity'},
@@ -1134,12 +1139,20 @@ const FIELD_DEFS={
     {p:'4E_financials.fiscal_year',l:'4E — Financial Year Reference',t:'text',h:'e.g. FY2024'},
     {p:'4E_financials.revenue',l:'4E — Revenue (latest FY, millions)',t:'number'},
     {p:'4E_financials.ebitda',l:'4E — EBITDA (latest FY, millions)',t:'number'},
-    {p:'4F_fleet.fleet_breakdown',l:'4F — Fleet Breakdown Table (Owned / Chartered / On Order)',t:'json',h:'[{"category":"Owned","vessel_count":105,"total_teu":350000},{"category":"Chartered-in","vessel_count":95,"total_teu":800000}]'},
-    {p:'4J_peer_comparison',l:'4J — Peer Comparison Table',t:'json',h:'[{"company":"MSC","fleet_teu":5900000,"market_share_pct":17.8,"alliance":"None","listed_yn":"N"}]'}
+    {p:'4F_fleet.owned_vessel_count',l:'4F — Owned Fleet: Vessel Count',t:'number'},
+    {p:'4F_fleet.owned_total_teu',l:'4F — Owned Fleet: Total TEU',t:'number'},
+    {p:'4F_fleet.chartered_vessel_count',l:'4F — Chartered-in Fleet: Vessel Count',t:'number'},
+    {p:'4F_fleet.chartered_total_teu',l:'4F — Chartered-in Fleet: Total TEU',t:'number'},
+    {p:'4F_fleet.on_order_vessel_count',l:'4F — On Order: Vessel Count',t:'number'},
+    {p:'4F_fleet.on_order_total_teu',l:'4F — On Order: Total TEU',t:'number'},
+    {p:'4J_peer_comparison',l:'4J — Peer Comparison (one per line: Company|FleetTEU|MarketShare%|Alliance)',t:'lines',h:'MSC|5900000|17.8|None\nMaersk|4200000|13.1|Gemini'}
   ],
   5:[
     {p:'5A_security_overview.is_secured',l:'5A — Facility Secured?',t:'bool'},
-    {p:'5A_security_overview.security_instruments',l:'5A — Security Instruments (ranked list)',t:'json',h:'[{"rank":1,"instrument":"Refund Guarantee","description":"Issued by IBK, covers pre-delivery phase"},{"rank":2,"instrument":"First Priority Mortgage","description":"Over vessel upon delivery, assigned to CUB"}]'},
+    {p:'5A_security_overview.instr_1_instrument',l:'5A — Security #1: Instrument Name',t:'text',h:'e.g. Refund Guarantee (KDB)'},
+    {p:'5A_security_overview.instr_1_description',l:'5A — Security #1: Description',t:'textarea',h:'e.g. Issued by KDB, demand guarantee covering all pre-delivery installments'},
+    {p:'5A_security_overview.instr_2_instrument',l:'5A — Security #2: Instrument Name',t:'text',h:'e.g. First Priority Vessel Mortgage'},
+    {p:'5A_security_overview.instr_2_description',l:'5A — Security #2: Description',t:'textarea',h:'e.g. Over vessel upon delivery, assigned to CUB as first mortgagee'},
     {p:'5B_refund_guarantee.applicable',l:'5B — Refund Guarantee Applicable?',t:'bool'},
     {p:'5B_refund_guarantee.issuer_full_name',l:'5B — RG Issuer Full Name',t:'text',h:'e.g. Industrial Bank of Korea'},
     {p:'5B_refund_guarantee.issuer_rating',l:'5B — RG Issuer Credit Rating',t:'text',h:'e.g. A+ (S&P)'},
@@ -1178,7 +1191,15 @@ const FIELD_DEFS={
     {p:'5C_vessel_mortgage.acr_at_delivery_pct',l:'5C — ACR at Delivery (%)',t:'number'},
     {p:'5C_vessel_mortgage.ltv_at_maturity_pct',l:'5C — LTV at Maturity (%)',t:'number'},
     {p:'5D_insurance.applicable',l:'5D — Insurance Package Applicable?',t:'bool'},
-    {p:'5D_insurance.instruments',l:'5D — Insurance Instruments (H&M / P&I / War Risk)',t:'json',h:'[{"type":"Hull & Machinery","insurer_or_club":"China P&I Club","insured_value_usd_m":180,"notes":"CUB named co-insured"}]'},
+    {p:'5D_insurance.hm_insurer',l:'5D — H&M Insurance: Insurer or Club',t:'text',h:'e.g. China P&I Club'},
+    {p:'5D_insurance.hm_insured_value_usd_m',l:'5D — H&M Insurance: Insured Value (USD M)',t:'number'},
+    {p:'5D_insurance.hm_notes',l:'5D — H&M Insurance: Notes',t:'text',h:'e.g. CUB named co-insured'},
+    {p:'5D_insurance.pi_insurer',l:'5D — P&I Insurance: Club',t:'text',h:'e.g. UK P&I Club'},
+    {p:'5D_insurance.pi_insured_value_usd_m',l:'5D — P&I Insurance: Insured Value (USD M)',t:'number'},
+    {p:'5D_insurance.pi_notes',l:'5D — P&I Insurance: Notes',t:'text',h:'e.g. Standard P&I coverage, CUB notified as mortgagee'},
+    {p:'5D_insurance.war_insurer',l:'5D — War Risk Insurance: Insurer',t:'text',h:'e.g. Lloyds of London'},
+    {p:'5D_insurance.war_insured_value_usd_m',l:'5D — War Risk Insurance: Insured Value (USD M)',t:'number'},
+    {p:'5D_insurance.war_notes',l:'5D — War Risk Insurance: Notes',t:'text',h:'e.g. Joint names, CUB mortgagee interest noted'},
     {p:'5E_value_maintenance_clause.acr_covenant_pct',l:'5E — ACR Covenant Level (%)',t:'number'},
     {p:'5E_value_maintenance_clause.ltv_covenant_pct',l:'5E — LTV Covenant Level (%)',t:'number'},
     {p:'5E_value_maintenance_clause.test_frequency_verbatim',l:'5E — Test Frequency (verbatim)',t:'text',h:'e.g. Every 2 years or upon each drawdown'},
@@ -1260,7 +1281,7 @@ const FIELD_DEFS={
     {p:'6E_rg_mechanism.issuer_rating_verbatim',l:'6E — RG Issuer Rating (verbatim)',t:'text',h:'e.g. AA (S&P) / AA- (Fitch)'},
     {p:'6E_rg_mechanism.format_verbatim',l:'6E — RG Format (verbatim)',t:'text',h:'e.g. Unconditional and irrevocable demand guarantee'},
     {p:'6E_rg_mechanism.governing_law',l:'6E — RG Governing Law',t:'text',h:'e.g. English law'},
-    {p:'6E_rg_mechanism.trigger_events',l:'6E — RG Trigger Events (list)',t:'json',h:'["Builder fails to complete vessel by Latest Delivery Date","Builder becomes insolvent"]'},
+    {p:'6E_rg_mechanism.trigger_events',l:'6E — RG Trigger Events (one per line)',t:'lines',h:'Builder fails to complete vessel by Latest Delivery Date\nBuilder becomes insolvent\nBuilder abandons construction'},
     {p:'6E_rg_mechanism.claim_process_verbatim',l:'6E — Claim Process (verbatim)',t:'textarea'},
     {p:'6E_rg_mechanism.coverage_summary_min_pct',l:'6E — Minimum RG Coverage (%)',t:'number'}
   ],
@@ -1325,7 +1346,7 @@ const FIELD_DEFS={
     {p:'7C_guarantor_financials.total_equity_fy2024',l:'7C — Guarantor Total Equity FY2024',t:'number'},
     {p:'7C_guarantor_financials.ocf_fy2024',l:'7C — Guarantor Operating Cash Flow FY2024',t:'number'},
     {p:'7E_base_case.applicable',l:'7E — Base Case Projections Applicable?',t:'bool'},
-    {p:'7E_base_case.key_assumptions',l:'7E — Key Assumptions Table',t:'json',h:'[{"assumption":"Charter rate (USD/day)","value":"USD28,000","source":"TC agreement"}]'},
+    {p:'7E_base_case.key_assumptions',l:'7E — Key Assumptions (one per line: Assumption|Value|Source)',t:'lines',h:'Charter rate (USD/day)|USD28,000|TC agreement\nOperating expenses (USD/day)|USD8,500|Historical average'},
     {p:'7E_base_case.min_dscr',l:'7E — Minimum Base Case DSCR (x)',t:'number'},
     {p:'7E_base_case.conclusion',l:'7E — Base Case Conclusion (verbatim)',t:'textarea'},
     {p:'7F_worse_case.applicable',l:'7F — Worse Case Projections Applicable?',t:'bool'},
@@ -1338,7 +1359,7 @@ const FIELD_DEFS={
     {p:'8A_acra_banking_charges.entity_name',l:'8A — Entity Name (as per ACRA)',t:'text'},
     {p:'8A_acra_banking_charges.uen',l:'8A — UEN',t:'text'},
     {p:'8A_acra_banking_charges.jurisdiction',l:'8A — Jurisdiction',t:'text',h:'e.g. Singapore'},
-    {p:'8A_acra_banking_charges.charges',l:'8A — Charges Table (JSON array)',t:'json',h:'[{"no":1,"chargee":"DBS Bank Ltd","date_of_registration":"15 Mar 2021","date_of_charge":"10 Mar 2021","amount_usd_m":128.75,"currency":"USD","property_charged":"Ship mortgage over MV Pacific Star","status":"Registered","is_cub_charge":false,"cub_facility_ref":null}]'},
+    {p:'8A_acra_banking_charges.charges',l:'8A — Charges (one per line: Chargee|Date|Amount USD M|Status)',t:'lines',h:'DBS Bank Ltd|15 Mar 2021|128.75|Registered\nCUB|01 Dec 2025|178.5|Pending Registration'},
     {p:'8A_acra_banking_charges.total_charges',l:'8A — Total Charges Count',t:'number'},
     {p:'8A_acra_banking_charges.active_charges',l:'8A — Active Charges Count',t:'number'},
     {p:'8A_acra_banking_charges.satisfied_charges',l:'8A — Satisfied Charges Count',t:'number'},
@@ -1348,10 +1369,10 @@ const FIELD_DEFS={
     {p:'8A_acra_banking_charges.analyst_commentary',l:'8A — Analyst Commentary (3-5 bullets)',t:'textarea',h:'Volume trend; CUB position; Satisfied charges; Charge type; Red flags'},
     {p:'8A_acra_banking_charges.new_deal_forward_looking',l:'8A — Include Forward-Looking Bullet (new facility)?',t:'bool'},
     {p:'8B_other_information.applicable',l:'8B — Other Information Applicable?',t:'bool'},
-    {p:'8B_other_information.litigation',l:'8B — Litigation (JSON array)',t:'json',h:'[{"case":"None material","jurisdiction":"N/A","status":"N/A","potential_liability_usd_m":null}]'},
+    {p:'8B_other_information.litigation',l:'8B — Litigation (one per line: Case|Jurisdiction|Status|Liability USD M)',t:'lines',h:'None material|N/A|N/A|0'},
     {p:'8B_other_information.sanctions_ofac',l:'8B — OFAC Sanctions Status',t:'select',opts:['Clear','Hit — see remarks','N/A']},
     {p:'8B_other_information.sanctions_mas',l:'8B — MAS Sanctions Status',t:'select',opts:['Clear','Hit — see remarks','N/A']},
-    {p:'8B_other_information.esg_controversies',l:'8B — ESG Controversies (JSON array)',t:'json',h:'[{"topic":"None","severity":"None","notes":"No material ESG controversies identified"}]'},
+    {p:'8B_other_information.esg_controversies',l:'8B — ESG Controversies (one per line: Topic|Severity|Notes)',t:'lines',h:'None|None|No material ESG controversies identified'},
     {p:'8B_other_information.regulatory_actions',l:'8B — Regulatory Actions / Enforcement Orders',t:'textarea',h:'None'},
     {p:'8B_other_information.material_events',l:'8B — Material Events Since Last Review',t:'textarea',h:'None'}
   ],
@@ -1510,7 +1531,31 @@ function finalizePayload(secNo,data){
     if(b.guarantor_entity_full_name||b.guarantor_entity_abbrev)rows.push({entity_full_name:b.guarantor_entity_full_name||'',entity_abbrev:b.guarantor_entity_abbrev||'',role:'Guarantor',fy2022_23:b.guarantor_fy2022_23||'',fy2024:b.guarantor_fy2024||'',interim:b.guarantor_interim||'',current:b.guarantor_current||'',override_flag:false,override_remarks:''});
     if(rows.length)d['3B_internal_ratings']={rows,period_display_labels:b.period_display_labels||{}};
   }
+  if(secNo===4){
+    const mgt=d['4C_management']||{};
+    const mgArr=[];
+    if(mgt.ceo_name)mgArr.push({name:mgt.ceo_name,title:mgt.ceo_title||'CEO',years_experience:null,background:mgt.ceo_background||''});
+    if(mgt.cfo_name)mgArr.push({name:mgt.cfo_name,title:mgt.cfo_title||'CFO',years_experience:null,background:mgt.cfo_background||''});
+    d['4C_management']=mgArr.length?mgArr:[];
+    const fl=d['4F_fleet']||{};
+    const flArr=[];
+    if(fl.owned_vessel_count!=null||fl.owned_total_teu!=null)flArr.push({category:'Owned',vessel_count:fl.owned_vessel_count||0,total_teu:fl.owned_total_teu||0});
+    if(fl.chartered_vessel_count!=null||fl.chartered_total_teu!=null)flArr.push({category:'Chartered-in',vessel_count:fl.chartered_vessel_count||0,total_teu:fl.chartered_total_teu||0});
+    if(fl.on_order_vessel_count!=null||fl.on_order_total_teu!=null)flArr.push({category:'On Order',vessel_count:fl.on_order_vessel_count||0,total_teu:fl.on_order_total_teu||0});
+    d['4F_fleet']={fleet_breakdown:flArr};
+  }
   if(secNo===5){
+    const sa=d['5A_security_overview']||{};
+    const sinstr=[];
+    if(sa.instr_1_instrument)sinstr.push({rank:1,instrument:sa.instr_1_instrument,description:sa.instr_1_description||''});
+    if(sa.instr_2_instrument)sinstr.push({rank:2,instrument:sa.instr_2_instrument,description:sa.instr_2_description||''});
+    d['5A_security_overview']={is_secured:sa.is_secured,security_instruments:sinstr};
+    const ins=d['5D_insurance']||{};
+    const iArr=[];
+    if(ins.hm_insurer)iArr.push({type:'Hull & Machinery',insurer_or_club:ins.hm_insurer,insured_value_usd_m:ins.hm_insured_value_usd_m||0,notes:ins.hm_notes||''});
+    if(ins.pi_insurer)iArr.push({type:'P&I',insurer_or_club:ins.pi_insurer,insured_value_usd_m:ins.pi_insured_value_usd_m||0,notes:ins.pi_notes||''});
+    if(ins.war_insurer)iArr.push({type:'War Risk',insurer_or_club:ins.war_insurer,insured_value_usd_m:ins.war_insured_value_usd_m||0,notes:ins.war_notes||''});
+    d['5D_insurance']={applicable:ins.applicable,instruments:iArr};
     const bg=d['5B_refund_guarantee']||{};const ms=[];
     for(let i=1;i<=4;i++){if(bg['m'+i+'_name'])ms.push({milestone:bg['m'+i+'_name'],sched_date:bg['m'+i+'_date']||'',rg_amount_usd_m:bg['m'+i+'_rg_usd_m']||0,coverage_pct:bg['m'+i+'_coverage_pct']||0,status:bg['m'+i+'_status']||''});}
     if(ms.length)d['5B_refund_guarantee']={applicable:bg.applicable,issuer_full_name:bg.issuer_full_name,issuer_rating:bg.issuer_rating,rating_agency:bg.rating_agency,legal_structure:bg.legal_structure,governing_law:bg.governing_law,assigned_to_cub:bg.assigned_to_cub,milestones:ms};
@@ -1583,7 +1628,42 @@ function expandPayload(secNo,data){
   if(secNo===3){
     const b=d['3B_internal_ratings'];if(b&&b.rows){const flat={period_display_labels:b.period_display_labels||{}};const bw=b.rows.find(r=>r.role==='Borrower');const gw=b.rows.find(r=>r.role==='Guarantor');if(bw){flat.borrower_entity_full_name=bw.entity_full_name;flat.borrower_entity_abbrev=bw.entity_abbrev;flat.borrower_fy2022_23=bw.fy2022_23;flat.borrower_fy2024=bw.fy2024;flat.borrower_interim=bw.interim;flat.borrower_current=bw.current;flat.borrower_override_flag=bw.override_flag;flat.borrower_override_remarks=bw.override_remarks;}if(gw){flat.guarantor_entity_full_name=gw.entity_full_name;flat.guarantor_entity_abbrev=gw.entity_abbrev;flat.guarantor_fy2022_23=gw.fy2022_23;flat.guarantor_fy2024=gw.fy2024;flat.guarantor_interim=gw.interim;flat.guarantor_current=gw.current;}d['3B_internal_ratings']=flat;}
   }
+  if(secNo===4){
+    const mgt=d['4C_management'];
+    if(Array.isArray(mgt)&&mgt.length){
+      const flat={};
+      if(mgt[0]){flat.ceo_name=mgt[0].name||'';flat.ceo_title=mgt[0].title||'';flat.ceo_background=mgt[0].background||'';}
+      if(mgt[1]){flat.cfo_name=mgt[1].name||'';flat.cfo_title=mgt[1].title||'';flat.cfo_background=mgt[1].background||'';}
+      d['4C_management']=flat;
+    }
+    const fl=d['4F_fleet']||{};
+    if(Array.isArray(fl.fleet_breakdown)){
+      const flat={};
+      for(const row of fl.fleet_breakdown){
+        if(row.category==='Owned'){flat.owned_vessel_count=row.vessel_count;flat.owned_total_teu=row.total_teu;}
+        else if(row.category==='Chartered-in'){flat.chartered_vessel_count=row.vessel_count;flat.chartered_total_teu=row.total_teu;}
+        else if(row.category==='On Order'){flat.on_order_vessel_count=row.vessel_count;flat.on_order_total_teu=row.total_teu;}
+      }
+      d['4F_fleet']=flat;
+    }
+  }
   if(secNo===5){
+    const sa=d['5A_security_overview'];
+    if(sa&&Array.isArray(sa.security_instruments)){
+      const flat={is_secured:sa.is_secured};
+      sa.security_instruments.forEach((instr,i)=>{flat['instr_'+(i+1)+'_instrument']=instr.instrument||'';flat['instr_'+(i+1)+'_description']=instr.description||'';});
+      d['5A_security_overview']=flat;
+    }
+    const ins=d['5D_insurance'];
+    if(ins&&Array.isArray(ins.instruments)){
+      const flat={applicable:ins.applicable};
+      ins.instruments.forEach(instr=>{
+        if(instr.type==='Hull & Machinery'){flat.hm_insurer=instr.insurer_or_club;flat.hm_insured_value_usd_m=instr.insured_value_usd_m;flat.hm_notes=instr.notes;}
+        else if(instr.type==='P&I'){flat.pi_insurer=instr.insurer_or_club;flat.pi_insured_value_usd_m=instr.insured_value_usd_m;flat.pi_notes=instr.notes;}
+        else if(instr.type==='War Risk'){flat.war_insurer=instr.insurer_or_club;flat.war_insured_value_usd_m=instr.insured_value_usd_m;flat.war_notes=instr.notes;}
+      });
+      d['5D_insurance']=flat;
+    }
     const bg=d['5B_refund_guarantee'];if(bg&&bg.milestones){const flat={applicable:bg.applicable,issuer_full_name:bg.issuer_full_name,issuer_rating:bg.issuer_rating,rating_agency:bg.rating_agency,legal_structure:bg.legal_structure,governing_law:bg.governing_law,assigned_to_cub:bg.assigned_to_cub};bg.milestones.forEach((m,i)=>{flat['m'+(i+1)+'_name']=m.milestone;flat['m'+(i+1)+'_date']=m.sched_date;flat['m'+(i+1)+'_rg_usd_m']=m.rg_amount_usd_m;flat['m'+(i+1)+'_coverage_pct']=m.coverage_pct;flat['m'+(i+1)+'_status']=m.status;});d['5B_refund_guarantee']=flat;}
     const fg=d['5F_corporate_guarantee'];if(fg&&fg.guarantee_phases){const flat={...fg};flat.guarantee_covers_predelivery=fg.guarantee_phases.includes('Pre-delivery');flat.guarantee_covers_postdelivery=fg.guarantee_phases.includes('Post-delivery');const l2k={'Cash & Equivalents (TWD bn)':'cash_twd_bn','Cash & Equivalents (USD bn)':'cash_usd_bn','Total Debt (TWD bn)':'total_debt_twd_bn','Net Worth / Equity (TWD bn)':'net_worth_twd_bn','Revenue (TWD bn)':'revenue_twd_bn','EBITDA (TWD bn)':'ebitda_twd_bn','Interest Coverage (x)':'interest_coverage','Net Margin (%)':'net_margin_pct','ROE (%)':'roe_pct'};if(fg.guarantor_financials)fg.guarantor_financials.forEach(gf=>{if(l2k[gf.metric])flat[l2k[gf.metric]]=gf.fy_current_twd_bn;});d['5F_corporate_guarantee']=flat;}
   }

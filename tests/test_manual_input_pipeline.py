@@ -64,7 +64,7 @@ async def _seed_report(db, rid: str, owner_id: str | None = None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 EXPECTED_FIELD_COUNTS = {
-    1: 68, 2: 48, 3: 26, 4: 22, 5: 66,
+    1: 68, 2: 48, 3: 26, 4: 32, 5: 77,
     6: 57, 7: 65, 8: 22, 9: 20, 10: 36, 11: 12,
 }
 
@@ -215,12 +215,18 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
             "group_auditor": "Deloitte",
         },
         "4B_ownership": {
-            "shareholders": [{"name": "Test Parent", "stake_percent": 100, "country": "TW"}],
+            "shareholders": ["Test Parent Corp|100|TW"],
             "ultimate_beneficial_owner": "Test Family",
             "ubo_stake_pct": 55.0,
         },
-        "4C_management": [{"name": "Jane Doe", "title": "GM", "years_experience": 20,
-                            "background": "20 years shipping"}],
+        "4C_management": {
+            "ceo_name": "Jane Doe",
+            "ceo_title": "Chief Executive Officer",
+            "ceo_background": "20 years in container shipping",
+            "cfo_name": "John Smith",
+            "cfo_title": "Chief Financial Officer",
+            "cfo_background": "15 years in shipping finance",
+        },
         "4D_business": {
             "primary_business": "Container liner shipping",
             "trade_routes": "Asia-Europe, Trans-Pacific",
@@ -229,17 +235,24 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
         },
         "4E_financials": {"currency": "USD", "fiscal_year": "FY2024", "revenue": 1000.0,
                           "ebitda": 250.0},
-        "4F_fleet": {"fleet_breakdown": [{"category": "Owned", "vessel_count": 50,
-                                          "total_teu": 500000}]},
-        "4J_peer_comparison": [{"company": "MSC", "fleet_teu": 5000000,
-                                 "market_share_pct": 17.8, "alliance": "None", "listed_yn": "N"}],
+        "4F_fleet": {
+            "owned_vessel_count": 105,
+            "owned_total_teu": 350000,
+            "chartered_vessel_count": 95,
+            "chartered_total_teu": 800000,
+            "on_order_vessel_count": 63,
+            "on_order_total_teu": 1200000,
+        },
+        "4J_peer_comparison": ["MSC|5900000|17.8|None", "Maersk|4200000|13.1|Gemini"],
     },
     5: {
         # Flat individual fields matching new FIELD_DEFS[5]
         "5A_security_overview": {
             "is_secured": True,
-            "security_instruments": [{"rank": 1, "instrument": "Refund Guarantee",
-                                       "description": "Issued by Test Bank"}],
+            "instr_1_instrument": "Refund Guarantee (Test Bank)",
+            "instr_1_description": "Issued by Test Bank, covers all pre-delivery installments",
+            "instr_2_instrument": "First Priority Vessel Mortgage",
+            "instr_2_description": "Over vessel upon delivery, assigned to CUB",
         },
         "5B_refund_guarantee": {
             "applicable": True,
@@ -272,8 +285,15 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
             "acr_at_delivery_pct": 120.0,
             "ltv_at_maturity_pct": 75.0,
         },
-        "5D_insurance": {"applicable": True,
-                         "instruments": [{"type": "H&M", "insurer_or_club": "Test P&I"}]},
+        "5D_insurance": {
+            "applicable": True,
+            "hm_insurer": "China P&I Club",
+            "hm_insured_value_usd_m": 180.0,
+            "hm_notes": "CUB named co-insured",
+            "pi_insurer": "UK P&I Club",
+            "pi_insured_value_usd_m": 0.0,
+            "pi_notes": "Standard P&I coverage",
+        },
         "5E_value_maintenance_clause": {
             "acr_covenant_pct": 120.0,
             "ltv_covenant_pct": 75.0,
@@ -1111,7 +1131,7 @@ class TestJsonHintParseability:
         )
 
     # Sections with no json-type fields (all blobs replaced with individual fields)
-    SECTIONS_WITHOUT_JSON_FIELDS = {2}
+    SECTIONS_WITHOUT_JSON_FIELDS = {2, 4, 5, 6, 7, 8}
 
     @pytest.mark.parametrize("sec_no", list(range(1, 12)))
     def test_section_json_hints_parse(self, sec_no):
