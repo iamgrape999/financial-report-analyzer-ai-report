@@ -64,12 +64,12 @@ async def _seed_report(db, rid: str, owner_id: str | None = None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 EXPECTED_FIELD_COUNTS = {
-    1: 38, 2: 6, 3: 4, 4: 11, 5: 7, 6: 6,
-    7: 7, 8: 1, 9: 4, 10: 3, 11: 12,
+    1: 7, 2: 6, 3: 4, 4: 12, 5: 7, 6: 7,
+    7: 8, 8: 2, 9: 4, 10: 3, 11: 12,
 }
 
 EXPECTED_REQUIRED_COUNTS = {
-    1: 23, 2: 5, 3: 4, 4: 7, 5: 3, 6: 6,
+    1: 6, 2: 5, 3: 4, 4: 7, 5: 3, 6: 6,
     7: 3, 8: 1, 9: 2, 10: 2, 11: 4,
 }
 
@@ -78,29 +78,52 @@ VALID_FIELD_TYPES = {"text", "number", "textarea", "lines", "json", "bool", "sel
 # Minimal valid input payloads for each section (representative, not exhaustive)
 MINIMAL_PAYLOADS: dict[int, dict] = {
     1: {
-        "borrower": "Test Borrower Ltd",
-        "guarantors": ["Test Guarantor Corp"],
-        "facility_amount_usd_m": 100.0,
-        "facility_type": "Term Loan",
-        "tenor_years": 5,
-        "ltc_percent": 80.0,
-        "interest_rate_basis": "SOFR",
-        "margin_bps": 200,
-        "balloon_percent": 30.0,
-        "repayment_schedule": "5% semi-annual + 30% balloon",
-        "purpose": "Vessel acquisition finance",
-        "tenor_structure": "5 years",
-        "security_pre_delivery": "Refund Guarantee",
-        "security_post_delivery": "First Priority Mortgage",
-        "value_maintenance_clause": {"acr_minimum_pct": 120, "ltv_maximum_pct": 83},
-        "sustainability_linked_kpi": {"description": "CO2 intensity"},
-        "regulatory_compliance": {"compliance_status": "Compliant"},
-        "group_limit": {"approved_group_limit_usd_m": 500, "within_limit": True},
-        "drawdown_conditions": {"max_drawdowns": 3},
-        "conditions_precedent": ["Execute facility agreement", "Legal opinions"],
-        "deal_comparison": [{"term": "Amount", "proposed": "USD100m", "previous": "USD80m"}],
-        "account_strategy": {"wallet_overview": "USD 5m wallet"},
-        "all_facilities": [{"item": 1, "proposed_facility_usd_m": 100.0, "is_new": True}],
+        "report_type": "new_deal",
+        "facility_summary": {
+            "rows": [{"item_no": 1, "borrower_full_name": "Test Borrower Ltd",
+                      "booking_location": "SG", "proposed_facility_usd_m": 100.0,
+                      "is_new": True, "currency": "USD", "facility_type": "Term Loan"}],
+            "totals": {"total_credit_limit_usd_m": 100.0},
+            "footnotes": [],
+            "appendix_ref": "See Appendix I.",
+        },
+        "regulatory_compliance": {
+            "compliance_status": "Compliant",
+            "group_limit": {"approved_group_limit_usd_m": 500, "within_limit": True},
+        },
+        "purpose_and_recommendation": {
+            "purpose_verbatim": "Vessel acquisition finance.",
+            "recommendation": "APPROVE",
+        },
+        "terms_and_conditions": {
+            "borrower": "Test Borrower Ltd",
+            "guarantors": ["Test Guarantor Corp"],
+            "facility_type": "Term Loan",
+            "facility_amount_usd_m": 100.0,
+            "ltc_percent": 80.0,
+            "tenor_years": 5,
+            "tenor_structure": "5 years",
+            "repayment_schedule": "5% semi-annual + 30% balloon",
+            "balloon_percent": 30.0,
+            "interest_rate_basis": "SOFR",
+            "margin_bps": 200,
+            "security_pre_delivery": "Refund Guarantee",
+            "security_post_delivery": "First Priority Mortgage",
+            "value_maintenance_clause": {"acr_minimum_pct": 120, "ltv_maximum_pct": 83},
+            "sustainability_linked_kpi": {"description": "CO2 intensity"},
+            "financial_covenants": "NIL",
+            "drawdown_conditions": {"max_drawdowns": 3},
+            "conditions_precedent": ["Execute facility agreement", "Legal opinions"],
+            "governing_law": "Singapore",
+            "deal_comparison": [{"term": "Amount", "proposed": "USD100m", "previous": "USD80m"}],
+        },
+        "account_strategy": {
+            "wallet": {"bank_market": "NII USD5m p.a."},
+            "current_relationship": "Term loan facility",
+            "immediate_opportunities": "Upfront fee USD100,000",
+            "future_opportunities": "Refinancing",
+            "other_opportunities": "FX hedging",
+        },
     },
     2: {
         "2A_credit_overview": {"bullets": [{"order": 1, "text_verbatim": "Test bullet"}],

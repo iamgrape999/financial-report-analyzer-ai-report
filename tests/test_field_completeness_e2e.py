@@ -48,80 +48,116 @@ from credit_report.generation.prompt_builder import (
 # ===========================================================================
 
 SEC1_PAYLOAD = {
-    "borrower": "Evergreen Marine (Asia) Pte. Ltd.",
-    "guarantors": ["Evergreen Marine Corporation (Taiwan) Ltd."],
-    "all_facilities": [
-        {
-            "item": 1,
-            "borrower": "EMA",
-            "booking_office": "SG",
-            "current_facility_usd_m": None,
-            "proposed_facility_usd_m": 178.5,
-            "is_new": True,
-            "outstanding_usd_m": 0,
-            "ccy": "USD",
-            "tenor": "11 years (Expected Delivery Jun 2026; Maturity Jun 2037)",
-            "facility_type": "Committed Bilateral Term Loan (SLL)",
-            "collateral": "IBK Refund Guarantee (pre); First Priority Vessel Mortgage (post)",
-            "guarantor": "EMC",
-        }
-    ],
-    "credit_limit_total_proposed_usd_m": 178.5,
-    "borrower_proposed_exposure_total_usd_m": 178.5,
-    "facility_type": "Committed Bilateral Term Loan (SLL)",
-    "facility_amount_usd_m": 178.5,
-    "facility_amount_formula": "Lesser of USD178.5m and 80% of Initial Market Value",
-    "ltc_percent": 80,
-    "tenor_years": 11,
-    "tenor_structure": "4+7 (pre+post delivery)",
-    "purpose": "Finance pre- and post-delivery of one 20,000 TEU LNG dual fuel containership (Hull H-2891) built by Samsung Heavy Industries.",
-    "repayment_schedule": "First 5% repayment 6 months from delivery; 12 semi-annual 5% instalments; 35% balloon at maturity",
-    "balloon_percent": 35,
-    "interest_rate_basis": "Term SOFR",
-    "margin_bps": 175,
-    "interest_period": "3 months",
-    "upfront_fee_pct": 0.10,
-    "upfront_fee_usd": 178500,
-    "annual_renewal_fee_usd": 0,
-    "security_pre_delivery": "IBK Refund Guarantee (A+/Aa2) fully covering each pre-delivery installment, assigned to CUB",
-    "security_post_delivery": "First priority ship mortgage; assignment of earnings and insurances; EMC corporate guarantee",
-    "value_maintenance_clause": {"acr_minimum_pct": 120, "ltv_maximum_pct": 83, "testing_frequency": "Every 2 years", "cure_period_days": 21},
-    "sustainability_linked_kpi": {"description": "CO2 intensity / MSCI ESG / DJSI", "max_margin_ratchet_bps": 5},
-    "financial_covenants": "NIL",
+    "report_type": "new_deal",
+    "facility_summary": {
+        "rows": [
+            {
+                "item_no": 1,
+                "borrower_full_name": "Evergreen Marine (Asia) Pte. Ltd. (EMA)",
+                "booking_location": "SG",
+                "current_facility_usd_m": None,
+                "proposed_facility_usd_m": 178.5,
+                "is_new": True,
+                "outstanding_usd_m": 0,
+                "outstanding_as_at": "end Oct 2025",
+                "currency": "USD",
+                "tenor": "7 years after Vessel Delivery Date or 11 years after Initial Drawdown Date, whichever earlier (Expected Delivery: 30 Jun 2028)",
+                "facility_type": "Committed Bilateral Term Loan (SLL)",
+                "collateral_pre": "Refund Guarantee issued by Korea Development Bank, assigned to CUB",
+                "collateral_post": "One 20,000 TEU dual fuel (LNG, Diesel) containership (Hull No. 2891)",
+                "guarantor": "Evergreen Marine Corporation (Taiwan) Ltd. (EMC)",
+                "is_psr": False,
+                "is_lapsing": False,
+            },
+            {
+                "item_no": 2,
+                "borrower_full_name": "Evergreen Marine (Asia) Pte. Ltd. (EMA)",
+                "booking_location": "SG",
+                "current_facility_usd_m": 128.75,
+                "proposed_facility_usd_m": 128.75,
+                "is_new": False,
+                "outstanding_usd_m": 0,
+                "currency": "USD",
+                "facility_type": "Committed Bilateral Term Loan (SLL)",
+                "collateral_pre": "Refund Guarantee issued by KEXIM, assigned to CUB",
+                "collateral_post": "One 14,000 TEU methanol dual fuel containership (Hull No. K712)",
+                "guarantor": "Evergreen Marine Corporation (Taiwan) Ltd. (EMC)",
+                "is_psr": False,
+                "is_lapsing": False,
+            },
+        ],
+        "totals": {"total_credit_limit_usd_m": 307.25, "psr_spot_limit_usd_m": 0.88,
+                   "credit_limit_total_proposed_usd_m": 417.25},
+        "footnotes": [
+            {"symbol": "[1]", "text_verbatim": "Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period. Latest Vessel Delivery Date 27 Dec 2028."},
+        ],
+        "appendix_ref": "Please refer to Appendix I for total CUB exposure to Evergreen Group.",
+    },
     "regulatory_compliance": {
         "bank_net_worth_twd_bn": 275,
+        "single_borrower_limit_pct": 5,
         "single_borrower_limit_twd_bn": 13.75,
         "usd_equivalent_usd_m": 436,
+        "exchange_rate": 31.52,
+        "exchange_rate_date": "2025-12-12",
+        "china_invested_enterprise": False,
         "compliance_status": "Compliant",
+        "unsecured_drawdown_cap_pct": 32,
         "unsecured_drawdown_cap_usd_m": 71.40,
+        "group_limit": {"approved_group_limit_usd_m": 750, "total_proposed_group_utilization_usd_m": 673.13, "within_limit": True},
     },
-    "group_limit": {"approved_group_limit_usd_m": 750, "total_proposed_group_utilization_usd_m": 673.13, "within_limit": True},
-    "drawdown_conditions": {"max_drawdowns": 5, "pre_delivery_cap_usd_m": 71.40, "aggregate_cap_usd_m": 178.50},
-    "conditions_precedent": [
-        {"no": 1, "condition": "Execution of all Facility Agreement and Security Documents"},
-        {"no": 2, "condition": "Receipt of satisfactory legal opinions (Singapore law and BVI law)"},
-        {"no": 3, "condition": "Evidence of insurance placement (H&M, P&I, War Risk) satisfactory to the Lender"},
-    ],
-    "deal_comparison": [
-        {"term": "Guarantor", "proposed": "EMC", "previous": "EMC"},
-        {"term": "Facility Amount", "proposed": "USD178.5m (80% LTC)", "previous": "USD128.75m (80% LTC)"},
-        {"term": "Purpose", "proposed": "One 20,000 TEU newbuild", "previous": "One 14,000 TEU newbuild"},
-        {"term": "Vessel Type", "proposed": "20,000 TEU LNG dual fuel", "previous": "14,000 TEU methanol dual fuel"},
-        {"term": "Tenor", "proposed": "11 years (4+7)", "previous": "11 years (4+7)"},
-        {"term": "Margin", "proposed": "0.85% p.a.", "previous": "0.85% p.a."},
-        {"term": "Upfront Fee", "proposed": "0.10%", "previous": "0.10%"},
-        {"term": "SLL Ratchet", "proposed": "Max 5bps p.a.", "previous": "Max 5bps p.a."},
-        {"term": "Drawdowns", "proposed": "<=5", "previous": "<=5"},
-        {"term": "Availability Period", "proposed": "Till 6 months post delivery; undrawn cancelled", "previous": "Till 6 months post delivery; undrawn cancelled"},
-        {"term": "Security", "proposed": "Pre: RG Assignment (IBK); Post: First mortgage", "previous": "Pre: RG Assignment (KEXIM); Post: First mortgage"},
-        {"term": "FMV Maintenance", "proposed": ">=120%", "previous": ">=120%"},
-    ],
-    "governing_law": "Singapore law",
-    "report_type": "new_deal",
-    "appendix_ref": "Please refer to Appendix I for total CUB exposure to Evergreen Group",
-    "item_footnotes": [{"symbol": "*", "text_verbatim": "PSR limit is advised to client. ISDA not signed yet."}],
-    "valuation_details": {"valuer": "Clarkson", "gongwen_ref": "GW-2025-001", "valuation_date": "2025-01-15", "amount_exact_verbatim": "USD98,500,000"},
-    "pam_sam_text": "Unsecured drawdown capped at 32% of contract price (USD71.40m) for PAM/SAM purposes",
+    "purpose_and_recommendation": {
+        "purpose_verbatim": (
+            "This report seeks approval for a new USD178.50m committed secured 11-year "
+            "sustainability-linked bilateral term loan facility to EMA to finance one 20,000 TEU "
+            "dual fuel (LNG, Diesel) containership under construction by Samsung Heavy Industries "
+            "Co., Ltd. in South Korea."
+        ),
+        "recommendation": "APPROVE",
+    },
+    "terms_and_conditions": {
+        "borrower": "Evergreen Marine (Asia) Pte. Ltd. (EMA)",
+        "guarantors": ["Evergreen Marine Corporation (Taiwan) Ltd. (EMC)"],
+        "lender": "Cathay United Bank Singapore Branch (CUB SG)",
+        "facility_type": "Committed Bilateral Term Loan (Sustainability-Linked)",
+        "facility_amount_usd_m": 178.5,
+        "facility_amount_formula": "Lesser of USD178,500,000 and 80% of Initial Market Value of Vessel",
+        "ltc_percent": 80,
+        "tenor_years": 11,
+        "tenor_structure": "4+7 (pre-delivery + post-delivery)",
+        "purpose": "Acquisition of one 20,000 TEU dual fuel (LNG, Diesel) containership (Hull No. 2891) under construction at Samsung Heavy Industries Co., Ltd., South Korea",
+        "repayment_schedule": "First 5% repayment 6 months from delivery; 12 semi-annual 5% instalments; 35% balloon at maturity",
+        "balloon_percent": 35,
+        "interest_rate_basis": "Term SOFR",
+        "margin_bps": 85,
+        "interest_period": "3 months or 1 month, not exceeding 3 months",
+        "upfront_fee_pct": 0.10,
+        "upfront_fee_usd": 178500,
+        "annual_renewal_fee_usd": 10000,
+        "security_pre_delivery": "Assignment of Refund Guarantee issued by Korea Development Bank (KDB), fully covering each pre-delivery installment, assigned to CUB SG",
+        "security_post_delivery": "First priority perfected mortgage on Vessel for 120% of Facility Amount plus interest and costs, and assignment of insurances",
+        "value_maintenance_clause": {"acr_minimum_pct": 120, "ltv_maximum_pct": 83, "testing_frequency": "Every 2 years post delivery", "cure_period_days": 21},
+        "sustainability_linked_kpi": {"description": "CO2 intensity / MSCI ESG / DJSI", "max_margin_ratchet_bps": 5},
+        "financial_covenants": "NIL",
+        "drawdown_conditions": {"max_drawdowns": 5, "pre_delivery_cap_usd_m": 71.40, "aggregate_cap_usd_m": 178.50},
+        "conditions_precedent": [
+            "Execution of all Facility Agreement and Security Documents",
+            "Receipt of satisfactory legal opinions (Singapore law)",
+            "Evidence of insurance placement (H&M, P&I, War Risk)",
+            "KYC/AML completion",
+        ],
+        "governing_law": "Singapore",
+        "deal_comparison": [
+            {"term": "Guarantor", "proposed": "EMC", "previous": "EMC"},
+            {"term": "Facility Amount", "proposed": "USD178.5m (80% LTC)", "previous": "USD128.75m (80% LTC)"},
+            {"term": "Purpose", "proposed": "One 20,000 TEU newbuild", "previous": "One 14,000 TEU newbuild"},
+            {"term": "Vessel Type", "proposed": "20,000 TEU LNG dual fuel", "previous": "14,000 TEU methanol dual fuel"},
+            {"term": "Tenor", "proposed": "11 years (4+7)", "previous": "11 years (4+7)"},
+            {"term": "Margin", "proposed": "0.85% p.a.", "previous": "0.85% p.a."},
+            {"term": "Security", "proposed": "Pre: RG (KDB); Post: First mortgage", "previous": "Pre: RG (KEXIM); Post: First mortgage"},
+            {"term": "FMV Maintenance", "proposed": ">=120%", "previous": ">=120%"},
+        ],
+    },
     "account_strategy": {
         "wallet": {
             "bank_market": "NII USD7.5m p.a.",
@@ -867,7 +903,7 @@ ALL_PAYLOADS = {
 
 # Critical data tokens that must appear in each section's prompt
 CRITICAL_TOKENS = {
-    1: ["Evergreen Marine (Asia)", "178.5", "new_deal", "Term SOFR", "35", "regulatory_compliance", "sll_kpi_performance", "IBK", "FMV Maintenance"],
+    1: ["Evergreen Marine (Asia)", "178.5", "new_deal", "Term SOFR", "35", "regulatory_compliance", "sll_kpi_performance", "Korea Development Bank", "FMV Maintenance", "facility_summary", "terms_and_conditions"],
     2: ["2A_credit_overview", "2B_solvency", "36.5", "198.3", "Korea Development Bank", "freight rate volatility", "AA, AA-"],
     3: ["3A_external_ratings", "3B_internal_ratings", "MSR", "PASS", "MAS 612", "EMA",
         "override_remarks", "Jul 2025", "Nov 2025", "potential weakness", "lease liability",
@@ -884,9 +920,8 @@ CRITICAL_TOKENS = {
 
 # Field keys that are in FIELD_DEFS (required=True) and must drive prompt content
 REQUIRED_FIELD_KEYS = {
-    1: ["borrower", "facility_type", "facility_amount_usd_m", "ltc_percent", "tenor_years", "purpose",
-        "repayment_schedule", "margin_bps", "security_pre_delivery", "security_post_delivery",
-        "regulatory_compliance", "report_type"],
+    1: ["report_type", "facility_summary", "regulatory_compliance", "purpose_and_recommendation",
+        "terms_and_conditions", "account_strategy"],
     2: ["2A_credit_overview", "2B_solvency", "2C_guarantor", "2D_collateral", "2E_risk_and_mitigants", "report_type"],
     3: ["3A_external_ratings", "3B_internal_ratings", "3C_mas_612", "3D_esg_rating"],
     4: ["4A_borrower", "4B_ownership", "4C_management", "4D_business", "4E_financials", "4G_debt_profile", "4H_banking_relationships"],
@@ -935,9 +970,10 @@ class TestPayloadStructure:
         for key in REQUIRED_FIELD_KEYS[sec]:
             assert key in payload, f"§{sec} payload missing required field '{key}'"
 
-    def test_sec1_all_facilities_is_list(self):
-        assert isinstance(SEC1_PAYLOAD["all_facilities"], list)
-        assert len(SEC1_PAYLOAD["all_facilities"]) >= 1
+    def test_sec1_facility_summary_rows_is_list(self):
+        rows = SEC1_PAYLOAD["facility_summary"]["rows"]
+        assert isinstance(rows, list)
+        assert len(rows) >= 1
 
     def test_sec2_risk_list_has_two_entries(self):
         risk_data = SEC2_PAYLOAD["2E_risk_and_mitigants"]
