@@ -253,35 +253,59 @@ SEC3_PAYLOAD = {
                 "entity_abbrev": "EMA",
                 "role": "Borrower",
                 "fy2022_23": "6-",
-                "fy2023_24": "6-",
-                "fy2024": "6",
-                "interim": None,
-                "current": "6",
-                "remarks": "Proposed MSR6",
-                "override_flag": False,
+                "fy2024": "3+",
+                "interim": "3+ (Override)",
+                "current": "3+ (Override)",
+                "override_flag": True,
+                "override_remarks": (
+                    "Generated MSR of 4- based on 9M2025 financial statements (Deloitte, unqualified). "
+                    "Proposed to manual override to MSR 3+. "
+                    "Previous approved Final MSR was 3+, Current Proposed Final MSR of 3+ is unchanged (0 notches). "
+                    "Revenue YoY +12.5% (FY2024: USD150m → 9M2025 annualised USD169m); "
+                    "operating margin improved from 31.0% to 33.2%; net income margin improved from 21.3% to 23.8%. "
+                    "9M2025 results weaker than FY2024 (generated MSR 3+) but remain above FY2023 (generated MSR 4-). "
+                    "US-China tariff Phase 1 rollback (May 2025) reduced near-term rate headwind; "
+                    "CCFI recovery to 1,450 by Q4 2025."
+                ),
             },
             {
                 "entity_full_name": "Evergreen Marine Corporation (Taiwan) Ltd.",
                 "entity_abbrev": "EMC",
                 "role": "Guarantor",
                 "fy2022_23": "5",
-                "fy2023_24": "5",
                 "fy2024": "5",
                 "interim": "5",
                 "current": "5",
-                "remarks": "",
                 "override_flag": False,
+                "override_remarks": "",
             },
         ],
-        "period_display_labels": {"fy2022_23": "2022/23", "fy2023_24": "2023/24", "fy2024": "2024", "interim": "Interim", "current": "Current"},
+        "period_display_labels": {
+            "fy2022_23": "2022/23",
+            "fy2024": "2024",
+            "interim": "Jul 2025",
+            "current": "Nov 2025",
+        },
     },
     "3C_mas_612": {
         "grade": "PASS",
-        "primary_paragraph_verbatim": "Borrower is internally rated as MSR 6, mapped to PASS under the MSR – MAS 612 Loan Classification Mapping matrix.",
-        "supporting_paragraphs": [
-            "EMA has maintained consistent MSR 6- to MSR 6 ratings over the review period.",
-            "The Guarantor EMC is internally rated MSR 5.",
-        ],
+        "msr_value": "3+",
+        "para_1_msr_mapping_verbatim": (
+            'Borrower is internally rated as MSR 3+, which is mapped to "PASS" under the '
+            '"MSR – MAS 612 Loan Classification Mapping" matrix. We recommend the MAS Notice 612 '
+            'loan grading for the Borrower to be "PASS", in view that the Borrower does not '
+            "exhibit potential weakness in repayment capability."
+        ),
+        "para_2_account_conduct_verbatim": "EMA's account conduct remains satisfactory.",
+        "para_3_financial_profile_verbatim": (
+            "Borrower Evergreen Marine (Asia) Pte. Ltd. and Guarantor Evergreen Marine Corporation "
+            "demonstrate acceptable financial profile (See Section 7: Financial Analysis) with both "
+            "companies in a Net Cash position."
+        ),
+        "para_4_projection_verbatim": (
+            "Financial Projections of Borrower Evergreen Marine (Asia) Pte. Ltd. (See Section 7) "
+            "demonstrates capability to meet debt and lease liability obligations throughout."
+        ),
     },
     "3D_esg_rating": {"entity_abbrev": "EMA", "rating_date": "2025-01-15", "image_ref": "[System-generated ESG rating image]"},
 }
@@ -845,7 +869,9 @@ ALL_PAYLOADS = {
 CRITICAL_TOKENS = {
     1: ["Evergreen Marine (Asia)", "178.5", "new_deal", "Term SOFR", "35", "regulatory_compliance", "sll_kpi_performance", "IBK", "FMV Maintenance"],
     2: ["2A_credit_overview", "2B_solvency", "36.5", "198.3", "Korea Development Bank", "freight rate volatility", "AA, AA-"],
-    3: ["3A_external_ratings", "3B_internal_ratings", "MSR", "PASS", "MAS 612", "EMA"],
+    3: ["3A_external_ratings", "3B_internal_ratings", "MSR", "PASS", "MAS 612", "EMA",
+        "override_remarks", "Jul 2025", "Nov 2025", "potential weakness", "lease liability",
+        "See Section 7", "Net Cash", "3+"],
     4: ["4A_borrower", "Evergreen Marine", "1650000", "OCEAN Alliance", "Amazon Logistics", "Deloitte"],
     5: ["Industrial Bank of Korea", "5B_refund_guarantee", "Steel Cutting", "Delivery", "21 Banking Days", "Evergreen Marine Corporation"],
     6: ["H-2891", "267.3", "Samsung Heavy Industries", "94%", "210", "LNG Dual Fuel", "6F_construction_progress"],
