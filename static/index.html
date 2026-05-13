@@ -250,41 +250,10 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <button class="btn btn-sm btn-outline-secondary" onclick="closePanel()">×</button>
     </div>
     <ul class="nav nav-tabs px-3 pt-2" id="panelTabs">
-      <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('input');return false" data-i18n="sp.tab_json">📋 Raw JSON</a></li>
-      <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('form');return false" data-i18n="sp.tab_form">📝 Structured Form</a></li>
+      <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('form');return false" data-i18n="sp.tab_form">📝 Structured Form</a></li>
+      <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('input');return false" data-i18n="sp.tab_json">📋 Raw JSON</a></li>
       <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('output');return false" data-i18n="sp.tab_output">📄 Generated Output</a></li>
-      <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('natural');return false" data-i18n="sp.tab_natural">✍️ 自然輸入</a></li>
     </ul>
-
-    <!-- Natural Input tab -->
-    <div id="tabNatural" class="p-3" style="display:none">
-      <div class="d-flex justify-content-between align-items-start mb-2">
-        <div>
-          <strong class="text-success" data-i18n="sp.nat_title">✍️ 自然語言輸入 Natural Language Input</strong>
-          <div class="small text-muted mt-1" data-i18n="sp.nat_hint">用中文或英文自然描述此段落的內容，AI 會自動轉換為所需格式。Fill in any fields naturally — AI converts to the required JSON structure.</div>
-        </div>
-        <button class="btn btn-outline-secondary btn-sm ms-2 flex-shrink-0" onclick="loadNaturalTemplate()" data-i18n="sp.nat_template">📋 範本 Template</button>
-      </div>
-      <textarea id="naturalInput" class="form-control" style="font-size:13px;line-height:1.65;font-family:'Segoe UI',system-ui,sans-serif;" rows="16"
-        placeholder="請用自然語言描述此段落的信息，例如：&#10;&#10;借款人：長榮海運（亞洲）有限公司&#10;融資金額：1億7850萬美元&#10;期限：11年（4+7預交付+交付後）&#10;利率：Term SOFR + 85 bps&#10;擔保人：長榮海運股份有限公司&#10;..."></textarea>
-      <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
-        <button class="btn btn-success btn-sm" onclick="aiConvertNatural()">
-          <span id="naturalSpin" class="spinner-border spinner-sm d-none me-1"></span>
-          <span data-i18n="sp.nat_convert">🤖 AI 轉換 Convert to JSON</span>
-        </button>
-        <small id="naturalStatus" class="text-muted"></small>
-      </div>
-      <div id="naturalPreview" class="d-none mt-3">
-        <div class="d-flex justify-content-between align-items-center mb-1">
-          <strong class="small" data-i18n="sp.nat_preview">轉換結果 Conversion Preview:</strong>
-          <div class="d-flex gap-2">
-            <button class="btn btn-primary btn-sm" onclick="applyNaturalJson()" data-i18n="sp.nat_apply">✅ 套用並儲存 Apply &amp; Save</button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('naturalPreview').classList.add('d-none')" data-i18n="sp.nat_discard">✖ 放棄</button>
-          </div>
-        </div>
-        <pre id="naturalPreviewJson" class="bg-light border rounded p-2" style="max-height:220px;overflow-y:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;"></pre>
-      </div>
-    </div>
 
     <!-- Input tab -->
     <div id="tabInput" class="p-3">
@@ -653,7 +622,6 @@ let sectionInputDataMap={}; // {n: parsed input_json object} — cached for qual
 let sectionOutputMap={};    // {n: output_obj}
 let sectionBlocksMap={};    // {n: ReportBlock[]} — real block IDs for improve panel
 let allOutputs=[];
-let _naturalConvertedJson=null;
 let uploadedDocs=[];        // cached document list for duplicate detection
 let lang=localStorage.getItem('lang')||'en';
 
@@ -785,14 +753,6 @@ const TRANSLATIONS={
     'modal.close':'Close',
     'etl.title':'🔍 AI Document ETL — Extracted Section Data',
     'etl.loading':'Running AI extraction… this may take 20-40 seconds',
-    'sp.tab_natural':'✍️ Natural Input',
-    'sp.nat_title':'✍️ Natural Language Input',
-    'sp.nat_hint':'Describe this section in plain English or Chinese — AI will convert to the required JSON structure. All 11 sections are supported.',
-    'sp.nat_template':'📋 Load Template',
-    'sp.nat_convert':'🤖 AI Convert to JSON',
-    'sp.nat_preview':'Conversion Preview:',
-    'sp.nat_apply':'✅ Apply & Save',
-    'sp.nat_discard':'✖ Discard',
   },
   zh:{
     'app.title':'🏦 財務報告分析系統',
@@ -903,14 +863,6 @@ const TRANSLATIONS={
     'modal.close':'關閉',
     'etl.title':'🔍 AI文件ETL — 萃取段落資料',
     'etl.loading':'執行AI萃取中… 可能需要20-40秒',
-    'sp.tab_natural':'✍️ 自然輸入',
-    'sp.nat_title':'✍️ 自然語言輸入',
-    'sp.nat_hint':'用中文或英文自然描述此段落的內容，AI 會自動轉換為所需的 JSON 結構。支援全部 11 段。',
-    'sp.nat_template':'📋 載入範本',
-    'sp.nat_convert':'🤖 AI 轉換為 JSON',
-    'sp.nat_preview':'轉換結果預覽：',
-    'sp.nat_apply':'✅ 套用並儲存',
-    'sp.nat_discard':'✖ 放棄',
   }
 };
 function t(key){return(TRANSLATIONS[lang]||TRANSLATIONS.en)[key]||(TRANSLATIONS.en)[key]||key;}
@@ -1318,7 +1270,7 @@ function renderSectionsTable(){
     const tok=o?.tokens_used?(o.tokens_used).toLocaleString():'—';
     const gen=o?.generated_at?fd(o.generated_at):'—';
     const inpIcon=inp?.has_data?'<span class="input-ok">✓</span>':'<span class="input-miss">✗</span>';
-    return `<tr style="cursor:pointer" onclick="openPanel(${n},'input')">
+    return `<tr style="cursor:pointer" onclick="openPanel(${n},'form')">
       <td class="ps-2"><span class="sec-badge s-${sc}">${n}</span></td>
       <td>${snm(n)}</td>
       <td class="text-center">${inpIcon}</td>
@@ -1344,469 +1296,16 @@ function openPanel(secNo,tab){
 function closePanel(){document.getElementById('secPanel').style.display='none';currentPanelSec=null;}
 
 function switchTab(tab){
-  const order=['input','form','output','natural'];
+  const order=['form','input','output'];
   document.querySelectorAll('#panelTabs .nav-link').forEach((el,i)=>el.classList.toggle('active',i===order.indexOf(tab)));
-  document.getElementById('tabInput').style.display=tab==='input'?'block':'none';
   document.getElementById('tabForm').style.display=tab==='form'?'block':'none';
+  document.getElementById('tabInput').style.display=tab==='input'?'block':'none';
   document.getElementById('tabOutput').style.display=tab==='output'?'block':'none';
-  document.getElementById('tabNatural').style.display=tab==='natural'?'block':'none';
-  if(tab==='input')loadInputEditor();
-  else if(tab==='form')openStructuredForm();
-  else if(tab==='natural'){/* template loaded on demand via loadNaturalTemplate */}
+  if(tab==='form')openStructuredForm();
+  else if(tab==='input')loadInputEditor();
   else loadSectionOutput(currentPanelSec);
 }
 
-// ── Natural Language Input ──────────────────────────────────────────────────
-const NATURAL_PROMPTS={
-  en:{
-    1:`§1 Facility Structure & Key Terms
-Please describe the following in plain language:
-
-Borrower: [Company name, country of incorporation]
-Guarantors: [List any guarantors, or "none"]
-Facility type: [e.g. Term Loan / Revolving Credit / Club Loan]
-Facility amount: [e.g. USD 50 million]
-Loan-to-cost (LTC): [e.g. 65%]
-Tenor: [e.g. 7 years, with 6-month grace period]
-Purpose: [e.g. financing acquisition of 1 x VLCC tanker]
-Repayment schedule: [e.g. equal quarterly instalments]
-Balloon payment: [e.g. 30% at maturity]
-Interest rate: [e.g. SOFR + 280 bps]
-Security (pre-delivery): [e.g. refund guarantee, assignment of shipbuilding contract]
-Security (post-delivery): [e.g. first priority mortgage, assignment of earnings and insurance]
-Value maintenance clause: [e.g. LTV must stay below 70%, cure period 30 days]
-Regulatory compliance: [e.g. MAS large-exposure limit, CUB group limit]
-Conditions precedent: [List key CPs, e.g. legal opinion, insurance confirmation]`,
-
-    2:`§2 Overall Comments
-Please describe:
-
-Credit decision: [APPROVE / DECLINE / CONDITIONAL APPROVE]
-Overall credit overview: [Brief 2-3 sentence summary of the transaction]
-Key strengths (list 3-5):
-  1.
-  2.
-  3.
-Key risks (list 3-5):
-  1.
-  2.
-  3.
-Borrower financial highlights: [Revenue, EBITDA, net debt, leverage ratio]
-Guarantor financial highlights: [If applicable]
-Collateral value and LTV: [e.g. vessel appraised at USD 75m, LTV 67%]
-Recommendation: [Final recommendation and any conditions]`,
-
-    3:`§3 Credit Risk Assessment
-Please describe:
-
-Overall risk rating: [e.g. BB+ / Acceptable / Watch List]
-Probability of default: [e.g. Low / Medium / High or a percentage]
-Industry/sector risk: [e.g. cyclical shipping sector, current market conditions]
-Borrower-specific risk: [e.g. single-vessel exposure, management track record]
-Market risk: [e.g. charter rate volatility, vessel oversupply concerns]
-Refinancing risk: [e.g. balloon repayment risk, market conditions at maturity]
-Environmental/ESG risk: [e.g. IMO 2030/2050 compliance, carbon transition risk]
-Country/political risk: [e.g. flag state risk, jurisdiction of collateral]
-Mitigants: [List key risk mitigants for each major risk]
-Residual risk: [After mitigants, overall residual risk assessment]`,
-
-    4:`§4 Borrower Background
-Please describe:
-
-Company full name: [Legal entity name]
-Country of incorporation: [e.g. Marshall Islands]
-Date of incorporation: [e.g. January 2018]
-Ownership structure: [e.g. 100% owned by XYZ Holdings Ltd (Bermuda)]
-Ultimate beneficial owner (UBO): [Name, nationality, ownership %]
-Business description: [e.g. single-purpose vehicle for vessel ownership]
-Vessels owned: [List vessels, type, year built, flag, class]
-Track record: [Years in business, key transactions, performance history]
-Management team: [Key executives, experience]
-Group structure: [Parent company, related entities, cross-guarantees]
-Financial summary (latest 3 years): [Revenue, EBITDA, net profit, total assets, net debt]
-Banking relationships: [Existing lenders, outstanding facilities]`,
-
-    5:`§5 Collateral Assessment
-Please describe:
-
-Collateral type: [e.g. First priority ship mortgage]
-Asset description: [Vessel name, IMO number, type, deadweight tonnage, year built, flag, classification society]
-Current appraised value: [USD amount, appraiser name, date of valuation]
-Valuation methodology: [e.g. market comparable, income approach]
-LTV at closing: [e.g. 65%]
-LTV covenant: [e.g. must not exceed 70%, 30-day cure period]
-Insurance: [P&I club, hull & machinery insured value, war risk]
-Charter status: [e.g. on time-charter to XYZ Charterer until Dec 2028, daily rate USD 22,000]
-Charterer credit quality: [e.g. investment-grade, BBB+ rated]
-Collateral ranking: [First priority / Second priority]
-Other security: [Assignment of earnings, insurance, refund guarantee]
-Stress test: [Value at 20% haircut vs. outstanding loan]`,
-
-    6:`§6 Project Overview (Ship Finance)
-Please describe:
-
-Project/transaction name: [e.g. Acquisition of MV Ocean Star]
-Project type: [Newbuild / Second-hand acquisition / Refinancing]
-Vessel details: [Type, DWT, LOA, beam, draft, year built or expected delivery]
-Shipyard: [For newbuilds: yard name, country, delivery date]
-Purchase price: [USD amount]
-Financing plan: [Loan amount, equity contribution, other funding sources]
-Employment strategy: [Spot market / Time charter / Bareboat charter]
-Charter party details: [Charterer, charter type, daily rate, duration, renewal options]
-Project cash flow: [Expected revenue, operating expenses, debt service coverage ratio]
-Market outlook: [Current and projected charter rates, supply/demand balance]
-Comparable transactions: [Recent similar deals in the market]
-Key project risks: [Construction risk, delivery risk, employment risk]`,
-
-    7:`§7 Financial Analysis
-Please describe (provide 3 years of historical data where available):
-
-Year 1 / Year 2 / Year 3 (specify years):
-Revenue: [USD m]
-EBITDA: [USD m]
-EBITDA margin: [%]
-Net profit: [USD m]
-Total assets: [USD m]
-Total debt: [USD m]
-Net debt: [USD m]
-Equity: [USD m]
-Debt/EBITDA: [x]
-Interest coverage (EBITDA/interest): [x]
-DSCR (debt service coverage ratio): [x]
-Current ratio: [x]
-Cash and equivalents: [USD m]
-
-Capital expenditure plans: [Planned investments]
-Dividend policy: [e.g. no dividend distribution during loan period]
-Auditor: [Audit firm name, latest audit year]
-Accounting standard: [IFRS / US GAAP / local GAAP]
-Going concern: [Any qualifications or concerns]`,
-
-    8:`§8 Legal Documentation & Charges
-Please describe:
-
-Governing law: [e.g. English law / Singapore law]
-Jurisdiction: [e.g. English courts / Singapore courts / arbitration]
-Key loan documents: [Facility agreement, security documents, intercreditor agreement]
-Mortgage details: [Flag state, registration date, priority]
-Assignment of earnings: [Bank account pledge, notice to charterer]
-Assignment of insurance: [P&I, H&M, loss payee endorsement]
-Legal opinions required: [e.g. English law, Marshall Islands law, flag state law]
-Negative covenants: [Key restrictions, e.g. no additional debt, no asset disposal]
-Financial covenants: [e.g. minimum liquidity, maximum leverage]
-Events of default: [Key EOD triggers]
-Change of control: [Ownership change restrictions]
-Environmental representations: [MARPOL compliance, ISM code]`,
-
-    9:`§9 Compliance Checklist
-Please confirm the following (Yes / No / N/A with comments):
-
-KYC/AML completed: [Yes/No — date completed, who conducted]
-Sanctions screening (OFAC, EU, UN): [Cleared / Flagged — details]
-Beneficial ownership verified: [Yes/No — UBO name and % confirmed]
-PEP screening: [No PEP / PEP identified — details]
-Source of funds verified: [Yes/No — method]
-Country risk assessment: [Low/Medium/High — FATF list status]
-MAS Notice 626 compliance: [Yes/No]
-Large exposure limit check: [Within limit / Needs approval]
-Regulatory capital calculation: [Risk weight, capital requirement]
-Environmental compliance: [IMO 2020 compliant, EEDI certification]
-Anti-bribery & corruption check: [No concerns / Concerns identified]
-Conflicts of interest: [None identified / Disclosed]`,
-
-    10:`§10 Appendix
-Please list the supporting documents and data attached:
-
-Document list:
-  1. [Document name, date, source]
-  2. [Document name, date, source]
-  3. [Document name, date, source]
-
-Financial statements: [Years covered, audited/management accounts]
-Valuation reports: [Appraiser, date, methodology]
-Charter party / contract: [Counterparty, effective date, key terms]
-Corporate documents: [Certificate of incorporation, M&A, shareholder register]
-Legal opinions: [Jurisdiction, law firm, date]
-Regulatory filings: [Any relevant regulatory approvals or filings]
-Additional notes: [Any other relevant information]`,
-
-    11:`§11 Analyst / External Research Report
-Please describe:
-
-Research source: [e.g. Clarksons Research, DNB Markets, Fearnley Securities]
-Report title and date: [Title, publication date]
-Key findings relevant to this transaction:
-  1. [Finding 1]
-  2. [Finding 2]
-  3. [Finding 3]
-Market outlook summary: [Current market conditions, 12-month outlook]
-Sector-specific data: [e.g. current VLCC time-charter rates, newbuild orderbook]
-Analyst recommendation: [Buy/Sell/Hold or equivalent sector view]
-Relevance to credit decision: [How this research supports or challenges the credit view]
-Source credibility assessment: [Independent / Affiliated / Publicly available]`
-  },
-  zh:{
-    1:`§1 融資結構與主要條款
-請用自然語言描述以下內容：
-
-借款人：[公司名稱、設立地]
-擔保人：[列出擔保人，或填「無」]
-融資類型：[例如：定期貸款 / 循環信用 / 聯合貸款]
-融資金額：[例如：5,000萬美元]
-貸款成本比（LTC）：[例如：65%]
-貸款期限：[例如：7年，含6個月寬限期]
-貸款用途：[例如：資助收購一艘VLCC油輪]
-還款方式：[例如：等額季付]
-氣球還款：[例如：到期時還30%本金]
-利率：[例如：SOFR加碼280個基點]
-交船前擔保品：[例如：退款保函、造船合約讓渡]
-交船後擔保品：[例如：第一順位船舶抵押、收益及保險讓渡]
-資產維持條款：[例如：LTV不得超過70%，30天補救期]
-法規遵循：[例如：金管會大額曝險限制、國泰集團上限]
-先決條件：[列出主要CP，例如：法律意見書、保險確認書]`,
-
-    2:`§2 綜合評述
-請描述：
-
-信用決策：[核准 / 拒絕 / 有條件核准]
-整體信用摘要：[簡短2-3句說明交易概況]
-主要優勢（列3-5點）：
-  1.
-  2.
-  3.
-主要風險（列3-5點）：
-  1.
-  2.
-  3.
-借款人財務重點：[營收、EBITDA、淨負債、槓桿比率]
-擔保人財務重點：[如適用]
-擔保品價值與LTV：[例如：船舶估值7,500萬美元，LTV為67%]
-建議：[最終建議及任何條件]`,
-
-    3:`§3 信用風險評估
-請描述：
-
-整體風險評級：[例如：BB+ / 可接受 / 觀察名單]
-違約機率：[例如：低 / 中 / 高，或具體百分比]
-產業/行業風險：[例如：週期性航運業、當前市場狀況]
-借款人特定風險：[例如：單船曝險、管理層背景]
-市場風險：[例如：租金費率波動、船舶供過於求]
-再融資風險：[例如：氣球還款風險、到期時市場狀況]
-環境/ESG風險：[例如：IMO 2030/2050合規、碳轉型風險]
-國家/政治風險：[例如：船旗國風險、擔保品司法管轄]
-緩解措施：[列出各主要風險的緩解措施]
-剩餘風險：[緩解措施後的整體剩餘風險評估]`,
-
-    4:`§4 借款人背景
-請描述：
-
-公司全名：[法律實體名稱]
-設立地：[例如：馬紹爾群島]
-設立日期：[例如：2018年1月]
-股權結構：[例如：100%由XYZ控股有限公司（百慕達）持有]
-最終受益所有人（UBO）：[姓名、國籍、持股比例]
-業務說明：[例如：單一目的公司，用於持有船舶]
-擁有船舶：[列出船舶、類型、建造年份、船旗、船級]
-業務往來記錄：[從業年數、主要交易、績效歷史]
-管理團隊：[主要高管、經驗]
-集團結構：[母公司、關聯實體、跨擔保]
-近3年財務摘要：[營收、EBITDA、淨利、總資產、淨負債]
-往來銀行關係：[現有貸款行、未償還融資]`,
-
-    5:`§5 擔保品評估
-請描述：
-
-擔保品類型：[例如：第一順位船舶抵押]
-資產說明：[船名、IMO號碼、類型、載重噸、建造年份、船旗、船級社]
-目前估值：[美元金額、估值師名稱、估值日期]
-估值方法：[例如：市場比較法、收益法]
-成交時LTV：[例如：65%]
-LTV契約：[例如：不得超過70%，30天補救期]
-保險：[P&I船東互保、船體及機械保險金額、戰爭險]
-租船狀態：[例如：定期租給XYZ租船方至2028年12月，日租USD 22,000]
-租船方信用品質：[例如：投資級，BBB+評級]
-擔保品順位：[第一順位 / 第二順位]
-其他擔保：[收益讓渡、保險讓渡、退款保函]
-壓力測試：[折讓20%後估值對比未償還貸款]`,
-
-    6:`§6 船舶融資概覽
-請描述：
-
-交易名稱：[例如：收購MV Ocean Star]
-交易類型：[新造船 / 二手船收購 / 再融資]
-船舶詳情：[類型、載重噸、全長、船寬、吃水、建造年份或預計交船日期]
-造船廠：[新造船：船廠名稱、國家、交船日期]
-收購價格：[美元金額]
-融資計畫：[貸款金額、股權投入、其他資金來源]
-就業策略：[現貨市場 / 定期租船 / 光船租賃]
-租約詳情：[租船方、租船類型、日租金、期限、續約選項]
-項目現金流：[預期收入、運營費用、債務覆蓋率（DSCR）]
-市場展望：[當前及預測租金費率、供需平衡]
-可比交易：[近期市場上類似交易]
-主要項目風險：[建造風險、交船風險、就業風險]`,
-
-    7:`§7 財務分析
-請描述（如有，提供近3年歷史數據）：
-
-第1年 / 第2年 / 第3年（請說明年份）：
-營收：[百萬美元]
-EBITDA：[百萬美元]
-EBITDA利潤率：[%]
-淨利：[百萬美元]
-總資產：[百萬美元]
-總負債：[百萬美元]
-淨負債：[百萬美元]
-股東權益：[百萬美元]
-負債/EBITDA：[倍]
-利息覆蓋率（EBITDA/利息）：[倍]
-債務服務覆蓋率（DSCR）：[倍]
-流動比率：[倍]
-現金及現金等價物：[百萬美元]
-
-資本支出計畫：[計畫投資]
-股利政策：[例如：貸款期間不得分配股利]
-審計師：[會計師事務所名稱、最新審計年份]
-會計準則：[IFRS / 美國GAAP / 本地GAAP]
-持續經營：[任何保留意見或疑慮]`,
-
-    8:`§8 法律文件與抵押
-請描述：
-
-準據法：[例如：英國法 / 新加坡法]
-司法管轄：[例如：英國法院 / 新加坡法院 / 仲裁]
-主要貸款文件：[融資協議、擔保文件、債權人間協議]
-抵押詳情：[船旗國、登記日期、順位]
-收益讓渡：[銀行帳戶質押、租船方通知]
-保險讓渡：[P&I、船體及機械、損失受益人背書]
-所需法律意見書：[例如：英國法、馬紹爾群島法、船旗國法]
-限制性契約：[主要限制，例如：不得增加負債、不得處置資產]
-財務契約：[例如：最低流動性、最高槓桿]
-違約事件：[主要EOD觸發條件]
-控制權變更：[股權變更限制]
-環境聲明：[MARPOL合規、ISM規章]`,
-
-    9:`§9 法規遵循清單
-請確認以下各項（是 / 否 / 不適用，並附說明）：
-
-KYC/AML已完成：[是/否 — 完成日期、執行人員]
-制裁篩選（OFAC、歐盟、聯合國）：[通過 / 有標記 — 詳情]
-受益所有人已核實：[是/否 — UBO姓名及持股比例已確認]
-PEP篩選：[無政治人物 / 已識別政治人物 — 詳情]
-資金來源已核實：[是/否 — 核實方式]
-國家風險評估：[低/中/高 — FATF名單狀態]
-金管會326號公告合規：[是/否]
-大額曝險限制確認：[在限額內 / 需要核准]
-監管資本計算：[風險權重、資本需求]
-環境合規：[IMO 2020合規、EEDI認證]
-反賄賂及反腐敗檢查：[無疑慮 / 已識別疑慮]
-利益衝突：[未識別 / 已揭露]`,
-
-    10:`§10 附錄
-請列出附件支持文件及資料：
-
-文件清單：
-  1. [文件名稱、日期、來源]
-  2. [文件名稱、日期、來源]
-  3. [文件名稱、日期、來源]
-
-財務報表：[涵蓋年份、經審計/管理帳目]
-估值報告：[估值師、日期、方法]
-租船合約/合同：[交易對手、生效日期、主要條款]
-公司文件：[設立證書、章程、股東名冊]
-法律意見書：[司法管轄、律師事務所、日期]
-監管申報：[任何相關監管核准或申報]
-補充說明：[任何其他相關資訊]`,
-
-    11:`§11 外部研究報告參考資料
-請描述：
-
-研究來源：[例如：Clarksons Research、DNB Markets、Fearnley Securities]
-報告標題及日期：[標題、發布日期]
-與本交易相關的主要發現：
-  1. [發現1]
-  2. [發現2]
-  3. [發現3]
-市場展望摘要：[當前市場狀況、12個月展望]
-行業特定數據：[例如：當前VLCC定期租船費率、新造船訂單]
-分析師建議：[買入/賣出/持有或同等行業看法]
-與信用決策的關聯性：[此研究如何支持或挑戰信用觀點]
-來源可信度評估：[獨立 / 關聯 / 公開可獲取]`
-  }
-};
-
-function loadNaturalTemplate(){
-  const sec=currentPanelSec;
-  if(!sec)return;
-  const prompts=NATURAL_PROMPTS[lang]||NATURAL_PROMPTS.en;
-  const tpl=prompts[sec]||NATURAL_PROMPTS.en[sec]||'';
-  document.getElementById('naturalInput').value=tpl;
-  document.getElementById('naturalPreview').classList.add('d-none');
-  document.getElementById('naturalStatus').textContent='';
-  _naturalConvertedJson=null;
-}
-
-async function aiConvertNatural(){
-  const sec=currentPanelSec;
-  if(!sec){toast('No section selected','warning');return;}
-  const text=document.getElementById('naturalInput').value.trim();
-  if(!text){toast(lang==='zh'?'請輸入內容後再轉換':'Please enter content before converting','warning');return;}
-  const spin=document.getElementById('naturalSpin');
-  spin.classList.remove('d-none');
-  document.getElementById('naturalStatus').textContent=lang==='zh'?'AI 轉換中…':'Converting…';
-  document.getElementById('naturalPreview').classList.add('d-none');
-  _naturalConvertedJson=null;
-  try{
-    const res=await fetch(
-      API+'/reports/'+currentRid+'/sections/'+sec+'/convert-natural',
-      {method:'POST',headers:{...H(),'Content-Type':'application/json'},
-       body:JSON.stringify({natural_text:text,section_no:sec})}
-    );
-    if(!res.ok){
-      const err=await res.json().catch(()=>({detail:'Unknown error'}));
-      throw new Error(err.detail||'Convert failed');
-    }
-    const data=await res.json();
-    _naturalConvertedJson=data.converted_json;
-    document.getElementById('naturalPreviewJson').textContent=JSON.stringify(data.converted_json,null,2);
-    document.getElementById('naturalPreview').classList.remove('d-none');
-    document.getElementById('naturalStatus').textContent=lang==='zh'?'✓ 轉換成功，請確認後套用':'✓ Conversion complete — review and apply';
-  }catch(e){
-    document.getElementById('naturalStatus').textContent='✗ '+(e.message||'Error');
-    toast((lang==='zh'?'轉換失敗：':'Conversion failed: ')+e.message,'danger');
-  }finally{
-    spin.classList.add('d-none');
-  }
-}
-
-async function applyNaturalJson(){
-  if(!_naturalConvertedJson||!currentPanelSec){
-    toast(lang==='zh'?'尚無轉換結果可套用':'No converted JSON to apply','warning');
-    return;
-  }
-  const sec=currentPanelSec;
-  try{
-    const res=await fetch(
-      API+'/reports/'+currentRid+'/inputs/'+sec,
-      {method:'PUT',headers:{...H(),'Content-Type':'application/json'},
-       body:JSON.stringify({input_json:_naturalConvertedJson})}
-    );
-    if(!res.ok){
-      const err=await res.json().catch(()=>({detail:'Save failed'}));
-      throw new Error(err.detail||'Save failed');
-    }
-    sectionInputMap[sec]={has_data:true,saved_at:new Date().toISOString()};
-    sectionInputDataMap[sec]=_naturalConvertedJson;
-    toast(lang==='zh'?`§${sec} 已儲存 ✓`:`§${sec} saved ✓`,'success');
-    document.getElementById('naturalPreview').classList.add('d-none');
-    document.getElementById('naturalStatus').textContent=lang==='zh'?'✅ 已套用並儲存':'✅ Applied and saved';
-    _naturalConvertedJson=null;
-    renderSectionsTable();
-    switchTab('input');
-  }catch(e){
-    toast((lang==='zh'?'儲存失敗：':'Save failed: ')+e.message,'danger');
-  }
-}
-// ────────────────────────────────────────────────────────────────────────────
 
 async function loadInputEditor(){
   const sec=currentPanelSec;if(!sec)return;
