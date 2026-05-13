@@ -967,10 +967,10 @@ function renderCompleteness(secNo,data){
 const FIELD_DEFS={
   1:[
     {p:'report_type',l:'Report Type',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']},
-    {p:'facility_summary.rows',l:'1A — Facility Rows (JSON array)',t:'json',h:'[{"item_no":1,"borrower_full_name":"EMA","booking_location":"SG","current_facility_usd_m":null,"proposed_facility_usd_m":178.5,"is_new":true,"outstanding_usd_m":0,"currency":"USD","tenor":"11 years","facility_type":"Term Loan (SLL)","collateral_pre":"RG (KDB)","collateral_post":"Vessel mortgage","guarantor":"EMC","is_psr":false,"is_lapsing":false}]'},
+    {p:'facility_summary.rows',l:'1A — Facility Rows (one per line: ItemNo|BorrowerName|BookingLoc|ProposedUSD M|IsNew|Currency|Tenor|FacilityType|CollateralPre|CollateralPost|Guarantor)',t:'lines',h:'1|EMA Pte Ltd|SG|178.5|Yes|USD|11 years|Term Loan (SLL)|RG (KDB)|Vessel mortgage|EMC'},
     {p:'facility_summary.totals.total_credit_limit_usd_m',l:'1A — Total Credit Limit (USD m)',t:'number'},
     {p:'facility_summary.totals.psr_spot_limit_usd_m',l:'1A — PSR Spot Limit (USD m)',t:'number'},
-    {p:'facility_summary.footnotes',l:'1A — Footnotes (JSON array)',t:'json',h:'[{"symbol":"[1]","text_verbatim":"Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period."}]'},
+    {p:'facility_summary.footnotes',l:'1A — Footnotes (one per line: [Symbol] Text)',t:'lines',h:'[1] Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period.\n[2] Facility to be cancelled if vessel not delivered by Latest Delivery Date.'},
     {p:'facility_summary.appendix_ref',l:'1A — Appendix Reference',t:'text',h:'e.g. Please refer to Appendix I for total CUB exposure to Evergreen Group.'},
     {p:'regulatory_compliance.bank_net_worth_twd_bn',l:'1B — Bank Net Worth (TWD bn)',t:'number'},
     {p:'regulatory_compliance.single_borrower_limit_pct',l:'1B — Single Borrower Limit (%)',t:'number'},
@@ -1023,7 +1023,7 @@ const FIELD_DEFS={
     {p:'terms_and_conditions.conditions_precedent',l:'1D — Conditions Precedent',t:'lines',h:'One condition per line'},
     {p:'terms_and_conditions.other_conditions',l:'1D — Other Conditions (one per line)',t:'lines',h:'e.g. EMC to remain listed throughout the loan facility'},
     {p:'terms_and_conditions.governing_law',l:'1D — Governing Law',t:'text'},
-    {p:'terms_and_conditions.deal_comparison',l:'1D — Deal Comparison (JSON array — min 11 rows)',t:'json',h:'[{"term":"Guarantor","proposed":"EMC","previous":"EMC"},{"term":"Facility Amount","proposed":"USD178.5m (80% LTC)","previous":"USD128.75m (80% LTC)"},{"term":"Purpose","proposed":"One 20,000 TEU newbuild","previous":"One 14,000 TEU newbuild"},{"term":"Vessel Type","proposed":"20,000 TEU LNG dual fuel","previous":"14,000 TEU methanol dual fuel"},{"term":"Tenor","proposed":"11 years (4+7)","previous":"11 years (4+7)"},{"term":"Margin","proposed":"0.85% p.a.","previous":"0.85% p.a."},{"term":"Upfront Fee","proposed":"0.10%","previous":"0.10%"},{"term":"SLL Ratchet","proposed":"Max 5bps p.a.","previous":"Max 5bps p.a."},{"term":"Drawdowns","proposed":"<=5","previous":"<=5"},{"term":"Availability Period","proposed":"Till 6 months post delivery; undrawn cancelled","previous":"Till 6 months post delivery; undrawn cancelled"},{"term":"Security","proposed":"Pre: RG (KDB); Post: First mortgage","previous":"Pre: RG (KEXIM); Post: First mortgage"},{"term":"FMV Maintenance","proposed":">=120%","previous":">=120%"}]'},
+    {p:'terms_and_conditions.deal_comparison',l:'1D — Deal Comparison (one per line: Term|Proposed|Previous)',t:'lines',h:'Guarantor|EMC|EMC\nFacility Amount|USD178.5m (80% LTC)|USD128.75m (80% LTC)\nPurpose|One 20,000 TEU newbuild|One 14,000 TEU newbuild\nVessel Type|20,000 TEU LNG dual fuel|14,000 TEU methanol dual fuel\nTenor|11 years (4+7)|11 years (4+7)\nMargin|0.85% p.a.|0.85% p.a.\nUpfront Fee|0.10%|0.10%\nSLL Ratchet|Max 5bps p.a.|Max 5bps p.a.\nDrawdowns|<=5|<=5\nSecurity|Pre: RG (KDB); Post: First mortgage|Pre: RG (KEXIM); Post: First mortgage\nFMV Maintenance|>=120%|>=120%'},
     {p:'account_strategy.wallet.bank_market',l:'1F — Wallet: Bank Market (NII / fees p.a.)',t:'text',h:'e.g. NII USD7.5m p.a.'},
     {p:'account_strategy.wallet.capital_market',l:'1F — Wallet: Capital Markets',t:'text',h:'e.g. USD 20m (bonds/ECM)'},
     {p:'account_strategy.wallet.treasury',l:'1F — Wallet: Treasury (FX / IRS)',t:'text',h:'e.g. FX / IRS hedging'},
@@ -1033,7 +1033,7 @@ const FIELD_DEFS={
     {p:'account_strategy.future_opportunities',l:'1F — Future Opportunities',t:'textarea'},
     {p:'account_strategy.other_opportunities',l:'1F — Other Opportunities',t:'textarea'},
     {p:'sll_kpi_performance.applicable',l:'1G — SLL KPI Performance: Applicable?',t:'bool'},
-    {p:'sll_kpi_performance.kpis',l:'1G — SLL KPI Performance Table (JSON array)',t:'json',h:'[{"kpi_name":"CO2 Intensity (gCO2/dwt-nm)","target_value":"<=8.5","actual_value":"7.2","period":"2024","on_track":true,"ratchet_bps":-5}]'}
+    {p:'sll_kpi_performance.kpis',l:'1G — SLL KPI Table (one per line: KPI Name|Target|Actual|Period|OnTrack|Ratchet bps)',t:'lines',h:'CO2 Intensity (gCO2/dwt-nm)|<=8.5|7.2|2024|Yes|-5\nMSCI ESG Rating|AA|AA|2024|Yes|-5\nDJSI Inclusion|Yes|Yes|2024|Yes|-5'}
   ],
   2:[
     {p:'2A_credit_overview.bullets',l:'2A — Credit Overview Bullets',t:'lines',h:'One bullet point per line (order inferred from sequence)'},
@@ -1087,7 +1087,7 @@ const FIELD_DEFS={
   ],
   3:[
     {p:'3A_external_ratings.all_nil',l:'3A — All External Ratings: NIL?',t:'bool'},
-    {p:'3A_external_ratings.ratings',l:'3A — External Ratings Table (S&P / Moodys / Fitch per entity)',t:'json',h:'[{"entity":"EMA","sp":"NR","moodys":"NR","fitch":"NR"}]'},
+    {p:'3A_external_ratings.ratings',l:'3A — External Ratings (one per line: Entity|S&P|Moodys|Fitch)',t:'lines',h:'EMA|NR|NR|NR\nEMC|BBB-|Baa3|NR'},
     {p:'3B_internal_ratings.period_display_labels.fy2022_23',l:'3B — MSR Period Label — Column 1 (FY2022/23)',t:'text',h:'e.g. 2022/23'},
     {p:'3B_internal_ratings.period_display_labels.fy2024',l:'3B — MSR Period Label — Column 2 (FY2024)',t:'text',h:'e.g. 2024'},
     {p:'3B_internal_ratings.period_display_labels.interim',l:'3B — MSR Period Label — Column 3 (Interim)',t:'text',h:'e.g. Jul 2025'},
@@ -1377,7 +1377,7 @@ const FIELD_DEFS={
     {p:'8B_other_information.material_events',l:'8B — Material Events Since Last Review',t:'textarea',h:'None'}
   ],
   9:[
-    {p:'9A_checklist.items',l:'9A — 23-Item Checklist (JSON array)',t:'json',h:'[{"no":1,"category":"KYC & Compliance","item":"CDD completed","response":"Yes","remarks":"Tier 1 KYC; reviewed 01 Dec 2025"},{"no":23,"category":"Regulatory (MAS)","item":"MAS 612 risk classification confirmed","response":"Yes","remarks":"Pass Grade; MSR3"}]'},
+    {p:'9A_checklist.items',l:'9A — 23-Item Checklist (one per line: Item|Yes/No|Remarks)',t:'lines',h:'CDD completed|Yes|Tier 1 KYC; reviewed 01 Dec 2025\nKYC/AML cleared|Yes|No PEP/sanctions hits\nMAS 612 risk classification confirmed|Yes|Pass Grade; MSR3'},
     {p:'9A_checklist.kyc_aml_cleared',l:'9A — KYC / AML Cleared?',t:'bool'},
     {p:'9A_checklist.esg_screen_passed',l:'9A — ESG Screening Passed?',t:'bool'},
     {p:'9A_checklist.mas612_classification',l:'9A — MAS 612 Classification',t:'text',h:'e.g. Pass Grade; MSR3'},
@@ -1386,14 +1386,14 @@ const FIELD_DEFS={
     {p:'9A_checklist.item16_search_date',l:'9A — Item 16: ACRA Search Date',t:'text'},
     {p:'9A_checklist.item16_entity_name',l:'9A — Item 16: Entity Name',t:'text'},
     {p:'9A_checklist.item16_uen',l:'9A — Item 16: UEN',t:'text'},
-    {p:'9B_conditions_covenants.conditions_precedent',l:'9B — Conditions Precedent (JSON array)',t:'json',h:'[{"no":1,"description":"Execution of facility agreement and all security documents","testing":"Before first drawdown"}]'},
-    {p:'9B_conditions_covenants.ongoing_covenants',l:'9B — Ongoing Covenants (JSON array)',t:'json',h:'[{"description":"ACR covenant: ACR >= 100% at all times","threshold":"100%","testing":"Every 2 years"}]'},
+    {p:'9B_conditions_covenants.conditions_precedent',l:'9B — Conditions Precedent (one per line: Description|Testing)',t:'lines',h:'Execution of facility agreement and all security documents|Before first drawdown\nShip mortgage registration|Within 5 Banking Days of delivery'},
+    {p:'9B_conditions_covenants.ongoing_covenants',l:'9B — Ongoing Covenants (one per line: Description|Threshold|Testing)',t:'lines',h:'ACR covenant: ACR >= 100% at all times|100%|Every 2 years\nInsurance maintained at required levels|Market value|Annual'},
     {p:'9B_conditions_covenants.financial_covenants',l:'9B — Financial Covenants',t:'text',h:'NIL'},
     {p:'9C_recommendation.decision',l:'9C — Decision',t:'select',opts:['APPROVE','APPROVE WITH CONDITIONS','DECLINE']},
     {p:'9C_recommendation.facility_amount_usd_m',l:'9C — Facility Amount (USD m)',t:'number'},
     {p:'9C_recommendation.tenor_years',l:'9C — Tenor (years)',t:'number'},
     {p:'9C_recommendation.security_structure',l:'9C — Security Structure Summary',t:'textarea'},
-    {p:'9C_recommendation.key_conditions',l:'9C — Key Conditions (JSON array)',t:'json',h:'["Execution of all security documents before first drawdown","Ship mortgage registration within 5 Banking Days"]'},
+    {p:'9C_recommendation.key_conditions',l:'9C — Key Conditions (one per line)',t:'lines',h:'Execution of all security documents before first drawdown\nShip mortgage registration within 5 Banking Days of delivery'},
     {p:'9C_recommendation.balloon_ltv_pct',l:'9C — Balloon LTV % (cap 75%)',t:'number'},
     {p:'9D_signoff.prepared_by',l:'9D — Prepared By (Name, Title)',t:'text',h:'[Name], Associate, Credit Management Department, CUB SG Branch'},
     {p:'9D_signoff.reviewed_by',l:'9D — Reviewed By (Name, Title)',t:'text',h:'[Name], Vice President, Credit Management Department, CUB SG Branch'}
@@ -1403,30 +1403,30 @@ const FIELD_DEFS={
     {p:'10A_group_exposure.currency',l:'10A — Currency',t:'text',h:'USD'},
     {p:'10A_group_exposure.as_of_date',l:'10A — As-of Date',t:'text',h:'e.g. Dec 2025'},
     {p:'10A_group_exposure.approved_group_limit_usd_m',l:'10A — Approved Group Limit (USD m)',t:'number'},
-    {p:'10A_group_exposure.rows',l:'10A — Exposure Table Rows (JSON array)',t:'json',h:'[{"entity":"EMA","branch":"SG","facility_type":"Term Loan [NEW]","current_approved_usd_m":0,"proposed_usd_m":213.84,"outstanding_usd_m":0,"collateral":"RG + Vessel","guarantor":"EMC","maturity_str":"Jun 2038E","msr":"MSR3","is_new_facility":true}]'},
+    {p:'10A_group_exposure.rows',l:'10A — Exposure Rows (one per line: Entity|Branch|Type|Approved USD M|Proposed USD M|Outstanding USD M|Collateral|Guarantor|Maturity|MSR)',t:'lines',h:'EMA|SG|Term Loan [NEW]|0|213.84|0|RG + Vessel|EMC|Jun 2038E|MSR3'},
     {p:'10A_group_exposure.proposed_exposure_usd_m',l:'10A — Total Proposed Exposure (USD m)',t:'number'},
     {p:'10A_group_exposure.existing_exposure_usd_m',l:'10A — Existing Outstanding (USD m)',t:'number'},
     {p:'10A_group_exposure.eva_note',l:'10A — Sister Company Note',t:'textarea',h:'Leave blank if no sister company'},
     {p:'10B_fleet_growth.group_name',l:'10B — Group Name',t:'text',h:'e.g. EMC'},
     {p:'10B_fleet_growth.year_range',l:'10B — Year Range',t:'text',h:'e.g. 2023-2028E'},
-    {p:'10B_fleet_growth.rows',l:'10B — Fleet Growth Table Rows (JSON array)',t:'json',h:'[{"year_label":"2023","owned_fleet_teu_m":1.21,"total_fleet_teu_m":1.92,"total_vessels":195,"owned_pct":63.0}]'},
+    {p:'10B_fleet_growth.rows',l:'10B — Fleet Growth Rows (one per line: Year|Owned TEU M|Total TEU M|Total Vessels|Owned%)',t:'lines',h:'2023|1.21|1.92|195|63.0\n2024|1.35|2.05|205|65.9\n2028E|2.09|2.55|240|82.0'},
     {p:'10B_fleet_growth.cagr_pct',l:'10B — CAGR (%)',t:'number'},
     {p:'10B_fleet_growth.chart_reference',l:'10B — Chart Source Reference',t:'text'},
     {p:'10B_fleet_growth.target_capacity_note',l:'10B — Target Capacity Note',t:'textarea'},
-    {p:'10B_fleet_growth.key_notes',l:'10B — Key Notes (JSON array — 5 bullets min)',t:'json',h:'["Target capacity: 2.55m TEU by end-2028E","Owned fleet transition 63% to 82%","Newbuild orderbook","CUB-financed vessel","EMC CAPEX plan"]'},
+    {p:'10B_fleet_growth.key_notes',l:'10B — Key Notes (one per line)',t:'lines',h:'Target capacity: 2.55m TEU by end-2028E\nOwned fleet transition 63% to 82%\nNewbuild orderbook: 63 vessels on order\nCUB-financed vessel included in orderbook\nEMC CAPEX plan: USD6.5bn 2025-2028E'},
     {p:'10C_projections.entity_name',l:'10C — Entity Name',t:'text'},
     {p:'10C_projections.basis',l:'10C — Basis',t:'select',opts:['Standalone','Consolidated']},
     {p:'10C_projections.currency',l:'10C — Currency',t:'text',h:'USD'},
     {p:'10C_projections.unit',l:'10C — Unit',t:'text',h:'USD000'},
-    {p:'10C_projections.key_assumptions',l:'10C — Key Assumptions Table (JSON array)',t:'json',h:'[{"assumption":"Charter rate (USD/day)","FY2026E":28000,"FY2027E":28500,"FY2028E":29000}]'},
+    {p:'10C_projections.key_assumptions',l:'10C — Key Assumptions (one per line: Assumption|FY2026E|FY2027E|FY2028E)',t:'lines',h:'Charter rate (USD/day)|28000|28500|29000\nOperating expenses (USD/day)|8500|8700|8900\nFleet utilization (%)|97|97|98'},
     {p:'10C_projections.assumptions_narrative',l:'10C — Assumptions Narrative',t:'textarea'},
-    {p:'10C_projections.base_case_pl',l:'10C — Base Case P&L (JSON array)',t:'json',h:'[{"item":"Revenue","FY2026E":10206,"FY2027E":10408,"FY2028E":10616,"is_subtotal":false}]'},
-    {p:'10C_projections.base_case_bs',l:'10C — Base Case Balance Sheet (JSON array)',t:'json',h:'[{"item":"Total Assets","FY2026E":217220,"FY2027E":204670,"FY2028E":192320,"is_subtotal":true}]'},
-    {p:'10C_projections.base_case_cf',l:'10C — Base Case Cash Flow (JSON array)',t:'json',h:'[{"item":"Operating Cash Flow","FY2026E":6520,"FY2027E":6780,"FY2028E":7050,"is_subtotal":false}]'},
-    {p:'10C_projections.base_case_dscr',l:'10C — Base Case DSCR by Year (JSON array)',t:'json',h:'[{"year_label":"FY2026E","ocf":6520,"debt_service":7100,"dscr":0.92}]'},
+    {p:'10C_projections.base_case_pl',l:'10C — Base Case P&L (one per line: Item|FY2026E|FY2027E|FY2028E|Subtotal?)',t:'lines',h:'Revenue|10206|10408|10616|No\nEBITDA|6520|6780|7050|Yes\nNet Income|2890|3120|3380|No'},
+    {p:'10C_projections.base_case_bs',l:'10C — Base Case Balance Sheet (one per line: Item|FY2026E|FY2027E|FY2028E|Subtotal?)',t:'lines',h:'Total Assets|217220|204670|192320|Yes\nTotal Debt|178500|161550|144600|No\nTotal Equity|38720|43120|47720|Yes'},
+    {p:'10C_projections.base_case_cf',l:'10C — Base Case Cash Flow (one per line: Item|FY2026E|FY2027E|FY2028E|Subtotal?)',t:'lines',h:'Operating Cash Flow|6520|6780|7050|No\nDebt Repayment|-16950|-16950|-16950|No\nFree Cash Flow|-10430|-10170|-9900|Yes'},
+    {p:'10C_projections.base_case_dscr',l:'10C — Base Case DSCR (one per line: Year|OCF|Debt Service|DSCR)',t:'lines',h:'FY2026E|6520|7100|0.92\nFY2027E|6780|7100|0.95\nFY2028E|7050|7100|0.99'},
     {p:'10C_projections.dscr_commentary',l:'10C — DSCR Commentary',t:'textarea'},
-    {p:'10C_projections.stress_assumptions',l:'10C — Stress Assumptions (JSON array)',t:'json',h:'[{"assumption":"Revenue","base_case":"USD28000/day","worse_case":"USD22400/day","stress_magnitude":"-20%"}]'},
-    {p:'10C_projections.worse_case_summary',l:'10C — Worse Case Summary (JSON array)',t:'json',h:'[{"item":"Revenue","value":8165,"is_dscr":false},{"item":"DSCR","value":0.58,"is_dscr":true}]'},
+    {p:'10C_projections.stress_assumptions',l:'10C — Stress Assumptions (one per line: Assumption|Base Case|Worse Case|Stress)',t:'lines',h:'Revenue|USD28000/day|USD22400/day|-20%\nOperating Costs|USD8500/day|USD8500/day|0%\nUtilization|97%|90%|-7pp'},
+    {p:'10C_projections.worse_case_summary',l:'10C — Worse Case Summary (one per line: Item|Value|Is DSCR?)',t:'lines',h:'Revenue|8165|No\nEBITDA|4120|No\nDSCR|0.58|Yes'},
     {p:'10C_projections.worse_case_commentary',l:'10C — Worse Case Commentary',t:'textarea'},
     {p:'10C_projections.freight_rate_drop_pct',l:'10C — Freight Rate Drop Pct (Stress)',t:'number',h:'e.g. 20 for -20%'},
     {p:'10C_projections.base_dscr_fy_1',l:'10C — Base DSCR Year 1 (FY2026E)',t:'number'},
@@ -1502,6 +1502,23 @@ function collectFormData(secNo){
 // ── finalizePayload: convert flat form fields → nested structure for prompt builder ──
 function finalizePayload(secNo,data){
   const d=JSON.parse(JSON.stringify(data));// deep clone
+  if(secNo===1){
+    const fs=d['facility_summary'];
+    if(fs&&Array.isArray(fs.rows)){
+      fs.rows=fs.rows.map(line=>{const p=line.split('|');return{item_no:parseInt(p[0])||1,borrower_full_name:p[1]||'',booking_location:p[2]||'',proposed_usd_m:parseFloat(p[3])||0,is_new:(p[4]||'').toLowerCase()==='yes',currency:p[5]||'USD',tenor:p[6]||'',facility_type:p[7]||'',collateral_pre_delivery:p[8]||'',collateral_post_delivery:p[9]||'',guarantor:p[10]||''};});
+    }
+    if(fs&&Array.isArray(fs.footnotes)){
+      fs.footnotes=fs.footnotes.map(line=>{const m=line.match(/^(\[.*?\])\s*(.*)/);return m?{symbol:m[1],text_verbatim:m[2]}:{symbol:'',text_verbatim:line};});
+    }
+    const tc=d['terms_and_conditions'];
+    if(tc&&Array.isArray(tc.deal_comparison)){
+      tc.deal_comparison=tc.deal_comparison.map(line=>{const p=line.split('|');return{term:p[0]||'',proposed:p[1]||'',previous:p[2]||''};});
+    }
+    const kpi=d['sll_kpi_performance'];
+    if(kpi&&Array.isArray(kpi.kpis)){
+      kpi.kpis=kpi.kpis.map(line=>{const p=line.split('|');return{kpi_name:p[0]||'',target_value:p[1]||'',actual_value:p[2]||'',period:p[3]||'',on_track:(p[4]||'').toLowerCase()==='yes',ratchet_bps:parseInt(p[5])||0};});
+    }
+  }
   if(secNo===2){
     const ao=d['2A_credit_overview']||{};
     // bullets: lines type → [{order,text_verbatim}] array
@@ -1526,6 +1543,10 @@ function finalizePayload(secNo,data){
     d['2E_risk_and_mitigants']={risk_factors:risks,additional_risk_factors_from_previous:arfArr};
   }
   if(secNo===3){
+    const ra=d['3A_external_ratings'];
+    if(ra&&Array.isArray(ra.ratings)){
+      ra.ratings=ra.ratings.map(line=>{const p=line.split('|');return{entity:p[0]||'',sp:p[1]||'NR',moodys:p[2]||'NR',fitch:p[3]||'NR'};});
+    }
     const b=d['3B_internal_ratings']||{};const rows=[];
     if(b.borrower_entity_full_name||b.borrower_entity_abbrev)rows.push({entity_full_name:b.borrower_entity_full_name||'',entity_abbrev:b.borrower_entity_abbrev||'',role:'Borrower',fy2022_23:b.borrower_fy2022_23||'',fy2024:b.borrower_fy2024||'',interim:b.borrower_interim||'',current:b.borrower_current||'',override_flag:b.borrower_override_flag||false,override_remarks:b.borrower_override_remarks||''});
     if(b.guarantor_entity_full_name||b.guarantor_entity_abbrev)rows.push({entity_full_name:b.guarantor_entity_full_name||'',entity_abbrev:b.guarantor_entity_abbrev||'',role:'Guarantor',fy2022_23:b.guarantor_fy2022_23||'',fy2024:b.guarantor_fy2024||'',interim:b.guarantor_interim||'',current:b.guarantor_current||'',override_flag:false,override_remarks:''});
@@ -1590,6 +1611,51 @@ function finalizePayload(secNo,data){
     }
     d['8A_acra_banking_charges']=a;
   }
+  if(secNo===9){
+    const c=d['9A_checklist'];
+    if(c&&Array.isArray(c.items)){
+      c.items=c.items.map(line=>{const p=line.split('|');return{item:p[0]||'',response:p[1]||'',remarks:p[2]||''};});
+    }
+    const bc=d['9B_conditions_covenants'];
+    if(bc){
+      if(Array.isArray(bc.conditions_precedent)){
+        bc.conditions_precedent=bc.conditions_precedent.map(line=>{const p=line.split('|');return{description:p[0]||'',testing:p[1]||''};});
+      }
+      if(Array.isArray(bc.ongoing_covenants)){
+        bc.ongoing_covenants=bc.ongoing_covenants.map(line=>{const p=line.split('|');return{description:p[0]||'',threshold:p[1]||'',testing:p[2]||''};});
+      }
+    }
+    const rec=d['9C_recommendation'];
+    if(rec&&Array.isArray(rec.key_conditions)){
+      rec.key_conditions=rec.key_conditions.filter(Boolean);
+    }
+  }
+  if(secNo===10){
+    const bg=d['10B_fleet_growth'];
+    if(bg&&Array.isArray(bg.rows)){
+      bg.rows=bg.rows.map(line=>{const p=line.split('|');return{year_label:p[0]||'',owned_fleet_teu_m:parseFloat(p[1])||0,total_fleet_teu_m:parseFloat(p[2])||0,total_vessels:parseInt(p[3])||0,owned_pct:parseFloat(p[4])||0};});
+    }
+    const pr=d['10C_projections'];
+    if(pr){
+      if(Array.isArray(pr.key_assumptions)){
+        pr.key_assumptions=pr.key_assumptions.map(line=>{const p=line.split('|');return{assumption:p[0]||'',FY2026E:parseFloat(p[1])||null,FY2027E:parseFloat(p[2])||null,FY2028E:parseFloat(p[3])||null};});
+      }
+      for(const f of['base_case_pl','base_case_bs','base_case_cf']){
+        if(Array.isArray(pr[f])){
+          pr[f]=pr[f].map(line=>{const p=line.split('|');return{item:p[0]||'',FY2026E:parseFloat(p[1])||null,FY2027E:parseFloat(p[2])||null,FY2028E:parseFloat(p[3])||null,is_subtotal:(p[4]||'').toLowerCase()==='yes'};});
+        }
+      }
+      if(Array.isArray(pr.base_case_dscr)){
+        pr.base_case_dscr=pr.base_case_dscr.map(line=>{const p=line.split('|');return{year_label:p[0]||'',ocf:parseFloat(p[1])||null,debt_service:parseFloat(p[2])||null,dscr:parseFloat(p[3])||null};});
+      }
+      if(Array.isArray(pr.stress_assumptions)){
+        pr.stress_assumptions=pr.stress_assumptions.map(line=>{const p=line.split('|');return{assumption:p[0]||'',base_case:p[1]||'',worse_case:p[2]||'',stress_magnitude:p[3]||''};});
+      }
+      if(Array.isArray(pr.worse_case_summary)){
+        pr.worse_case_summary=pr.worse_case_summary.map(line=>{const p=line.split('|');return{item:p[0]||'',value:parseFloat(p[1])||null,is_dscr:(p[2]||'').toLowerCase()==='yes'};});
+      }
+    }
+  }
   return d;
 }
 
@@ -1626,6 +1692,10 @@ function expandPayload(secNo,data){
     }
   }
   if(secNo===3){
+    const ra=d['3A_external_ratings'];
+    if(ra&&Array.isArray(ra.ratings)&&ra.ratings.length&&typeof ra.ratings[0]==='object'){
+      ra.ratings=ra.ratings.map(r=>`${r.entity||''}|${r.sp||'NR'}|${r.moodys||'NR'}|${r.fitch||'NR'}`);
+    }
     const b=d['3B_internal_ratings'];if(b&&b.rows){const flat={period_display_labels:b.period_display_labels||{}};const bw=b.rows.find(r=>r.role==='Borrower');const gw=b.rows.find(r=>r.role==='Guarantor');if(bw){flat.borrower_entity_full_name=bw.entity_full_name;flat.borrower_entity_abbrev=bw.entity_abbrev;flat.borrower_fy2022_23=bw.fy2022_23;flat.borrower_fy2024=bw.fy2024;flat.borrower_interim=bw.interim;flat.borrower_current=bw.current;flat.borrower_override_flag=bw.override_flag;flat.borrower_override_remarks=bw.override_remarks;}if(gw){flat.guarantor_entity_full_name=gw.entity_full_name;flat.guarantor_entity_abbrev=gw.entity_abbrev;flat.guarantor_fy2022_23=gw.fy2022_23;flat.guarantor_fy2024=gw.fy2024;flat.guarantor_interim=gw.interim;flat.guarantor_current=gw.current;}d['3B_internal_ratings']=flat;}
   }
   if(secNo===4){
@@ -1687,9 +1757,66 @@ function expandPayload(secNo,data){
       d['8A_acra_banking_charges']=a;
     }
   }
+  if(secNo===1){
+    const fs=d['facility_summary'];
+    if(fs&&Array.isArray(fs.rows)&&fs.rows.length&&typeof fs.rows[0]==='object'){
+      fs.rows=fs.rows.map(r=>[r.item_no,r.borrower_full_name,r.booking_location,r.proposed_usd_m,r.is_new?'Yes':'No',r.currency,r.tenor,r.facility_type,r.collateral_pre_delivery,r.collateral_post_delivery,r.guarantor].join('|'));
+    }
+    if(fs&&Array.isArray(fs.footnotes)&&fs.footnotes.length&&typeof fs.footnotes[0]==='object'){
+      fs.footnotes=fs.footnotes.map(fn=>`${fn.symbol||''} ${fn.text_verbatim||''}`.trim());
+    }
+    const tc=d['terms_and_conditions'];
+    if(tc&&Array.isArray(tc.deal_comparison)&&tc.deal_comparison.length&&typeof tc.deal_comparison[0]==='object'){
+      tc.deal_comparison=tc.deal_comparison.map(r=>`${r.term||''}|${r.proposed||''}|${r.previous||''}`);
+    }
+    const kpi=d['sll_kpi_performance'];
+    if(kpi&&Array.isArray(kpi.kpis)&&kpi.kpis.length&&typeof kpi.kpis[0]==='object'){
+      kpi.kpis=kpi.kpis.map(k=>`${k.kpi_name||''}|${k.target_value||''}|${k.actual_value||''}|${k.period||''}|${k.on_track?'Yes':'No'}|${k.ratchet_bps||0}`);
+    }
+  }
   if(secNo===9){
     const c=d['9A_checklist'];
-    if(Array.isArray(c))d['9A_checklist']={items:c};
+    if(c&&Array.isArray(c.items)&&c.items.length&&typeof c.items[0]==='object'){
+      c.items=c.items.map(it=>`${it.item||it.category||''}|${it.response||''}|${it.remarks||''}`);
+    } else if(Array.isArray(c)){
+      d['9A_checklist']={items:c};
+    }
+    const bc=d['9B_conditions_covenants'];
+    if(bc){
+      if(Array.isArray(bc.conditions_precedent)&&bc.conditions_precedent.length&&typeof bc.conditions_precedent[0]==='object'){
+        bc.conditions_precedent=bc.conditions_precedent.map(cp=>`${cp.description||''}|${cp.testing||''}`);
+      }
+      if(Array.isArray(bc.ongoing_covenants)&&bc.ongoing_covenants.length&&typeof bc.ongoing_covenants[0]==='object'){
+        bc.ongoing_covenants=bc.ongoing_covenants.map(oc=>`${oc.description||''}|${oc.threshold||''}|${oc.testing||''}`);
+      }
+    }
+  }
+  if(secNo===10){
+    const bg=d['10B_fleet_growth'];
+    if(bg&&Array.isArray(bg.rows)&&bg.rows.length&&typeof bg.rows[0]==='object'){
+      bg.rows=bg.rows.map(r=>`${r.year_label||''}|${r.owned_fleet_teu_m||''}|${r.total_fleet_teu_m||''}|${r.total_vessels||''}|${r.owned_pct||''}`);
+    }
+    const pr=d['10C_projections'];
+    if(pr){
+      if(Array.isArray(pr.key_assumptions)&&pr.key_assumptions.length&&typeof pr.key_assumptions[0]==='object'){
+        pr.key_assumptions=pr.key_assumptions.map(a=>`${a.assumption||''}|${a.FY2026E||''}|${a.FY2027E||''}|${a.FY2028E||''}`);
+      }
+      const tblFields=['base_case_pl','base_case_bs','base_case_cf'];
+      for(const f of tblFields){
+        if(Array.isArray(pr[f])&&pr[f].length&&typeof pr[f][0]==='object'){
+          pr[f]=pr[f].map(r=>`${r.item||''}|${r.FY2026E||''}|${r.FY2027E||''}|${r.FY2028E||''}|${r.is_subtotal?'Yes':'No'}`);
+        }
+      }
+      if(Array.isArray(pr.base_case_dscr)&&pr.base_case_dscr.length&&typeof pr.base_case_dscr[0]==='object'){
+        pr.base_case_dscr=pr.base_case_dscr.map(r=>`${r.year_label||''}|${r.ocf||''}|${r.debt_service||''}|${r.dscr||''}`);
+      }
+      if(Array.isArray(pr.stress_assumptions)&&pr.stress_assumptions.length&&typeof pr.stress_assumptions[0]==='object'){
+        pr.stress_assumptions=pr.stress_assumptions.map(r=>`${r.assumption||''}|${r.base_case||''}|${r.worse_case||''}|${r.stress_magnitude||''}`);
+      }
+      if(Array.isArray(pr.worse_case_summary)&&pr.worse_case_summary.length&&typeof pr.worse_case_summary[0]==='object'){
+        pr.worse_case_summary=pr.worse_case_summary.map(r=>`${r.item||''}|${r.value||''}|${r.is_dscr?'Yes':'No'}`);
+      }
+    }
   }
   return d;
 }

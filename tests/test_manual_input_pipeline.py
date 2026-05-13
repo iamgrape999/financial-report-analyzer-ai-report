@@ -80,11 +80,9 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
     1: {
         "report_type": "new_deal",
         "facility_summary": {
-            "rows": [{"item_no": 1, "borrower_full_name": "Test Borrower Ltd",
-                      "booking_location": "SG", "proposed_facility_usd_m": 100.0,
-                      "is_new": True, "currency": "USD", "facility_type": "Term Loan"}],
+            "rows": ["1|Test Borrower Ltd|SG|100.0|Yes|USD|5 years|Term Loan|RG|Vessel Mortgage|Test Guarantor"],
             "totals": {"total_credit_limit_usd_m": 100.0},
-            "footnotes": [],
+            "footnotes": ["[1] Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period."],
             "appendix_ref": "See Appendix I.",
         },
         "regulatory_compliance": {
@@ -115,7 +113,7 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
             "drawdown_conditions": {"max_drawdowns": 3},
             "conditions_precedent": ["Execute facility agreement", "Legal opinions"],
             "governing_law": "Singapore",
-            "deal_comparison": [{"term": "Amount", "proposed": "USD100m", "previous": "USD80m"}],
+            "deal_comparison": ["Amount|USD100m|USD80m", "Tenor|5 years|5 years"],
         },
         "account_strategy": {
             "wallet": {"bank_market": "NII USD5m p.a."},
@@ -473,9 +471,7 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
     },
     9: {
         "9A_checklist": {
-            "items": [{"no": 1, "category": "KYC & Compliance",
-                       "item": "CDD completed", "response": "Yes",
-                       "remarks": "Tier 1 KYC; reviewed 01 Dec 2025"}],
+            "items": ["CDD completed|Yes|Tier 1 KYC; reviewed 01 Dec 2025"],
             "kyc_aml_cleared": True,
             "esg_screen_passed": True,
             "mas612_classification": "Pass Grade; MSR3",
@@ -486,10 +482,8 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
             "item16_uen": "202100000Z",
         },
         "9B_conditions_covenants": {
-            "conditions_precedent": [{"no": 1, "description": "Execution of facility agreement",
-                                      "testing": "Before first drawdown"}],
-            "ongoing_covenants": [{"description": "ACR covenant: ACR >= 100%",
-                                   "threshold": "100%", "testing": "Every 2 years"}],
+            "conditions_precedent": ["Execution of facility agreement|Before first drawdown"],
+            "ongoing_covenants": ["ACR covenant: ACR >= 100%|100%|Every 2 years"],
             "financial_covenants": "NIL",
         },
         "9C_recommendation": {
@@ -1131,7 +1125,7 @@ class TestJsonHintParseability:
         )
 
     # Sections with no json-type fields (all blobs replaced with individual fields)
-    SECTIONS_WITHOUT_JSON_FIELDS = {2, 4, 5, 6, 7, 8}
+    SECTIONS_WITHOUT_JSON_FIELDS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
     @pytest.mark.parametrize("sec_no", list(range(1, 12)))
     def test_section_json_hints_parse(self, sec_no):
