@@ -432,14 +432,19 @@ _SECTION_SCHEMAS: dict[int, dict] = {
     2: {
         "name": "Overall Comments",
         "fields": (
-            "credit_decision (APPROVE or DECLINE), "
-            "credit_overview_table (array of {topic, comment}), "
-            "key_strengths (string[]), "
-            "key_risks (array of {risk, mitigant, residual}), "
-            "borrower_metrics {entity, currency, total_assets_bn, total_equity_bn, cash_bn, ebitda_bn, de_ratio, interest_coverage, revenue_bn, net_income_bn}, "
-            "guarantor_metrics {entity, currency, cash_twd_bn, ebitda_twd_bn, de_ratio, interest_coverage, as_of_date}, "
-            "market_index, market_index_level (number), ltc_percent, acr_min_pct, ltv_max_pct, "
-            "conditions_precedent (string[])"
+            "2A_credit_overview {bullets: array of {order, text_verbatim}, tariff_impact_paragraphs: string[]}, "
+            "2B_solvency {primary_repayment_source_verbatim, secondary_repayment_source_verbatim, "
+            "ema: {period, cash_bn_usd, total_debt_bn_usd, op_ebitda_bn_usd, debt_ebitda_ratio, "
+            "interest_coverage, prior_year_coverage}}, "
+            "2C_guarantor {guarantor_name_abbrev, period, cash_twd_bn, cash_usd_bn, "
+            "total_debt_twd_bn, total_debt_usd_bn, interest_coverage, prior_year_coverage, "
+            "support_history_verbatim}, "
+            "2D_collateral {pre_delivery: {issuer_full_name, rating_sp, rating_fitch, "
+            "coverage_verbatim, assigned_to_cub}, "
+            "post_delivery: {vessel_spec, ltc_pct, acr_pct, ltv_pct}}, "
+            "2E_risk_and_mitigants {risk_factors: array of {risk_no, level, title, "
+            "changes_from_previous, risk_bullets, mitigant_bullets}, "
+            "additional_risk_factors_from_previous: array of {title, level, note}}"
         ),
     },
     3: {

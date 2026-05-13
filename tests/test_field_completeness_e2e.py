@@ -184,37 +184,63 @@ SEC2_PAYLOAD = {
     },
     "2D_collateral": {
         "pre_delivery": {
-            "issuer_full_name": "Industrial Bank of Korea",
-            "rating": "A+",
-            "rating_agencies": ["S&P", "Moody's"],
-            "coverage_verbatim": "fully covering each pre-delivery installment",
+            "issuer_full_name": "Korea Development Bank",
+            "rating_sp": "AA",
+            "rating_fitch": "AA-",
+            "coverage_verbatim": "fully covering each pre-delivery installment during vessel pre-delivery phase",
             "assigned_to_cub": True,
             "satisfactory_to_bank": True,
         },
         "post_delivery": {
             "security_type": "First priority vessel mortgage",
-            "vessel_spec": "one 20,000 TEU LNG dual fuel containership (Hull No. 2891)",
+            "vessel_spec": "one 24,000 TEU dual-fuel (LNG, Diesel) containership (Hull No. 2891)",
             "ltc_pct": 80,
             "acr_pct": 120,
             "ltv_pct": 83,
         },
     },
-    "2E_risk_and_mitigants": [
-        {
-            "risk_no": 1,
-            "level": "High",
-            "title": "Container freight rate volatility",
-            "risk_bullets": ["CCFI averaged 1,220 in 9M2025, down 28% YoY"],
-            "mitigant_bullets": ["Long-term TC contract with EMC covering >80% of vessel revenue for 12 years"],
-        },
-        {
-            "risk_no": 2,
-            "level": "Medium",
-            "title": "Construction/delivery risk",
-            "risk_bullets": ["Delivery expected Jun 2028; delay risk given complex LNG dual fuel systems"],
-            "mitigant_bullets": ["SHI: 94% on-time delivery rate; 210-day grace period in facility"],
-        },
-    ],
+    "2E_risk_and_mitigants": {
+        "risk_factors": [
+            {
+                "risk_no": 1,
+                "level": "High",
+                "title": "Container freight rate volatility",
+                "changes_from_previous": None,
+                "risk_bullets": [
+                    "CCFI averaged 1,220 in 9M2025, down 28% YoY",
+                    "Revenue highly correlated with spot and contract rates; US-China tariff impact on trade volumes",
+                ],
+                "mitigant_bullets": [
+                    "Long-term TC contract with EMC covering >80% of vessel revenue for 12 years",
+                    "EMC balance sheet: net cash TWD5.2bn (USD165m); D/E 0.31x as of 3Q2025",
+                    "Historical precedent: CCFI trough was 842 in FY2016 (FY2000-FY2019 average 1,050); "
+                    "EMC remained net-cash positive even in worst-year 2016",
+                    "40% of world's container ships affected by Red Sea disruptions — near-term rate support",
+                ],
+            },
+            {
+                "risk_no": 2,
+                "level": "Medium",
+                "title": "Construction/delivery risk",
+                "changes_from_previous": None,
+                "risk_bullets": ["Delivery expected Jun 2028; delay risk given complex LNG dual fuel systems"],
+                "mitigant_bullets": [
+                    "SHI: 94% on-time delivery rate over past 5 years across 180 vessels",
+                    "210-day contractual grace period built into facility structure",
+                    "Korea Development Bank (AA, AA- rating by S&P and Fitch respectively) Refund Guarantee "
+                    "fully covers each pre-delivery installment",
+                ],
+            },
+        ],
+        "additional_risk_factors_from_previous": [
+            {
+                "title": "US Port Fee Surcharge Risk",
+                "level": "Medium",
+                "note": "New risk identified since previous review; US Executive Order on port fees for "
+                        "Chinese-built vessels effective Jan 2026",
+            }
+        ],
+    },
     "report_type": "new_deal",
 }
 
@@ -818,7 +844,7 @@ ALL_PAYLOADS = {
 # Critical data tokens that must appear in each section's prompt
 CRITICAL_TOKENS = {
     1: ["Evergreen Marine (Asia)", "178.5", "new_deal", "Term SOFR", "35", "regulatory_compliance", "sll_kpi_performance", "IBK", "FMV Maintenance"],
-    2: ["credit_overview", "solvency", "36.5", "198.3", "Industrial Bank of Korea", "freight rate volatility"],
+    2: ["2A_credit_overview", "2B_solvency", "36.5", "198.3", "Korea Development Bank", "freight rate volatility", "AA, AA-"],
     3: ["3A_external_ratings", "3B_internal_ratings", "MSR", "PASS", "MAS 612", "EMA"],
     4: ["4A_borrower", "Evergreen Marine", "1650000", "OCEAN Alliance", "Amazon Logistics", "Deloitte"],
     5: ["Industrial Bank of Korea", "5B_refund_guarantee", "Steel Cutting", "Delivery", "21 Banking Days", "Evergreen Marine Corporation"],
@@ -888,8 +914,11 @@ class TestPayloadStructure:
         assert len(SEC1_PAYLOAD["all_facilities"]) >= 1
 
     def test_sec2_risk_list_has_two_entries(self):
-        risks = SEC2_PAYLOAD["2E_risk_and_mitigants"]
+        risk_data = SEC2_PAYLOAD["2E_risk_and_mitigants"]
+        assert isinstance(risk_data, dict)
+        risks = risk_data["risk_factors"]
         assert isinstance(risks, list) and len(risks) >= 2
+        assert "additional_risk_factors_from_previous" in risk_data
 
     def test_sec7_entities_has_borrower_and_guarantor(self):
         entities = SEC7_PAYLOAD["entities_to_analyze"]
