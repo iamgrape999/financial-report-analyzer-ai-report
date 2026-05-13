@@ -57,7 +57,7 @@ class BlockPatchIn(BaseModel):
 
 class BlockImproveIn(BaseModel):
     instruction: str
-    expected_version: int
+    expected_version: Optional[int] = None
 
 
 class BlockImproveOut(BaseModel):
