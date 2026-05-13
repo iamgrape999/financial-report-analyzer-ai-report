@@ -64,7 +64,7 @@ async def _seed_report(db, rid: str, owner_id: str | None = None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 EXPECTED_FIELD_COUNTS = {
-    1: 54, 2: 33, 3: 26, 4: 22, 5: 66,
+    1: 68, 2: 48, 3: 26, 4: 22, 5: 66,
     6: 57, 7: 65, 8: 22, 9: 20, 10: 36, 11: 12,
 }
 
@@ -126,8 +126,10 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
         },
     },
     2: {
-        "2A_credit_overview": {"bullets": [{"order": 1, "text_verbatim": "Test bullet"}],
-                               "tariff_impact_paragraphs": ["Minimal tariff exposure."]},
+        "2A_credit_overview": {
+            "bullets": "EMC is the 7th largest container line globally\nNew USD178.5m SLL to finance one vessel",
+            "tariff_impact_paragraphs": "EMC has minimal direct exposure to US tariff risk. Cross-trade lanes account for approximately 15% of revenue.\n\nHistorical leverage benchmarks show EMC maintained net cash position.",
+        },
         "2B_solvency": {
             "primary_repayment_source_verbatim": "Operating cash flow.",
             "secondary_repayment_source_verbatim": "Guarantor support.",
@@ -165,10 +167,15 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
             },
         },
         "2E_risk_and_mitigants": {
-            "risk_factors": [{"risk_no": 1, "level": "Medium",
-                              "title": "Rate risk", "risk_bullets": ["Rate volatility"],
-                              "mitigant_bullets": ["TC agreement"]}],
-            "additional_risk_factors_from_previous": [],
+            "risk_1_level": "Medium",
+            "risk_1_title": "Rate risk",
+            "risk_1_risk_bullets": "Rate volatility affects revenue",
+            "risk_1_mitigant_bullets": "TC agreement covers 80% of vessel revenue",
+            "risk_2_level": "Medium",
+            "risk_2_title": "Construction risk",
+            "risk_2_risk_bullets": "Delivery delay risk",
+            "risk_2_mitigant_bullets": "KDB Refund Guarantee covers each installment",
+            "additional_risk_factors_from_previous": "",
         },
         "report_type": "new_deal",
     },
@@ -1103,11 +1110,17 @@ class TestJsonHintParseability:
             f"{len(failures)} json hints failed to parse:\n" + "\n".join(failures[:10])
         )
 
+    # Sections with no json-type fields (all blobs replaced with individual fields)
+    SECTIONS_WITHOUT_JSON_FIELDS = {2}
+
     @pytest.mark.parametrize("sec_no", list(range(1, 12)))
     def test_section_json_hints_parse(self, sec_no):
         html = _load_html()
         hints = self._extract_json_hints(html)
         sec_hints = [(p, h) for (s, p, h) in hints if s == sec_no]
+        if sec_no in self.SECTIONS_WITHOUT_JSON_FIELDS:
+            # Section has no json-type fields by design; skip hint check
+            return
         assert sec_hints, f"§{sec_no}: no json-type field hints found"
         for path, raw in sec_hints:
             unescaped = raw.replace("\\'", "'")

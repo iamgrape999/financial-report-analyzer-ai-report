@@ -92,6 +92,13 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
   .navbar-brand small{display:none;}
   .section-panel .d-flex.gap-2{flex-wrap:wrap;}
 }
+/* ── JSON Preview Panel ── */
+.form-split-wrap{display:grid;grid-template-columns:1fr;gap:0;transition:grid-template-columns .2s;}
+.form-split-wrap.split-on{grid-template-columns:1fr 420px;}
+#jsonPreviewPanel{background:#1e1e2e;color:#cdd6f4;font-family:monospace;font-size:11px;
+  border-radius:0 6px 6px 0;padding:12px;overflow-y:auto;max-height:calc(100vh - 220px);
+  border-left:2px solid #313244;display:none;position:sticky;top:0;}
+.form-split-wrap.split-on #jsonPreviewPanel{display:block;}
 </style>
 </head>
 <body>
@@ -275,9 +282,13 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
         <button class="btn btn-primary btn-sm" onclick="saveFormInput()" data-i18n="sp.save_form">💾 Save Form</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="syncFormToJson()" data-i18n="sp.sync_json">↔ Sync to JSON</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="toggleJsonPreview()" id="splitViewBtn" title="Show JSON preview alongside form">⟷ JSON Preview</button>
         <small class="text-muted" data-i18n="sp.form_hint">Fill in each field below and click Save. ✗ fields contribute to completeness (50% target for draft generation).</small>
       </div>
-      <div id="formFields" class="row g-2"></div>
+      <div id="formSplitWrap" class="form-split-wrap">
+        <div id="formFields" class="row g-2"></div>
+        <div id="jsonPreviewPanel"><pre id="jsonPreviewCode" style="margin:0;white-space:pre-wrap;word-break:break-all;color:#cdd6f4;font-size:11px;"></pre></div>
+      </div>
     </div>
 
     <!-- Output tab -->
@@ -893,8 +904,8 @@ const TEMPLATES={
 
 // ── Required fields per section (for completeness check) ─────────────────────
 const REQUIRED_FIELDS={
-  1:[{p:'report_type',l:'Report Type'},{p:'facility_summary',l:'Facility Summary Table (1A)'},{p:'regulatory_compliance.compliance_status',l:'Regulatory Compliance Status (1B)'},{p:'purpose_and_recommendation.recommendation',l:'Recommendation — APPROVE/DECLINE (1C)'},{p:'terms_and_conditions.borrower',l:'Borrower Name (1D)'},{p:'account_strategy.wallet.bank_market',l:'Account Strategy — Wallet NII (1F)'}],
-  2:[{p:'2A_credit_overview.bullets',l:'Credit Overview Bullets (T1)'},{p:'2B_solvency.primary_repayment_source_verbatim',l:'Primary Repayment Source (T2)'},{p:'2C_guarantor.guarantor_name_abbrev',l:'Guarantor Name Abbreviation (T3)'},{p:'2D_collateral.pre_delivery.issuer_full_name',l:'Pre-Delivery RG Issuer (T4)'},{p:'2E_risk_and_mitigants.risk_factors',l:'Risk Factors with Level + Bullets (T5)'}],
+  1:[{p:'report_type',l:'Report Type'},{p:'facility_summary.rows',l:'Facility Rows Table (1A)'},{p:'regulatory_compliance.compliance_status',l:'Regulatory Compliance Status (1B)'},{p:'purpose_and_recommendation.recommendation',l:'Recommendation — APPROVE/DECLINE (1C)'},{p:'terms_and_conditions.borrower',l:'Borrower Name (1D)'},{p:'account_strategy.wallet.bank_market',l:'Account Strategy — Wallet NII (1F)'}],
+  2:[{p:'2A_credit_overview.bullets',l:'Credit Overview Bullets (T1)'},{p:'2B_solvency.primary_repayment_source_verbatim',l:'Primary Repayment Source (T2)'},{p:'2C_guarantor.guarantor_name_abbrev',l:'Guarantor Name Abbreviation (T3)'},{p:'2D_collateral.pre_delivery.issuer_full_name',l:'Pre-Delivery RG Issuer (T4)'},{p:'2E_risk_and_mitigants.risk_1_title',l:'Risk 1 Title (2E)'}],
   3:[{p:'3C_mas_612.grade',l:'MAS 612 Loan Grade (3C)'},{p:'3C_mas_612.para_1_msr_mapping_verbatim',l:'MAS 612 Para 1 — MSR Mapping (3C)'},{p:'3B_internal_ratings.borrower_entity_full_name',l:'Borrower Name in MSR Table (3B)'},{p:'3B_internal_ratings.borrower_fy2024',l:'Borrower Current MSR Rating (3B)'}],
   4:[{p:'4A_borrower.company_name_en',l:'Company Name English (4A)'},{p:'4B_ownership.shareholders',l:'Shareholders Table (4B)'},{p:'4C_management',l:'Key Management Table (4C)'},{p:'4D_business.primary_business',l:'Primary Business (4D)'},{p:'4E_financials.revenue',l:'Revenue Latest FY (4E)'},{p:'4F_fleet.fleet_breakdown',l:'Fleet Breakdown Table (4F)'},{p:'4J_peer_comparison',l:'Peer Comparison Table (4J)'}],
   5:[{p:'5A_security_overview.is_secured',l:'Facility Secured? (5A)'},{p:'5C_vessel_mortgage.loan_amount_usd_m',l:'Vessel Mortgage Loan Amount (5C)'},{p:'5E_value_maintenance_clause.acr_covenant_pct',l:'ACR Covenant Level (5E)'}],
@@ -956,7 +967,11 @@ function renderCompleteness(secNo,data){
 const FIELD_DEFS={
   1:[
     {p:'report_type',l:'Report Type',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']},
-    {p:'facility_summary',l:'1A — Facility Summary Table (JSON — rows/totals/footnotes/appendix_ref)',t:'json',h:'{"rows":[{"item_no":1,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"SG","current_facility_usd_m":null,"proposed_facility_usd_m":178.5,"is_new":true,"outstanding_usd_m":0,"currency":"USD","tenor":"7 years after VDD or 11 years after Initial Drawdown, whichever earlier","facility_type":"Committed Bilateral Term Loan (SLL)","collateral_pre":"RG issued by KDB, assigned to CUB","collateral_post":"One 20,000 TEU LNG dual fuel containership (Hull No. 2891)","guarantor":"EMC","is_psr":false,"is_lapsing":false}],"totals":{"total_credit_limit_usd_m":307.25,"psr_spot_limit_usd_m":0.88},"footnotes":[{"symbol":"[1]","text_verbatim":"Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period."}],"appendix_ref":"Please refer to Appendix I for total CUB exposure to Evergreen Group."}'},
+    {p:'facility_summary.rows',l:'1A — Facility Rows (JSON array)',t:'json',h:'[{"item_no":1,"borrower_full_name":"EMA","booking_location":"SG","current_facility_usd_m":null,"proposed_facility_usd_m":178.5,"is_new":true,"outstanding_usd_m":0,"currency":"USD","tenor":"11 years","facility_type":"Term Loan (SLL)","collateral_pre":"RG (KDB)","collateral_post":"Vessel mortgage","guarantor":"EMC","is_psr":false,"is_lapsing":false}]'},
+    {p:'facility_summary.totals.total_credit_limit_usd_m',l:'1A — Total Credit Limit (USD m)',t:'number'},
+    {p:'facility_summary.totals.psr_spot_limit_usd_m',l:'1A — PSR Spot Limit (USD m)',t:'number'},
+    {p:'facility_summary.footnotes',l:'1A — Footnotes (JSON array)',t:'json',h:'[{"symbol":"[1]","text_verbatim":"Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period."}]'},
+    {p:'facility_summary.appendix_ref',l:'1A — Appendix Reference',t:'text',h:'e.g. Please refer to Appendix I for total CUB exposure to Evergreen Group.'},
     {p:'regulatory_compliance.bank_net_worth_twd_bn',l:'1B — Bank Net Worth (TWD bn)',t:'number'},
     {p:'regulatory_compliance.single_borrower_limit_pct',l:'1B — Single Borrower Limit (%)',t:'number'},
     {p:'regulatory_compliance.single_borrower_limit_twd_bn',l:'1B — Single Borrower Limit (TWD bn)',t:'number'},
@@ -992,11 +1007,20 @@ const FIELD_DEFS={
     {p:'terms_and_conditions.annual_renewal_fee_usd',l:'1D — Annual Renewal Fee (USD)',t:'number'},
     {p:'terms_and_conditions.security_pre_delivery',l:'1D — Pre-Delivery Security',t:'textarea'},
     {p:'terms_and_conditions.security_post_delivery',l:'1D — Post-Delivery Security',t:'textarea'},
-    {p:'terms_and_conditions.value_maintenance_clause',l:'1D — Value Maintenance Clause (JSON)',t:'json',h:'{"acr_minimum_pct":120,"ltv_maximum_pct":83,"testing_frequency":"Every 2 years post delivery","cure_period_days":21,"cure_mechanism":"Partial prepayment or provision of additional collateral"}'},
-    {p:'terms_and_conditions.sustainability_linked_kpi',l:'1D — Sustainability-Linked KPI (JSON)',t:'json',h:'{"description":"Annual testing; KPIs cover EMC fleet Scope 1 CO2 intensity reduction, MSCI ESG rating, and DJSI inclusion","max_margin_ratchet_bps":5,"ratchet_direction":"Margin increase on KPI miss / decrease on KPI achievement"}'},
+    {p:'terms_and_conditions.value_maintenance_clause.acr_minimum_pct',l:'1D — VMC: ACR Minimum (%)',t:'number',h:'e.g. 120'},
+    {p:'terms_and_conditions.value_maintenance_clause.ltv_maximum_pct',l:'1D — VMC: LTV Maximum (%)',t:'number',h:'e.g. 83'},
+    {p:'terms_and_conditions.value_maintenance_clause.testing_frequency',l:'1D — VMC: Testing Frequency',t:'text',h:'e.g. Every 2 years post delivery'},
+    {p:'terms_and_conditions.value_maintenance_clause.cure_period_days',l:'1D — VMC: Cure Period (days)',t:'number',h:'e.g. 21'},
+    {p:'terms_and_conditions.value_maintenance_clause.cure_mechanism',l:'1D — VMC: Cure Mechanism',t:'text',h:'e.g. Partial prepayment or provision of additional collateral'},
+    {p:'terms_and_conditions.sustainability_linked_kpi.description',l:'1D — SLL KPI: Description',t:'textarea',h:'e.g. Annual testing; KPIs cover EMC fleet Scope 1 CO2 intensity reduction, MSCI ESG rating, and DJSI inclusion'},
+    {p:'terms_and_conditions.sustainability_linked_kpi.max_margin_ratchet_bps',l:'1D — SLL KPI: Max Margin Ratchet (bps)',t:'number',h:'e.g. 5'},
+    {p:'terms_and_conditions.sustainability_linked_kpi.ratchet_direction',l:'1D — SLL KPI: Ratchet Direction',t:'text',h:'e.g. Margin increase on KPI miss / decrease on KPI achievement'},
     {p:'terms_and_conditions.financial_covenants',l:'1D — Financial Covenants',t:'text',h:'e.g. NIL'},
-    {p:'terms_and_conditions.drawdown_conditions',l:'1D — Drawdown Conditions (JSON)',t:'json',h:'{"max_drawdowns":5,"per_drawdown_cap_pct_of_cost":80,"aggregate_cap_usd_m":178.5,"pre_delivery_cap_usd_m":71.4}'},
-    {p:'terms_and_conditions.conditions_precedent',l:'1D — Conditions Precedent (JSON array)',t:'json',h:'["Execution of all Facility Agreement and Security Documents","Receipt of satisfactory legal opinions (Singapore law)","Evidence of insurance placement (H&M, P&I, War Risk)","KYC/AML completion","EMA and EMC board resolutions"]'},
+    {p:'terms_and_conditions.drawdown_conditions.max_drawdowns',l:'1D — Drawdown: Max Number',t:'number',h:'e.g. 5'},
+    {p:'terms_and_conditions.drawdown_conditions.per_drawdown_cap_pct_of_cost',l:'1D — Drawdown: Cap per Drawdown (% of Cost)',t:'number',h:'e.g. 80'},
+    {p:'terms_and_conditions.drawdown_conditions.aggregate_cap_usd_m',l:'1D — Drawdown: Aggregate Cap (USD m)',t:'number'},
+    {p:'terms_and_conditions.drawdown_conditions.pre_delivery_cap_usd_m',l:'1D — Drawdown: Pre-Delivery Cap (USD m)',t:'number'},
+    {p:'terms_and_conditions.conditions_precedent',l:'1D — Conditions Precedent',t:'lines',h:'One condition per line'},
     {p:'terms_and_conditions.other_conditions',l:'1D — Other Conditions (one per line)',t:'lines',h:'e.g. EMC to remain listed throughout the loan facility'},
     {p:'terms_and_conditions.governing_law',l:'1D — Governing Law',t:'text'},
     {p:'terms_and_conditions.deal_comparison',l:'1D — Deal Comparison (JSON array — min 11 rows)',t:'json',h:'[{"term":"Guarantor","proposed":"EMC","previous":"EMC"},{"term":"Facility Amount","proposed":"USD178.5m (80% LTC)","previous":"USD128.75m (80% LTC)"},{"term":"Purpose","proposed":"One 20,000 TEU newbuild","previous":"One 14,000 TEU newbuild"},{"term":"Vessel Type","proposed":"20,000 TEU LNG dual fuel","previous":"14,000 TEU methanol dual fuel"},{"term":"Tenor","proposed":"11 years (4+7)","previous":"11 years (4+7)"},{"term":"Margin","proposed":"0.85% p.a.","previous":"0.85% p.a."},{"term":"Upfront Fee","proposed":"0.10%","previous":"0.10%"},{"term":"SLL Ratchet","proposed":"Max 5bps p.a.","previous":"Max 5bps p.a."},{"term":"Drawdowns","proposed":"<=5","previous":"<=5"},{"term":"Availability Period","proposed":"Till 6 months post delivery; undrawn cancelled","previous":"Till 6 months post delivery; undrawn cancelled"},{"term":"Security","proposed":"Pre: RG (KDB); Post: First mortgage","previous":"Pre: RG (KEXIM); Post: First mortgage"},{"term":"FMV Maintenance","proposed":">=120%","previous":">=120%"}]'},
@@ -1008,11 +1032,12 @@ const FIELD_DEFS={
     {p:'account_strategy.immediate_opportunities',l:'1F — Immediate Opportunities',t:'textarea'},
     {p:'account_strategy.future_opportunities',l:'1F — Future Opportunities',t:'textarea'},
     {p:'account_strategy.other_opportunities',l:'1F — Other Opportunities',t:'textarea'},
-    {p:'sll_kpi_performance',l:'SLL KPI Actual vs Target Table (JSON — for SLL facilities)',t:'json',h:'{"kpis":[{"kpi_name":"CO2 Intensity (gCO2/dwt-nm)","target_value":"<=8.5","actual_value":"7.2","period":"2024","on_track":true,"ratchet_bps":-5},{"kpi_name":"MSCI ESG Rating","target_value":"AA","actual_value":"A","period":"2024","on_track":false,"ratchet_bps":0},{"kpi_name":"DJSI Inclusion","target_value":"Included","actual_value":"Included","period":"2024","on_track":true,"ratchet_bps":-5}]}'}
+    {p:'sll_kpi_performance.applicable',l:'1G — SLL KPI Performance: Applicable?',t:'bool'},
+    {p:'sll_kpi_performance.kpis',l:'1G — SLL KPI Performance Table (JSON array)',t:'json',h:'[{"kpi_name":"CO2 Intensity (gCO2/dwt-nm)","target_value":"<=8.5","actual_value":"7.2","period":"2024","on_track":true,"ratchet_bps":-5}]'}
   ],
   2:[
-    {p:'2A_credit_overview.bullets',l:'2A — Credit Overview Bullets (JSON — order + text_verbatim)',t:'json',h:'[{"order":1,"text_verbatim":"EMC is the 7th largest container line globally with 1.97m TEU capacity and 5.8% market share"},{"order":2,"text_verbatim":"New USD178.5m SLL facility to finance one 20,000 TEU LNG dual fuel vessel"},{"order":3,"text_verbatim":"EMA net cash USD0.9bn; D/E 0.38x as at FY2024"},{"order":4,"text_verbatim":"Pre-delivery: KDB Refund Guarantee (AA/AA-) fully covering each installment, assigned to CUB"},{"order":5,"text_verbatim":"9M2025 CCFI average 1,220, -28% YoY; EMC revenue TWD198bn"},{"order":6,"text_verbatim":"EMC: 7th ranked globally, OCEAN Alliance member, 50-year track record"}]'},
-    {p:'2A_credit_overview.tariff_impact_paragraphs',l:'2A — Tariff Impact Paragraphs (JSON array of 2 verbatim strings)',t:'json',h:'["EMC has minimal direct exposure to US tariff risk. Cross-trade lanes account for approximately 15% of revenue. Historical analysis shows freight rates recovered within 12-18 months of previous US-China trade disputes.","Historical leverage benchmarks show EMC maintained net cash position even in the worst-year 2016 (CCFI trough 842). Current net cash of TWD5.2bn provides significant buffer against rate headwinds."]'},
+    {p:'2A_credit_overview.bullets',l:'2A — Credit Overview Bullets',t:'lines',h:'One bullet point per line (order inferred from sequence)'},
+    {p:'2A_credit_overview.tariff_impact_paragraphs',l:'2A — Tariff Impact Paragraphs',t:'textarea',h:'Enter 2 paragraphs separated by a blank line'},
     {p:'2B_solvency.primary_repayment_source_verbatim',l:'2B — Primary Repayment Source (verbatim)',t:'textarea',h:'Primary source of repayment will be from operating cash flow generated by the EMA vessel fleet.'},
     {p:'2B_solvency.secondary_repayment_source_verbatim',l:'2B — Secondary Repayment Source (verbatim)',t:'textarea',h:'Secondary source of repayment include the corporate guarantee provided by EMC and the value of the vessel collateral.'},
     {p:'2B_solvency.ema.period',l:'2B — EMA Financial Period',t:'text',h:'e.g. FY2024'},
@@ -1041,8 +1066,23 @@ const FIELD_DEFS={
     {p:'2D_collateral.post_delivery.ltc_pct',l:'2D — LTC at Delivery (%)',t:'number'},
     {p:'2D_collateral.post_delivery.acr_pct',l:'2D — ACR Floor (%)',t:'number'},
     {p:'2D_collateral.post_delivery.ltv_pct',l:'2D — LTV Cap (%)',t:'number'},
-    {p:'2E_risk_and_mitigants.risk_factors',l:'2E — Risk Factors (JSON — risk_no,level,title,risk_bullets,mitigant_bullets)',t:'json',h:'[{"risk_no":1,"level":"High","title":"Container freight rate volatility","changes_from_previous":null,"risk_bullets":["CCFI averaged 1,220 in 9M2025, down 28% YoY","Revenue highly correlated with spot and contract rates"],"mitigant_bullets":["Long-term TC contract with EMC covering >80% of vessel revenue","EMC balance sheet: net cash TWD5.2bn; D/E 0.31x as of 3Q2025","Historical: CCFI trough 842 in FY2016; EMC remained net-cash positive"]},{"risk_no":2,"level":"Medium","title":"Construction/delivery risk","changes_from_previous":null,"risk_bullets":["Delivery expected Jun 2028; delay risk given complex LNG dual fuel systems"],"mitigant_bullets":["SHI: 94% on-time delivery rate over past 5 years","210-day contractual grace period built into facility structure","KDB Refund Guarantee (AA/AA-) fully covers each pre-delivery installment"]}]'},
-    {p:'2E_risk_and_mitigants.additional_risk_factors_from_previous',l:'2E — Additional / New Risk Factors vs Prior Review (JSON array)',t:'json',h:'[{"title":"US Port Fee Surcharge Risk","level":"Medium","note":"New risk identified since previous review; US Executive Order on port fees for Chinese-built vessels effective Jan 2026"}]'},
+    {p:'2E_risk_and_mitigants.risk_1_level',l:'2E — Risk 1: Level',t:'select',opts:['High','Medium','Low']},
+    {p:'2E_risk_and_mitigants.risk_1_title',l:'2E — Risk 1: Title',t:'text'},
+    {p:'2E_risk_and_mitigants.risk_1_risk_bullets',l:'2E — Risk 1: Risk Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.risk_1_mitigant_bullets',l:'2E — Risk 1: Mitigant Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.risk_2_level',l:'2E — Risk 2: Level',t:'select',opts:['High','Medium','Low']},
+    {p:'2E_risk_and_mitigants.risk_2_title',l:'2E — Risk 2: Title',t:'text'},
+    {p:'2E_risk_and_mitigants.risk_2_risk_bullets',l:'2E — Risk 2: Risk Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.risk_2_mitigant_bullets',l:'2E — Risk 2: Mitigant Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.risk_3_level',l:'2E — Risk 3: Level',t:'select',opts:['High','Medium','Low']},
+    {p:'2E_risk_and_mitigants.risk_3_title',l:'2E — Risk 3: Title',t:'text'},
+    {p:'2E_risk_and_mitigants.risk_3_risk_bullets',l:'2E — Risk 3: Risk Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.risk_3_mitigant_bullets',l:'2E — Risk 3: Mitigant Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.risk_4_level',l:'2E — Risk 4: Level',t:'select',opts:['High','Medium','Low']},
+    {p:'2E_risk_and_mitigants.risk_4_title',l:'2E — Risk 4: Title',t:'text'},
+    {p:'2E_risk_and_mitigants.risk_4_risk_bullets',l:'2E — Risk 4: Risk Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.risk_4_mitigant_bullets',l:'2E — Risk 4: Mitigant Bullets (one per line)',t:'lines'},
+    {p:'2E_risk_and_mitigants.additional_risk_factors_from_previous',l:'2E — Additional / New Risk Factors vs Prior Review',t:'textarea',h:'Describe new/changed risks vs. prior review (free text)'},
     {p:'report_type',l:'Report Type',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']}
   ],
   3:[
@@ -1441,6 +1481,29 @@ function collectFormData(secNo){
 // ── finalizePayload: convert flat form fields → nested structure for prompt builder ──
 function finalizePayload(secNo,data){
   const d=JSON.parse(JSON.stringify(data));// deep clone
+  if(secNo===2){
+    const ao=d['2A_credit_overview']||{};
+    // bullets: lines type → [{order,text_verbatim}] array
+    if(Array.isArray(ao.bullets))ao.bullets=ao.bullets.map((t,i)=>({order:i+1,text_verbatim:t}));
+    // tariff_impact_paragraphs: textarea string → array of paragraphs
+    if(typeof ao.tariff_impact_paragraphs==='string'){
+      ao.tariff_impact_paragraphs=ao.tariff_impact_paragraphs.split(/\n{2,}/).map(s=>s.trim()).filter(Boolean);
+      if(!ao.tariff_impact_paragraphs.length)delete ao.tariff_impact_paragraphs;
+    }
+    d['2A_credit_overview']=ao;
+    const re2=d['2E_risk_and_mitigants']||{};
+    const risks=[];
+    for(let i=1;i<=4;i++){
+      if(re2['risk_'+i+'_title']){
+        const rb=Array.isArray(re2['risk_'+i+'_risk_bullets'])?re2['risk_'+i+'_risk_bullets']:(typeof re2['risk_'+i+'_risk_bullets']==='string'?re2['risk_'+i+'_risk_bullets'].split('\n').filter(l=>l.trim()):[]);
+        const mb=Array.isArray(re2['risk_'+i+'_mitigant_bullets'])?re2['risk_'+i+'_mitigant_bullets']:(typeof re2['risk_'+i+'_mitigant_bullets']==='string'?re2['risk_'+i+'_mitigant_bullets'].split('\n').filter(l=>l.trim()):[]);
+        risks.push({risk_no:i,level:re2['risk_'+i+'_level']||'Medium',title:re2['risk_'+i+'_title'],changes_from_previous:null,risk_bullets:rb,mitigant_bullets:mb});
+      }
+    }
+    const arf=re2['additional_risk_factors_from_previous'];
+    const arfArr=typeof arf==='string'?arf.split('\n').filter(l=>l.trim()).map(l=>({title:l,level:'Medium',note:l})):(Array.isArray(arf)?arf:[]);
+    d['2E_risk_and_mitigants']={risk_factors:risks,additional_risk_factors_from_previous:arfArr};
+  }
   if(secNo===3){
     const b=d['3B_internal_ratings']||{};const rows=[];
     if(b.borrower_entity_full_name||b.borrower_entity_abbrev)rows.push({entity_full_name:b.borrower_entity_full_name||'',entity_abbrev:b.borrower_entity_abbrev||'',role:'Borrower',fy2022_23:b.borrower_fy2022_23||'',fy2024:b.borrower_fy2024||'',interim:b.borrower_interim||'',current:b.borrower_current||'',override_flag:b.borrower_override_flag||false,override_remarks:b.borrower_override_remarks||''});
@@ -1488,6 +1551,35 @@ function finalizePayload(secNo,data){
 // ── expandPayload: reverse finalizePayload for form loading ──
 function expandPayload(secNo,data){
   if(!data)return data;const d=JSON.parse(JSON.stringify(data));
+  if(secNo===2){
+    const ao=d['2A_credit_overview']||{};
+    // bullets: [{order,text_verbatim}] → newline-joined string for lines field
+    if(Array.isArray(ao.bullets)){
+      ao.bullets=ao.bullets.map(b=>typeof b==='object'?b.text_verbatim||JSON.stringify(b):String(b)).join('\n');
+      d['2A_credit_overview']=ao;
+    }
+    // tariff_impact_paragraphs: [...] → textarea string
+    if(Array.isArray(ao.tariff_impact_paragraphs)){
+      ao.tariff_impact_paragraphs=ao.tariff_impact_paragraphs.join('\n\n');
+      d['2A_credit_overview']=ao;
+    }
+    // risk_factors: [{...}] → flat per-risk fields
+    const re2=d['2E_risk_and_mitigants'];
+    if(re2&&Array.isArray(re2.risk_factors)){
+      re2.risk_factors.forEach((r,i)=>{
+        re2['risk_'+(i+1)+'_level']=r.level||'Medium';
+        re2['risk_'+(i+1)+'_title']=r.title||'';
+        re2['risk_'+(i+1)+'_risk_bullets']=Array.isArray(r.risk_bullets)?r.risk_bullets.join('\n'):'';
+        re2['risk_'+(i+1)+'_mitigant_bullets']=Array.isArray(r.mitigant_bullets)?r.mitigant_bullets.join('\n'):'';
+      });
+      d['2E_risk_and_mitigants']=re2;
+    }
+    // additional_risk_factors_from_previous: [...] → textarea string
+    if(re2&&Array.isArray(re2.additional_risk_factors_from_previous)){
+      re2.additional_risk_factors_from_previous=re2.additional_risk_factors_from_previous.map(r=>typeof r==='object'?r.title||JSON.stringify(r):String(r)).join('\n');
+      d['2E_risk_and_mitigants']=re2;
+    }
+  }
   if(secNo===3){
     const b=d['3B_internal_ratings'];if(b&&b.rows){const flat={period_display_labels:b.period_display_labels||{}};const bw=b.rows.find(r=>r.role==='Borrower');const gw=b.rows.find(r=>r.role==='Guarantor');if(bw){flat.borrower_entity_full_name=bw.entity_full_name;flat.borrower_entity_abbrev=bw.entity_abbrev;flat.borrower_fy2022_23=bw.fy2022_23;flat.borrower_fy2024=bw.fy2024;flat.borrower_interim=bw.interim;flat.borrower_current=bw.current;flat.borrower_override_flag=bw.override_flag;flat.borrower_override_remarks=bw.override_remarks;}if(gw){flat.guarantor_entity_full_name=gw.entity_full_name;flat.guarantor_entity_abbrev=gw.entity_abbrev;flat.guarantor_fy2022_23=gw.fy2022_23;flat.guarantor_fy2024=gw.fy2024;flat.guarantor_interim=gw.interim;flat.guarantor_current=gw.current;}d['3B_internal_ratings']=flat;}
   }
@@ -1554,6 +1646,23 @@ function syncFormToJson(){
   document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
   renderCompleteness(sec,data);
   toast('Form synced to JSON editor','info');
+  updateJsonPreview();
+}
+
+function toggleJsonPreview(){
+  const wrap=document.getElementById('formSplitWrap');
+  const btn=document.getElementById('splitViewBtn');
+  if(!wrap)return;
+  const on=wrap.classList.toggle('split-on');
+  btn.classList.toggle('btn-outline-secondary',!on);
+  btn.classList.toggle('btn-outline-info',on);
+  if(on)updateJsonPreview();
+}
+function updateJsonPreview(){
+  const sec=currentPanelSec;if(!sec)return;
+  const panel=document.getElementById('jsonPreviewCode');if(!panel)return;
+  const data=finalizePayload(sec,collectFormData(sec));
+  panel.textContent=JSON.stringify(data,null,2);
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
