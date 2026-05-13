@@ -418,9 +418,15 @@ _SECTION_SCHEMAS: dict[int, dict] = {
             "security_pre_delivery, security_post_delivery, "
             "value_maintenance_clause {acr_minimum_pct, ltv_maximum_pct, testing_frequency, cure_period_days, cure_mechanism}, "
             "sustainability_linked_kpi {description, max_margin_ratchet_bps}, "
+            "sll_kpi_performance {kpis: array of {kpi_name, target_value, actual_value, period, on_track, ratchet_bps}}, "
             "regulatory_compliance {bank_net_worth_twd_bn, single_borrower_limit_twd_bn, usd_equivalent_usd_m, compliance_status, unsecured_drawdown_cap_usd_m}, "
             "group_limit {approved_group_limit_usd_m, total_proposed_group_utilization_usd_m, within_limit}, "
-            "conditions_precedent (string[]), governing_law"
+            "conditions_precedent (JSON array of {no, condition} — T&C Field #13), "
+            "deal_comparison (JSON array of {term, proposed, previous} — min 11 columns: "
+            "Guarantor, Facility Amount, Purpose, Vessel Type, Tenor, Margin, Upfront Fee, SLL Ratchet, Drawdowns, Availability Period, Security, FMV Maintenance), "
+            "account_strategy {wallet: {bank_market, capital_market, treasury, deposit}, "
+            "current_relationship, immediate_opportunities, future_opportunities, other_opportunities}, "
+            "governing_law"
         ),
     },
     2: {

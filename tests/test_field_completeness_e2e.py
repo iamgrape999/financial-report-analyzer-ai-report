@@ -97,8 +97,25 @@ SEC1_PAYLOAD = {
     },
     "group_limit": {"approved_group_limit_usd_m": 750, "total_proposed_group_utilization_usd_m": 673.13, "within_limit": True},
     "drawdown_conditions": {"max_drawdowns": 5, "pre_delivery_cap_usd_m": 71.40, "aggregate_cap_usd_m": 178.50},
-    "conditions_precedent": ["Execution of all facility and security documents", "Receipt of satisfactory legal opinions"],
-    "deal_comparison": [{"term": "Amount", "proposed": "USD178.5m", "previous": "USD128.75m"}],
+    "conditions_precedent": [
+        {"no": 1, "condition": "Execution of all Facility Agreement and Security Documents"},
+        {"no": 2, "condition": "Receipt of satisfactory legal opinions (Singapore law and BVI law)"},
+        {"no": 3, "condition": "Evidence of insurance placement (H&M, P&I, War Risk) satisfactory to the Lender"},
+    ],
+    "deal_comparison": [
+        {"term": "Guarantor", "proposed": "EMC", "previous": "EMC"},
+        {"term": "Facility Amount", "proposed": "USD178.5m (80% LTC)", "previous": "USD128.75m (80% LTC)"},
+        {"term": "Purpose", "proposed": "One 20,000 TEU newbuild", "previous": "One 14,000 TEU newbuild"},
+        {"term": "Vessel Type", "proposed": "20,000 TEU LNG dual fuel", "previous": "14,000 TEU methanol dual fuel"},
+        {"term": "Tenor", "proposed": "11 years (4+7)", "previous": "11 years (4+7)"},
+        {"term": "Margin", "proposed": "0.85% p.a.", "previous": "0.85% p.a."},
+        {"term": "Upfront Fee", "proposed": "0.10%", "previous": "0.10%"},
+        {"term": "SLL Ratchet", "proposed": "Max 5bps p.a.", "previous": "Max 5bps p.a."},
+        {"term": "Drawdowns", "proposed": "<=5", "previous": "<=5"},
+        {"term": "Availability Period", "proposed": "Till 6 months post delivery; undrawn cancelled", "previous": "Till 6 months post delivery; undrawn cancelled"},
+        {"term": "Security", "proposed": "Pre: RG Assignment (IBK); Post: First mortgage", "previous": "Pre: RG Assignment (KEXIM); Post: First mortgage"},
+        {"term": "FMV Maintenance", "proposed": ">=120%", "previous": ">=120%"},
+    ],
     "governing_law": "Singapore law",
     "report_type": "new_deal",
     "appendix_ref": "Please refer to Appendix I for total CUB exposure to Evergreen Group",
@@ -106,12 +123,23 @@ SEC1_PAYLOAD = {
     "valuation_details": {"valuer": "Clarkson", "gongwen_ref": "GW-2025-001", "valuation_date": "2025-01-15", "amount_exact_verbatim": "USD98,500,000"},
     "pam_sam_text": "Unsecured drawdown capped at 32% of contract price (USD71.40m) for PAM/SAM purposes",
     "account_strategy": {
-        "wallet_overview": "Bank wallet USD 50m / Capital Markets USD 20m / Treasury USD 10m",
-        "current_relationship": "NII USD7.5m p.a.; deposits EMA USD1.9bn / EMC NTD198bn; utilization 55%",
-        "opportunities": "Cross-sell FX hedging; capital markets USD100m bond",
-        "nii_usd_m": 7.5,
-        "tmu_pct": 0.3,
-        "deposits_verbatim": "EMA USD1.9bn; EMC NTD198bn",
+        "wallet": {
+            "bank_market": "NII USD7.5m p.a.",
+            "capital_market": "USD 20m (bonds/ECM)",
+            "treasury": "FX / IRS hedging",
+            "deposit": "EMA USD1.9bn; EMC NTD198bn",
+        },
+        "current_relationship": "NII USD7.5m p.a.; utilization 55%",
+        "immediate_opportunities": "FX hedging for pre-delivery installments; upfront fee USD178,500",
+        "future_opportunities": "Capital markets bond USD100m; syndication lead role",
+        "other_opportunities": "Cross-sell trade finance; ESG advisory",
+    },
+    "sll_kpi_performance": {
+        "kpis": [
+            {"kpi_name": "CO2 Intensity (gCO2/dwt-nm)", "target_value": "<=8.5", "actual_value": "7.2", "period": "2024", "on_track": True, "ratchet_bps": -5},
+            {"kpi_name": "MSCI ESG Rating", "target_value": "AA", "actual_value": "A", "period": "2024", "on_track": False, "ratchet_bps": 0},
+            {"kpi_name": "DJSI Inclusion", "target_value": "Included", "actual_value": "Included", "period": "2024", "on_track": True, "ratchet_bps": -5},
+        ]
     },
 }
 
@@ -789,7 +817,7 @@ ALL_PAYLOADS = {
 
 # Critical data tokens that must appear in each section's prompt
 CRITICAL_TOKENS = {
-    1: ["Evergreen Marine (Asia)", "178.5", "new_deal", "Term SOFR", "35", "regulatory_compliance", "account_strategy", "IBK"],
+    1: ["Evergreen Marine (Asia)", "178.5", "new_deal", "Term SOFR", "35", "regulatory_compliance", "sll_kpi_performance", "IBK", "FMV Maintenance"],
     2: ["credit_overview", "solvency", "36.5", "198.3", "Industrial Bank of Korea", "freight rate volatility"],
     3: ["3A_external_ratings", "3B_internal_ratings", "MSR", "PASS", "MAS 612", "EMA"],
     4: ["4A_borrower", "Evergreen Marine", "1650000", "OCEAN Alliance", "Amazon Logistics", "Deloitte"],
