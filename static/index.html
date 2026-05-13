@@ -155,9 +155,9 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <div class="card-body p-0">
       <table class="table table-hover mb-0">
         <thead class="table-light"><tr>
-          <th class="ps-3" data-i18n="dash.col_borrower">Borrower</th><th data-i18n="dash.col_type">Type</th><th data-i18n="dash.col_branch">Branch</th><th data-i18n="dash.col_status">Status</th><th data-i18n="dash.col_created">Created</th>
+          <th class="ps-3" data-i18n="dash.col_borrower">Borrower</th><th data-i18n="dash.col_type">Type</th><th data-i18n="dash.col_branch">Branch</th><th data-i18n="dash.col_status">Status</th><th data-i18n="dash.col_created">Created</th><th></th>
         </tr></thead>
-        <tbody id="rptBody"><tr><td colspan="5" class="text-center text-muted py-4" data-i18n="dash.loading">Loading…</td></tr></tbody>
+        <tbody id="rptBody"><tr><td colspan="6" class="text-center text-muted py-4" data-i18n="dash.loading">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1990,18 +1990,30 @@ async function showDashboard(){
 // ── Reports list ──────────────────────────────────────────────────────────────
 async function loadReports(){
   const tb=document.getElementById('rptBody');
-  tb.innerHTML='<tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr>';
+  tb.innerHTML='<tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>';
   try{
     const res=await fetch(API+'/reports?limit=50',{headers:H()});
     if(res.status===401){logout();return;}
     const data=await res.json();
-    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="text-center text-muted py-4">No reports yet.</td></tr>';return;}
+    if(!data.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted py-4">No reports yet.</td></tr>';return;}
     tb.innerHTML=data.map(r=>`<tr class="report-row" onclick="loadReportDetail('${r.id}')">
       <td class="ps-3 fw-semibold">${esc(r.borrower_name||'—')}</td>
       <td>${esc(r.report_type||'—')}</td><td>${esc(r.booking_branch||'—')}</td>
       <td>${sbadge(r.status)}</td><td class="text-muted small">${fd(r.created_at)}</td>
+      <td class="text-end pe-2" onclick="event.stopPropagation()">
+        <button class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size:11px" onclick="deleteReport('${r.id}','${esc(r.borrower_name||r.id)}')">🗑</button>
+      </td>
     </tr>`).join('');
-  }catch(e){tb.innerHTML=`<tr><td colspan="5" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;}
+  }catch(e){tb.innerHTML=`<tr><td colspan="6" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;}
+}
+
+async function deleteReport(id, label){
+  if(!confirm(`Delete report "${label}"?\n\nThis cannot be undone.`))return;
+  try{
+    const res=await fetch(API+'/reports/'+id,{method:'DELETE',headers:H()});
+    if(res.status===204||res.ok){toast('Report deleted','success');await loadReports();}
+    else{const d=await res.json().catch(()=>({}));toast('Delete failed: '+(d.detail||res.status),'danger');}
+  }catch(e){toast('Delete error: '+e.message,'danger');}
 }
 
 async function createReport(){
