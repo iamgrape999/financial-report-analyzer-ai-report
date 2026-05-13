@@ -64,7 +64,7 @@ async def _seed_report(db, rid: str, owner_id: str | None = None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 EXPECTED_FIELD_COUNTS = {
-    1: 7, 2: 6, 3: 4, 4: 12, 5: 7, 6: 7,
+    1: 54, 2: 33, 3: 4, 4: 12, 5: 7, 6: 7,
     7: 8, 8: 2, 9: 4, 10: 3, 11: 12,
 }
 
@@ -128,15 +128,49 @@ MINIMAL_PAYLOADS: dict[int, dict] = {
     2: {
         "2A_credit_overview": {"bullets": [{"order": 1, "text_verbatim": "Test bullet"}],
                                "tariff_impact_paragraphs": ["Minimal tariff exposure."]},
-        "2B_solvency": {"primary_repayment_source_verbatim": "Operating cash flow.",
-                        "secondary_repayment_source_verbatim": "Guarantor support."},
-        "2C_guarantor": {"guarantor_name_abbrev": "TESTG", "period": "FY2024",
-                         "interest_coverage": 15.0},
-        "2D_collateral": {"pre_delivery": {"issuer_full_name": "Test Bank"},
-                          "post_delivery": {"ltc_pct": 80}},
-        "2E_risk_and_mitigants": [{"risk_no": 1, "level": "Medium",
-                                   "title": "Rate risk", "risk_bullets": ["Rate volatility"],
-                                   "mitigant_bullets": ["TC agreement"]}],
+        "2B_solvency": {
+            "primary_repayment_source_verbatim": "Operating cash flow.",
+            "secondary_repayment_source_verbatim": "Guarantor support.",
+            "ema": {
+                "period": "FY2024",
+                "cash_bn_usd": 2.2,
+                "total_debt_bn_usd": 8.5,
+                "op_ebitda_bn_usd": 3.1,
+                "debt_ebitda_ratio": 2.74,
+                "interest_coverage": 15.0,
+                "prior_year_coverage": 14.2,
+            },
+        },
+        "2C_guarantor": {
+            "guarantor_name_abbrev": "TESTG",
+            "guarantor_full_name": "Test Guarantor Corp",
+            "period": "FY2024",
+            "cash_twd_bn": 198.3,
+            "total_debt_twd_bn": 450.0,
+            "net_worth_twd_bn": 320.0,
+            "interest_coverage": 15.0,
+            "support_history_verbatim": "No prior support events.",
+        },
+        "2D_collateral": {
+            "pre_delivery": {
+                "issuer_full_name": "Test Bank",
+                "issuer_rating": "A",
+                "facility_amount_pct": 100,
+                "assigned_to_cub": True,
+            },
+            "post_delivery": {
+                "ltc_pct": 80,
+                "acr_pct": 120,
+                "ltv_pct": 83,
+            },
+        },
+        "2E_risk_and_mitigants": {
+            "risk_factors": [{"risk_no": 1, "level": "Medium",
+                              "title": "Rate risk", "risk_bullets": ["Rate volatility"],
+                              "mitigant_bullets": ["TC agreement"]}],
+            "additional_risk_factors_from_previous": [],
+        },
+        "report_type": "new_deal",
     },
     3: {
         "3A_external_ratings": {"all_nil": True, "ratings": []},
@@ -628,6 +662,16 @@ class TestFieldFilledCompletenessLogic:
             return len(v) > 0
         return True  # numbers, bools
 
+    @staticmethod
+    def _get_nested(obj: dict, path: str) -> Any:
+        """Simulate JS getNestedValue — traverse dot-notation path."""
+        cur = obj
+        for key in path.split("."):
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(key)
+        return cur
+
     def _get_completeness(self, sec_no: int, data: dict) -> dict:
         from_html = _load_html()
         rf_start = from_html.find("const REQUIRED_FIELDS={")
@@ -641,8 +685,8 @@ class TestFieldFilledCompletenessLogic:
         required = re.findall(r"\{p:'([^']+)'", m.group(1)) if m else []
         if not required:
             return {"filled": 0, "total": 0, "pct": 100, "missing": []}
-        filled_paths = [p for p in required if self._is_filled(data.get(p))]
-        missing = [p for p in required if not self._is_filled(data.get(p))]
+        filled_paths = [p for p in required if self._is_filled(self._get_nested(data, p))]
+        missing = [p for p in required if not self._is_filled(self._get_nested(data, p))]
         pct = round(len(filled_paths) / len(required) * 100) if required else 100
         return {"filled": len(filled_paths), "total": len(required),
                 "pct": pct, "missing": missing}

@@ -893,8 +893,8 @@ const TEMPLATES={
 
 // ── Required fields per section (for completeness check) ─────────────────────
 const REQUIRED_FIELDS={
-  1:[{p:'report_type',l:'Report Type'},{p:'facility_summary',l:'Facility Summary Table (1A)'},{p:'regulatory_compliance',l:'Regulatory Compliance — Banking Act s33-3 (1B)'},{p:'purpose_and_recommendation',l:'Purpose of Report & Recommendation (1C)'},{p:'terms_and_conditions',l:'Terms & Conditions — 21 fields + Deal Comparison (1D)'},{p:'account_strategy',l:'Account Strategy — Wallet + 5 Sub-Sections (1F)'}],
-  2:[{p:'2A_credit_overview',l:'Credit Overview Bullets (T1) + Tariff Impact Narrative'},{p:'2B_solvency',l:'Solvency — EMA Repayment Sources + Metrics in Billions (T2)'},{p:'2C_guarantor',l:'Guarantor — EMC Metrics + Support History (T3)'},{p:'2D_collateral',l:'Collateral Summary — Pre/Post Delivery (T4)'},{p:'2E_risk_and_mitigants',l:'Risk and Mitigants with Levels + Bullets (T5)'}],
+  1:[{p:'report_type',l:'Report Type'},{p:'facility_summary',l:'Facility Summary Table (1A)'},{p:'regulatory_compliance.compliance_status',l:'Regulatory Compliance Status (1B)'},{p:'purpose_and_recommendation.recommendation',l:'Recommendation — APPROVE/DECLINE (1C)'},{p:'terms_and_conditions.borrower',l:'Borrower Name (1D)'},{p:'account_strategy.wallet.bank_market',l:'Account Strategy — Wallet NII (1F)'}],
+  2:[{p:'2A_credit_overview.bullets',l:'Credit Overview Bullets (T1)'},{p:'2B_solvency.primary_repayment_source_verbatim',l:'Primary Repayment Source (T2)'},{p:'2C_guarantor.guarantor_name_abbrev',l:'Guarantor Name Abbreviation (T3)'},{p:'2D_collateral.pre_delivery.issuer_full_name',l:'Pre-Delivery RG Issuer (T4)'},{p:'2E_risk_and_mitigants.risk_factors',l:'Risk Factors with Level + Bullets (T5)'}],
   3:[{p:'3A_external_ratings',l:'External Ratings (or NIL)'},{p:'3B_internal_ratings',l:'MSR Table — 6-Column with Sub-Header Row'},{p:'3C_mas_612',l:'MAS 612 Loan Grading — Grade + Paragraphs'},{p:'3D_esg_rating',l:'ESG Rating Date + Image Reference'}],
   4:[{p:'4A_borrower',l:'Corporate Identity (4A)'},{p:'4B_ownership',l:'Ownership & Group Structure (4B)'},{p:'4C_management',l:'Key Management Table (4C)'},{p:'4D_business',l:'Business Overview (4D)'},{p:'4E_financials',l:'Financial Highlights — revenue/EBITDA/net income (4E)'},{p:'4F_fleet',l:'Fleet Profile — breakdown table (4F)'},{p:'4J_peer_comparison',l:'Peer Comparison Table (4J)'}],
   5:[{p:'5A_security_overview',l:'Security Package Overview — secured/unsecured (5A)'},{p:'5C_vessel_mortgage',l:'Vessel Mortgage — valuations, LTC, ACR, LTV (5C)'},{p:'5E_value_maintenance_clause',l:'Value Maintenance Clause with cure mechanism (5E)'}],
@@ -906,8 +906,19 @@ const REQUIRED_FIELDS={
   11:[{p:'11A_report_meta',l:'Analyst Report Metadata'},{p:'11B_rating',l:'Rating & Target Price'},{p:'11D_investment_thesis',l:'Investment Thesis (bull/bear/catalysts/risks)'},{p:'11E_annual_income_statement',l:'Annual Income Statement'}],
 };
 
+function getNestedValue(obj,path){
+  return path.split('.').reduce(function(cur,key){return cur!=null?cur[key]:undefined;},obj);
+}
+function setNestedValue(obj,path,value){
+  const keys=path.split('.');let cur=obj;
+  for(let i=0;i<keys.length-1;i++){
+    if(cur[keys[i]]===null||cur[keys[i]]===undefined||typeof cur[keys[i]]!=='object')cur[keys[i]]={};
+    cur=cur[keys[i]];
+  }
+  cur[keys[keys.length-1]]=value;
+}
 function isFieldFilled(data,path){
-  const v=data[path];
+  const v=getNestedValue(data,path);
   if(v===null||v===undefined)return false;
   if(typeof v==='string'){const t=v.trim();return t!==''&&!t.startsWith('To be generated from')&&t!=='APPROVE/DECLINE';}
   if(Array.isArray(v))return v.length>0;
@@ -943,14 +954,96 @@ function renderCompleteness(secNo,data){
 
 // ── Structured form field definitions per section ─────────────────────────────
 const FIELD_DEFS={
-  1:[{p:'report_type',l:'Report Type',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']},{p:'facility_summary',l:'1A — Facility Summary Table (JSON)',t:'json',h:'{"rows":[{"item_no":1,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"SG","current_facility_usd_m":null,"proposed_facility_usd_m":178.5,"is_new":true,"outstanding_usd_m":0,"outstanding_as_at":"end Oct 2025","currency":"USD","tenor":"7 years after Vessel Delivery Date or 11 years after Initial Drawdown Date, whichever earlier (Expected Delivery: 30 Jun 2028)","facility_type":"Committed Bilateral Term Loan (SLL)","collateral_pre":"Refund Guarantee issued by Korea Development Bank, assigned to CUB","collateral_post":"One 20,000 TEU dual fuel (LNG, Diesel) containership (Hull No. 2891)","guarantor":"Evergreen Marine Corporation (Taiwan) Ltd. (EMC)","is_psr":false,"is_lapsing":false},{"item_no":2,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"SG","current_facility_usd_m":128.75,"proposed_facility_usd_m":128.75,"is_new":false,"outstanding_usd_m":0,"currency":"USD","tenor":"11 years (4+7)","facility_type":"Committed Bilateral Term Loan (SLL)","collateral_pre":"Refund Guarantee issued by KEXIM, assigned to CUB","collateral_post":"One 14,000 TEU methanol dual fuel containership (Hull No. K712)","guarantor":"Evergreen Marine Corporation (Taiwan) Ltd. (EMC)","is_psr":false,"is_lapsing":false}],"totals":{"total_credit_limit_usd_m":307.25,"psr_spot_limit_usd_m":0.88},"footnotes":[{"symbol":"*","text_verbatim":"Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period."}],"appendix_ref":"Please refer to Appendix I for total CUB exposure to Evergreen Group."}'},{p:'regulatory_compliance',l:'1B — Regulatory Compliance — Banking Act s33-3, Unsecured Exposure, Group Limit (JSON)',t:'json',h:'{"bank_net_worth_twd_bn":275,"single_borrower_limit_pct":5,"single_borrower_limit_twd_bn":13.75,"usd_equivalent_usd_m":436,"exchange_rate":31.52,"exchange_rate_date":"2025-12-12","china_invested_enterprise":false,"compliance_status":"Compliant","unsecured_drawdown_cap_pct":32,"unsecured_drawdown_cap_usd_m":71.4,"credit_breakdown":[{"facility":"New vessel loan (Item 1)","credit_limit_usd_m":178.5,"unsecured_usd_m":71.4,"secured":"After delivery: 60% of appraised value"}],"group_limit":{"approved_group_limit_usd_m":750,"total_proposed_group_utilization_usd_m":673.13,"ema_proposed_exposure_usd_m":418.13,"within_limit":true}}'},{p:'purpose_and_recommendation',l:'1C — Purpose of Report & Recommendation (JSON)',t:'json',h:'{"purpose_verbatim":"This report seeks approval for a new USD178.50m committed secured 11-year sustainability-linked bilateral term loan facility to EMA to finance one 20,000 TEU dual fuel (LNG, Diesel) containership under construction by Samsung Heavy Industries Co., Ltd. in South Korea. The facility amount represents 80% of vessel contract price of USD223.13m and is guaranteed by EMC.","recommendation":"APPROVE"}'},{p:'terms_and_conditions',l:'1D — Terms & Conditions: 21 T&C fields + Deal Comparison (JSON)',t:'json',h:'{"borrower":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","guarantors":["Evergreen Marine Corporation (Taiwan) Ltd. (EMC)"],"lender":"Cathay United Bank Singapore Branch (CUB SG)","facility_type":"Committed Bilateral Term Loan (Sustainability-Linked)","facility_amount_usd_m":178.5,"facility_amount_formula":"Lesser of USD178,500,000 and 80% of Initial Market Value of Vessel","ltc_percent":80,"tenor_years":11,"tenor_structure":"4+7 (pre-delivery + post-delivery)","purpose":"Acquisition of one 20,000 TEU dual fuel (LNG, Diesel) containership (Hull No. 2891) under construction at Samsung Heavy Industries Co., Ltd., South Korea","availability_period":"Till 6 months from vessel delivery date; undrawn limits automatically cancelled","repayment_schedule":"First 5% repayment 6 months from delivery; subsequent 12 semi-annual instalments of 5% each; final 35% balloon at maturity","balloon_percent":35,"interest_rate_basis":"Term SOFR","margin_bps":85,"interest_period":"3 months or 1 month, not exceeding 3 months","upfront_fee_pct":0.1,"upfront_fee_usd":178500,"annual_renewal_fee_usd":10000,"security_pre_delivery":"Assignment of Refund Guarantee issued by Korea Development Bank (KDB), fully covering each pre-delivery installment, assigned to CUB SG","security_post_delivery":"First priority perfected mortgage on Vessel for 120% of Facility Amount plus interest and costs, and assignment of insurances","value_maintenance_clause":{"acr_minimum_pct":120,"ltv_maximum_pct":83,"testing_frequency":"Every 2 years post delivery","cure_period_days":21,"cure_mechanism":"Partial prepayment or provision of additional collateral"},"sustainability_linked_kpi":{"description":"Annual testing; KPIs cover EMC fleet Scope 1 CO2 intensity reduction, MSCI ESG rating, and DJSI inclusion","max_margin_ratchet_bps":5,"ratchet_direction":"Margin increase on KPI miss / decrease on KPI achievement"},"financial_covenants":"NIL","drawdown_conditions":{"max_drawdowns":5,"per_drawdown_cap_pct_of_cost":80,"aggregate_cap_usd_m":178.5,"pre_delivery_cap_usd_m":71.4},"conditions_precedent":["Execution of facility and security documents","EMC Corporate Guarantee","Assignment of Refund Guarantee from KDB to CUB SG","Satisfactory legal opinions","Evidence of upfront fee payment","KYC/AML completion","EMA and EMC board resolutions"],"other_conditions":["EMC to remain listed throughout the loan facility"],"governing_law":"Singapore","deal_comparison":[{"term":"Guarantor","proposed":"EMC","previous":"EMC"},{"term":"Facility Amount","proposed":"USD178.5m (80% LTC)","previous":"USD128.75m (80% LTC)"},{"term":"Purpose","proposed":"One 20,000 TEU newbuild","previous":"One 14,000 TEU newbuild"},{"term":"Tenor","proposed":"11 years (4+7)","previous":"11 years (4+7)"},{"term":"Margin","proposed":"0.85% p.a.","previous":"0.85% p.a."},{"term":"Upfront Fee","proposed":"0.10%","previous":"0.10%"},{"term":"SLL Ratchet","proposed":"Max 5bps p.a.","previous":"Max 5bps p.a."},{"term":"Drawdowns","proposed":"<=5","previous":"<=5"},{"term":"Availability Period","proposed":"Till 6 months post delivery; undrawn cancelled","previous":"Till 6 months post delivery; undrawn cancelled"},{"term":"Security","proposed":"Pre: RG (KDB); Post: First mortgage","previous":"Pre: RG (KEXIM); Post: First mortgage"},{"term":"FMV Maintenance","proposed":">=120%","previous":">=120%"}]}'},{p:'account_strategy',l:'1F — Account Strategy: Wallet + 5 Sub-Sections (JSON)',t:'json',h:'{"wallet":{"bank_market":"NII USD7.5m p.a.","capital_market":"USD 20m (bonds/ECM)","treasury":"FX / IRS hedging","deposit":"EMA USD1.9bn; EMC NTD198bn"},"current_relationship":"NII USD7.5m p.a.; utilization 55%","immediate_opportunities":"FX hedging for pre-delivery installments; upfront fee USD178,500","future_opportunities":"Capital markets bond USD100m; syndication lead role","other_opportunities":"Cross-sell trade finance; ESG advisory"}'},{p:'sll_kpi_performance',l:'SLL KPI Actual vs Target Table (JSON — for SLL facilities)',t:'json',h:'{"kpis":[{"kpi_name":"CO2 Intensity (gCO2/dwt-nm)","target_value":"<=8.5","actual_value":"7.2","period":"2024","on_track":true,"ratchet_bps":-5},{"kpi_name":"MSCI ESG Rating","target_value":"AA","actual_value":"A","period":"2024","on_track":false,"ratchet_bps":0},{"kpi_name":"DJSI Inclusion","target_value":"Included","actual_value":"Included","period":"2024","on_track":true,"ratchet_bps":-5}]}'}],
+  1:[
+    {p:'report_type',l:'Report Type',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']},
+    {p:'facility_summary',l:'1A — Facility Summary Table (JSON — rows/totals/footnotes/appendix_ref)',t:'json',h:'{"rows":[{"item_no":1,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"SG","current_facility_usd_m":null,"proposed_facility_usd_m":178.5,"is_new":true,"outstanding_usd_m":0,"currency":"USD","tenor":"7 years after VDD or 11 years after Initial Drawdown, whichever earlier","facility_type":"Committed Bilateral Term Loan (SLL)","collateral_pre":"RG issued by KDB, assigned to CUB","collateral_post":"One 20,000 TEU LNG dual fuel containership (Hull No. 2891)","guarantor":"EMC","is_psr":false,"is_lapsing":false}],"totals":{"total_credit_limit_usd_m":307.25,"psr_spot_limit_usd_m":0.88},"footnotes":[{"symbol":"[1]","text_verbatim":"Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period."}],"appendix_ref":"Please refer to Appendix I for total CUB exposure to Evergreen Group."}'},
+    {p:'regulatory_compliance.bank_net_worth_twd_bn',l:'1B — Bank Net Worth (TWD bn)',t:'number'},
+    {p:'regulatory_compliance.single_borrower_limit_pct',l:'1B — Single Borrower Limit (%)',t:'number'},
+    {p:'regulatory_compliance.single_borrower_limit_twd_bn',l:'1B — Single Borrower Limit (TWD bn)',t:'number'},
+    {p:'regulatory_compliance.usd_equivalent_usd_m',l:'1B — Single Borrower Limit (USD M equiv.)',t:'number'},
+    {p:'regulatory_compliance.exchange_rate',l:'1B — Exchange Rate (TWD/USD)',t:'number'},
+    {p:'regulatory_compliance.exchange_rate_date',l:'1B — Exchange Rate Date',t:'text',h:'e.g. 2025-12-12'},
+    {p:'regulatory_compliance.china_invested_enterprise',l:'1B — China Invested Enterprise?',t:'bool'},
+    {p:'regulatory_compliance.compliance_status',l:'1B — Compliance Status',t:'select',opts:['Compliant','Non-Compliant','Conditional Compliant']},
+    {p:'regulatory_compliance.unsecured_drawdown_cap_pct',l:'1B — Unsecured Drawdown Cap (%)',t:'number'},
+    {p:'regulatory_compliance.unsecured_drawdown_cap_usd_m',l:'1B — Unsecured Drawdown Cap (USD M)',t:'number'},
+    {p:'regulatory_compliance.group_limit.approved_group_limit_usd_m',l:'1B — Approved Group Limit (USD M)',t:'number'},
+    {p:'regulatory_compliance.group_limit.total_proposed_group_utilization_usd_m',l:'1B — Total Proposed Group Utilization (USD M)',t:'number'},
+    {p:'regulatory_compliance.group_limit.within_limit',l:'1B — Group Limit: Within Limit?',t:'bool'},
+    {p:'purpose_and_recommendation.purpose_verbatim',l:'1C — Purpose of Report (verbatim)',t:'textarea',h:'This report seeks approval for...'},
+    {p:'purpose_and_recommendation.recommendation',l:'1C — Recommendation',t:'select',opts:['APPROVE','DECLINE','CONDITIONAL APPROVAL']},
+    {p:'terms_and_conditions.borrower',l:'1D — Borrower',t:'text',h:'e.g. Evergreen Marine (Asia) Pte. Ltd. (EMA)'},
+    {p:'terms_and_conditions.guarantors',l:'1D — Guarantors (one per line)',t:'lines'},
+    {p:'terms_and_conditions.lender',l:'1D — Lender',t:'text',h:'e.g. Cathay United Bank Singapore Branch (CUB SG)'},
+    {p:'terms_and_conditions.facility_type',l:'1D — Facility Type',t:'text',h:'e.g. Committed Bilateral Term Loan (SLL)'},
+    {p:'terms_and_conditions.facility_amount_usd_m',l:'1D — Facility Amount (USD M)',t:'number'},
+    {p:'terms_and_conditions.facility_amount_formula',l:'1D — Facility Amount Formula',t:'text',h:'e.g. Lesser of USD178.5m and 80% of Initial Market Value'},
+    {p:'terms_and_conditions.ltc_percent',l:'1D — LTC / Advance Rate (%)',t:'number'},
+    {p:'terms_and_conditions.tenor_years',l:'1D — Tenor (years)',t:'number'},
+    {p:'terms_and_conditions.tenor_structure',l:'1D — Tenor Structure',t:'text',h:'e.g. 4+7 (pre-delivery + post-delivery)'},
+    {p:'terms_and_conditions.purpose',l:'1D — Purpose of Facility',t:'textarea'},
+    {p:'terms_and_conditions.repayment_schedule',l:'1D — Repayment Schedule',t:'textarea',h:'e.g. First 5% repayment 6 months from delivery; 12 semi-annual 5% instalments; 35% balloon'},
+    {p:'terms_and_conditions.balloon_percent',l:'1D — Balloon at Maturity (%)',t:'number'},
+    {p:'terms_and_conditions.interest_rate_basis',l:'1D — Interest Rate Basis',t:'text',h:'e.g. Term SOFR'},
+    {p:'terms_and_conditions.margin_bps',l:'1D — Margin (bps)',t:'number'},
+    {p:'terms_and_conditions.interest_period',l:'1D — Interest Period',t:'text',h:'e.g. 3 months or 1 month'},
+    {p:'terms_and_conditions.upfront_fee_pct',l:'1D — Upfront Fee (%)',t:'number'},
+    {p:'terms_and_conditions.upfront_fee_usd',l:'1D — Upfront Fee (USD amount)',t:'number'},
+    {p:'terms_and_conditions.annual_renewal_fee_usd',l:'1D — Annual Renewal Fee (USD)',t:'number'},
+    {p:'terms_and_conditions.security_pre_delivery',l:'1D — Pre-Delivery Security',t:'textarea'},
+    {p:'terms_and_conditions.security_post_delivery',l:'1D — Post-Delivery Security',t:'textarea'},
+    {p:'terms_and_conditions.value_maintenance_clause',l:'1D — Value Maintenance Clause (JSON)',t:'json',h:'{"acr_minimum_pct":120,"ltv_maximum_pct":83,"testing_frequency":"Every 2 years post delivery","cure_period_days":21,"cure_mechanism":"Partial prepayment or provision of additional collateral"}'},
+    {p:'terms_and_conditions.sustainability_linked_kpi',l:'1D — Sustainability-Linked KPI (JSON)',t:'json',h:'{"description":"Annual testing; KPIs cover EMC fleet Scope 1 CO2 intensity reduction, MSCI ESG rating, and DJSI inclusion","max_margin_ratchet_bps":5,"ratchet_direction":"Margin increase on KPI miss / decrease on KPI achievement"}'},
+    {p:'terms_and_conditions.financial_covenants',l:'1D — Financial Covenants',t:'text',h:'e.g. NIL'},
+    {p:'terms_and_conditions.drawdown_conditions',l:'1D — Drawdown Conditions (JSON)',t:'json',h:'{"max_drawdowns":5,"per_drawdown_cap_pct_of_cost":80,"aggregate_cap_usd_m":178.5,"pre_delivery_cap_usd_m":71.4}'},
+    {p:'terms_and_conditions.conditions_precedent',l:'1D — Conditions Precedent (JSON array)',t:'json',h:'["Execution of all Facility Agreement and Security Documents","Receipt of satisfactory legal opinions (Singapore law)","Evidence of insurance placement (H&M, P&I, War Risk)","KYC/AML completion","EMA and EMC board resolutions"]'},
+    {p:'terms_and_conditions.other_conditions',l:'1D — Other Conditions (one per line)',t:'lines',h:'e.g. EMC to remain listed throughout the loan facility'},
+    {p:'terms_and_conditions.governing_law',l:'1D — Governing Law',t:'text'},
+    {p:'terms_and_conditions.deal_comparison',l:'1D — Deal Comparison (JSON array — min 11 rows)',t:'json',h:'[{"term":"Guarantor","proposed":"EMC","previous":"EMC"},{"term":"Facility Amount","proposed":"USD178.5m (80% LTC)","previous":"USD128.75m (80% LTC)"},{"term":"Purpose","proposed":"One 20,000 TEU newbuild","previous":"One 14,000 TEU newbuild"},{"term":"Vessel Type","proposed":"20,000 TEU LNG dual fuel","previous":"14,000 TEU methanol dual fuel"},{"term":"Tenor","proposed":"11 years (4+7)","previous":"11 years (4+7)"},{"term":"Margin","proposed":"0.85% p.a.","previous":"0.85% p.a."},{"term":"Upfront Fee","proposed":"0.10%","previous":"0.10%"},{"term":"SLL Ratchet","proposed":"Max 5bps p.a.","previous":"Max 5bps p.a."},{"term":"Drawdowns","proposed":"<=5","previous":"<=5"},{"term":"Availability Period","proposed":"Till 6 months post delivery; undrawn cancelled","previous":"Till 6 months post delivery; undrawn cancelled"},{"term":"Security","proposed":"Pre: RG (KDB); Post: First mortgage","previous":"Pre: RG (KEXIM); Post: First mortgage"},{"term":"FMV Maintenance","proposed":">=120%","previous":">=120%"}]'},
+    {p:'account_strategy.wallet.bank_market',l:'1F — Wallet: Bank Market (NII / fees p.a.)',t:'text',h:'e.g. NII USD7.5m p.a.'},
+    {p:'account_strategy.wallet.capital_market',l:'1F — Wallet: Capital Markets',t:'text',h:'e.g. USD 20m (bonds/ECM)'},
+    {p:'account_strategy.wallet.treasury',l:'1F — Wallet: Treasury (FX / IRS)',t:'text',h:'e.g. FX / IRS hedging'},
+    {p:'account_strategy.wallet.deposit',l:'1F — Wallet: Deposits',t:'text',h:'e.g. EMA USD1.9bn; EMC NTD198bn'},
+    {p:'account_strategy.current_relationship',l:'1F — Current Relationship Summary',t:'text'},
+    {p:'account_strategy.immediate_opportunities',l:'1F — Immediate Opportunities',t:'textarea'},
+    {p:'account_strategy.future_opportunities',l:'1F — Future Opportunities',t:'textarea'},
+    {p:'account_strategy.other_opportunities',l:'1F — Other Opportunities',t:'textarea'},
+    {p:'sll_kpi_performance',l:'SLL KPI Actual vs Target Table (JSON — for SLL facilities)',t:'json',h:'{"kpis":[{"kpi_name":"CO2 Intensity (gCO2/dwt-nm)","target_value":"<=8.5","actual_value":"7.2","period":"2024","on_track":true,"ratchet_bps":-5},{"kpi_name":"MSCI ESG Rating","target_value":"AA","actual_value":"A","period":"2024","on_track":false,"ratchet_bps":0},{"kpi_name":"DJSI Inclusion","target_value":"Included","actual_value":"Included","period":"2024","on_track":true,"ratchet_bps":-5}]}'}
+  ],
   2:[
-    {p:'2A_credit_overview',l:'Credit Overview Bullets + Tariff Impact (JSON)',t:'json',h:'{"bullets":[{"order":1,"text_verbatim":"EMC is the 7th largest container line globally with 1.97m TEU capacity and 5.8% market share"},{"order":2,"text_verbatim":"New USD178.5m SLL facility to finance one 20,000 TEU LNG dual fuel vessel"},{"order":3,"text_verbatim":"EMA net cash USD0.9bn; D/E 0.38x as at FY2024"},{"order":4,"text_verbatim":"Pre-delivery: IBK Refund Guarantee (A+/Aa2) fully covering each installment assigned to CUB"},{"order":5,"text_verbatim":"9M2025 CCFI average 1,220, -28% YoY; EMC revenue TWD198bn"},{"order":6,"text_verbatim":"EMC: #14 ranked globally, SCC/OCEAN Alliance member, 50-year track record"}],"tariff_impact_paragraphs":["EMC has minimal direct exposure to US tariff risk. Cross-trade lanes account for approximately 15% of revenue...","Historical leverage benchmarks show EMC maintained net cash position even in the worst-year 2016..."]}'},
-    {p:'2B_solvency',l:'Solvency — EMA Repayment Sources + Metrics (JSON)',t:'json',h:'{"primary_repayment_source_verbatim":"Primary source of repayment will be from operating cash flow generated by the EMA vessel fleet.","secondary_repayment_source_verbatim":"Secondary source of repayment include the corporate guarantee provided by EMC and the value of the vessel collateral.","ema":{"period":"FY2024","cash_bn_usd":2.20,"total_debt_bn_usd":1.95,"op_ebitda_bn_usd":3.05,"debt_ebitda_ratio":0.64,"interest_coverage":36.5,"prior_year_coverage":42.1}}'},
-    {p:'2C_guarantor',l:'Guarantor — EMC Metrics + Support History (JSON)',t:'json',h:'{"guarantor_name_abbrev":"EMC","period":"3Q2025","cash_twd_bn":198.3,"cash_usd_bn":6.3,"total_debt_twd_bn":87.2,"total_debt_usd_bn":2.8,"interest_coverage":31.2,"prior_year_coverage":35.8,"support_history_verbatim":"EMC has consistently supported EMA through providing corporate guarantees across all CUB facilities since 2019. No events of default or drawdown on guarantees to date."}'},
-    {p:'2D_collateral',l:'Collateral Summary — Pre/Post Delivery (JSON)',t:'json',h:'{"pre_delivery":{"issuer_full_name":"Korea Development Bank","rating_sp":"AA","rating_fitch":"AA-","coverage_verbatim":"fully covering each pre-delivery installment during vessel pre-delivery phase","assigned_to_cub":true,"satisfactory_to_bank":true},"post_delivery":{"security_type":"First priority vessel mortgage","vessel_spec":"one 24,000 TEU dual-fuel (LNG, Diesel) containership (Hull No. 2891)","ltc_pct":80,"acr_pct":120,"ltv_pct":83}}'},
-    {p:'2E_risk_and_mitigants',l:'Risk Factors + Additional Risk Factors from Previous (JSON)',t:'json',h:'{"risk_factors":[{"risk_no":1,"level":"High","title":"Container freight rate volatility","changes_from_previous":null,"risk_bullets":["CCFI averaged 1,220 in 9M2025, down 28% YoY","Revenue highly correlated with spot and contract rates; US-China tariff impact on trade volumes"],"mitigant_bullets":["Long-term TC contract with EMC covering >80% of vessel revenue for 12 years","EMC balance sheet: net cash TWD5.2bn (USD165m); D/E 0.31x as of 3Q2025","Historical precedent: CCFI trough was 842 in FY2016 (FY2000-FY2019 average 1,050); EMC remained net-cash positive even in worst-year 2016","40% of world\'s container ships affected by Red Sea disruptions — near-term rate support"]},{"risk_no":2,"level":"Medium","title":"Construction/delivery risk","changes_from_previous":null,"risk_bullets":["Delivery expected Jun 2028; delay risk given complex LNG dual fuel systems"],"mitigant_bullets":["SHI: 94% on-time delivery rate over past 5 years across 180 vessels","210-day contractual grace period built into facility structure","Korea Development Bank (AA, AA- rating by S&P and Fitch respectively) Refund Guarantee fully covers each pre-delivery installment"]}],"additional_risk_factors_from_previous":[{"title":"US Port Fee Surcharge Risk","level":"Medium","note":"New risk identified since previous review; US Executive Order on port fees for Chinese-built vessels effective Jan 2026"}]}'},
-    {p:'report_type',l:'Report Type (new_deal / annual_review)',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']}
+    {p:'2A_credit_overview.bullets',l:'2A — Credit Overview Bullets (JSON — order + text_verbatim)',t:'json',h:'[{"order":1,"text_verbatim":"EMC is the 7th largest container line globally with 1.97m TEU capacity and 5.8% market share"},{"order":2,"text_verbatim":"New USD178.5m SLL facility to finance one 20,000 TEU LNG dual fuel vessel"},{"order":3,"text_verbatim":"EMA net cash USD0.9bn; D/E 0.38x as at FY2024"},{"order":4,"text_verbatim":"Pre-delivery: KDB Refund Guarantee (AA/AA-) fully covering each installment, assigned to CUB"},{"order":5,"text_verbatim":"9M2025 CCFI average 1,220, -28% YoY; EMC revenue TWD198bn"},{"order":6,"text_verbatim":"EMC: 7th ranked globally, OCEAN Alliance member, 50-year track record"}]'},
+    {p:'2A_credit_overview.tariff_impact_paragraphs',l:'2A — Tariff Impact Paragraphs (JSON array of 2 verbatim strings)',t:'json',h:'["EMC has minimal direct exposure to US tariff risk. Cross-trade lanes account for approximately 15% of revenue. Historical analysis shows freight rates recovered within 12-18 months of previous US-China trade disputes.","Historical leverage benchmarks show EMC maintained net cash position even in the worst-year 2016 (CCFI trough 842). Current net cash of TWD5.2bn provides significant buffer against rate headwinds."]'},
+    {p:'2B_solvency.primary_repayment_source_verbatim',l:'2B — Primary Repayment Source (verbatim)',t:'textarea',h:'Primary source of repayment will be from operating cash flow generated by the EMA vessel fleet.'},
+    {p:'2B_solvency.secondary_repayment_source_verbatim',l:'2B — Secondary Repayment Source (verbatim)',t:'textarea',h:'Secondary source of repayment include the corporate guarantee provided by EMC and the value of the vessel collateral.'},
+    {p:'2B_solvency.ema.period',l:'2B — EMA Financial Period',t:'text',h:'e.g. FY2024'},
+    {p:'2B_solvency.ema.cash_bn_usd',l:'2B — EMA Cash (USD bn)',t:'number'},
+    {p:'2B_solvency.ema.total_debt_bn_usd',l:'2B — EMA Total Debt (USD bn)',t:'number'},
+    {p:'2B_solvency.ema.op_ebitda_bn_usd',l:'2B — EMA Operating EBITDA (USD bn)',t:'number'},
+    {p:'2B_solvency.ema.debt_ebitda_ratio',l:'2B — EMA Debt / EBITDA',t:'number'},
+    {p:'2B_solvency.ema.interest_coverage',l:'2B — EMA Interest Coverage (current year)',t:'number'},
+    {p:'2B_solvency.ema.prior_year_coverage',l:'2B — EMA Interest Coverage (prior year)',t:'number'},
+    {p:'2C_guarantor.guarantor_name_abbrev',l:'2C — Guarantor Abbreviation',t:'text',h:'e.g. EMC'},
+    {p:'2C_guarantor.period',l:'2C — Guarantor Financial Period',t:'text',h:'e.g. 3Q2025'},
+    {p:'2C_guarantor.cash_twd_bn',l:'2C — Guarantor Cash (TWD bn)',t:'number'},
+    {p:'2C_guarantor.cash_usd_bn',l:'2C — Guarantor Cash (USD bn)',t:'number'},
+    {p:'2C_guarantor.total_debt_twd_bn',l:'2C — Guarantor Total Debt (TWD bn)',t:'number'},
+    {p:'2C_guarantor.total_debt_usd_bn',l:'2C — Guarantor Total Debt (USD bn)',t:'number'},
+    {p:'2C_guarantor.interest_coverage',l:'2C — Guarantor Interest Coverage (current year)',t:'number'},
+    {p:'2C_guarantor.prior_year_coverage',l:'2C — Guarantor Interest Coverage (prior year)',t:'number'},
+    {p:'2C_guarantor.support_history_verbatim',l:'2C — Guarantor Support History (verbatim)',t:'textarea'},
+    {p:'2D_collateral.pre_delivery.issuer_full_name',l:'2D — Pre-Delivery RG Issuer Full Name',t:'text',h:'e.g. Korea Development Bank'},
+    {p:'2D_collateral.pre_delivery.rating_sp',l:'2D — RG Issuer Rating (S&P)',t:'text',h:'e.g. AA'},
+    {p:'2D_collateral.pre_delivery.rating_fitch',l:'2D — RG Issuer Rating (Fitch)',t:'text',h:'e.g. AA-'},
+    {p:'2D_collateral.pre_delivery.coverage_verbatim',l:'2D — Pre-Delivery Coverage Description (verbatim)',t:'textarea',h:'fully covering each pre-delivery installment during vessel pre-delivery phase'},
+    {p:'2D_collateral.pre_delivery.assigned_to_cub',l:'2D — RG Assigned to CUB?',t:'bool'},
+    {p:'2D_collateral.post_delivery.security_type',l:'2D — Post-Delivery Security Type',t:'text',h:'e.g. First priority vessel mortgage'},
+    {p:'2D_collateral.post_delivery.vessel_spec',l:'2D — Vessel Specification (post-delivery)',t:'text',h:'e.g. one 20,000 TEU dual-fuel (LNG, Diesel) containership (Hull No. 2891)'},
+    {p:'2D_collateral.post_delivery.ltc_pct',l:'2D — LTC at Delivery (%)',t:'number'},
+    {p:'2D_collateral.post_delivery.acr_pct',l:'2D — ACR Floor (%)',t:'number'},
+    {p:'2D_collateral.post_delivery.ltv_pct',l:'2D — LTV Cap (%)',t:'number'},
+    {p:'2E_risk_and_mitigants.risk_factors',l:'2E — Risk Factors (JSON — risk_no,level,title,risk_bullets,mitigant_bullets)',t:'json',h:'[{"risk_no":1,"level":"High","title":"Container freight rate volatility","changes_from_previous":null,"risk_bullets":["CCFI averaged 1,220 in 9M2025, down 28% YoY","Revenue highly correlated with spot and contract rates"],"mitigant_bullets":["Long-term TC contract with EMC covering >80% of vessel revenue","EMC balance sheet: net cash TWD5.2bn; D/E 0.31x as of 3Q2025","Historical: CCFI trough 842 in FY2016; EMC remained net-cash positive"]},{"risk_no":2,"level":"Medium","title":"Construction/delivery risk","changes_from_previous":null,"risk_bullets":["Delivery expected Jun 2028; delay risk given complex LNG dual fuel systems"],"mitigant_bullets":["SHI: 94% on-time delivery rate over past 5 years","210-day contractual grace period built into facility structure","KDB Refund Guarantee (AA/AA-) fully covers each pre-delivery installment"]}]'},
+    {p:'2E_risk_and_mitigants.additional_risk_factors_from_previous',l:'2E — Additional / New Risk Factors vs Prior Review (JSON array)',t:'json',h:'[{"title":"US Port Fee Surcharge Risk","level":"Medium","note":"New risk identified since previous review; US Executive Order on port fees for Chinese-built vessels effective Jan 2026"}]'},
+    {p:'report_type',l:'Report Type',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']}
   ],
   3:[
     {p:'3A_external_ratings',l:'External Ratings (JSON) — all_nil=true → one sentence only',t:'json',h:'{"all_nil":true,"ratings":[]}'},
@@ -1004,7 +1097,7 @@ function populateForm(secNo,data){
   const defs=FIELD_DEFS[secNo]||[];
   for(const f of defs){
     const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
-    const v=data[f.p];if(v===null||v===undefined){el.value='';continue;}
+    const v=getNestedValue(data,f.p);if(v===null||v===undefined){el.value='';continue;}
     if(f.t==='lines')el.value=Array.isArray(v)?v.join('\n'):String(v);
     else if(f.t==='json')el.value=typeof v==='object'?JSON.stringify(v,null,2):String(v);
     else if(f.t==='bool')el.value=String(v);
@@ -1017,11 +1110,13 @@ function collectFormData(secNo){
   for(const f of defs){
     const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
     const raw=el.value.trim();if(!raw)continue;
-    if(f.t==='number'){const n=parseFloat(raw);if(!isNaN(n))result[f.p]=n;}
-    else if(f.t==='lines')result[f.p]=raw.split('\n').map(l=>l.trim()).filter(Boolean);
-    else if(f.t==='json'){try{result[f.p]=JSON.parse(raw);}catch(e){result[f.p]=raw;}}
-    else if(f.t==='bool')result[f.p]=raw==='true';
-    else result[f.p]=raw;
+    let value;
+    if(f.t==='number'){const n=parseFloat(raw);if(isNaN(n))continue;value=n;}
+    else if(f.t==='lines')value=raw.split('\n').map(l=>l.trim()).filter(Boolean);
+    else if(f.t==='json'){try{value=JSON.parse(raw);}catch(e){value=raw;}}
+    else if(f.t==='bool')value=raw==='true';
+    else value=raw;
+    setNestedValue(result,f.p,value);
   }
   return result;
 }
