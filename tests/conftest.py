@@ -28,7 +28,7 @@ def create_test_environment():
     for d in ["data", "data/credit_reports", "data/memory", "data/logs"]:
         Path(d).mkdir(parents=True, exist_ok=True)
 
-    async def _create_tables() -> None:
+    async def _create_tables_and_seed() -> None:
         # Import all model modules so their metadata is registered before create_all
         import credit_report.models  # noqa: F401
         import credit_report.calculation_engine.models  # noqa: F401
@@ -41,4 +41,9 @@ def create_test_environment():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-    asyncio.run(_create_tables())
+        # Seed the admin user so tests that call login("admin@example.com")
+        # work against a fresh CI database as well as an existing local database.
+        from main import _seed_admin
+        await _seed_admin()
+
+    asyncio.run(_create_tables_and_seed())
