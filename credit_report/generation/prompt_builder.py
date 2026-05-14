@@ -251,9 +251,10 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "2. **ZERO COMPRESSION**: Every quantitative data point from input MUST appear in output. "
         "Trade diversion %, debt capacity, historical benchmarks, vessel %, port call % — ALL preserved.\n"
         "3. **KDB RATING**: \"Korea Development Bank (AA, AA- rating by S&P and Fitch respectively)\" "
-        "— MUST appear in BOTH T1 bullet #4 AND T4. NEVER omit.\n"
+        "— MUST appear in BOTH T1 bullet #4 AND T4 (when 2D_collateral data is provided). NEVER omit "
+        "when collateral data is present.\n"
         "4. **RISK COUNT**: Output EXACTLY the number of risks in input + additional_risk_factors_from_previous "
-        "items. Do NOT add, merge, split, or skip any.\n"
+        "items. Do NOT add, merge, split, or skip any. (When 2E_risk_and_mitigants is null, use placeholder — see C-5.)\n"
         "5. **NO SUB-HEADINGS**: Heading EXACTLY \"2. Overall Comments\". "
         "ZERO sub-numbering (no 2.1/2.2). VIOLATION = REJECTION.\n\n"
 
@@ -311,7 +312,12 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "### C-2. Solvency (MANDATORY — Table T2)\n"
         "Left: **Solvency**. Right: by entity.\n\n"
 
-        "**OPENING SENTENCES (MANDATORY):**\n"
+        "⛔NULL DATA RULE for T2: If `2B_solvency` in the input JSON is null, empty, or absent → "
+        "T2 right cell MUST contain EXACTLY: '[Solvency data not yet provided — please complete "
+        "the 2B_solvency section in the analyst input form]'. "
+        "NEVER generate empty cells, '||', or blank rows. NEVER skip Table T2.\n\n"
+
+        "**OPENING SENTENCES (MANDATORY when 2B_solvency data IS present):**\n"
         "\"Primary source of repayment will be from cash generated from EMA's operating activities. "
         "Secondary source of repayment include available cash on hand, sale of vessel, "
         "or capital injection from parent EMC.\"\n\n"
@@ -331,6 +337,11 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "Trigger: guarantor ≠ \"NIL\".\n"
         "Left: **The Guarantor and their Supportive Performance**.\n\n"
 
+        "⛔NULL DATA RULE for T3: If `2C_guarantor` in the input JSON is null, empty, or absent → "
+        "T3 right cell MUST contain EXACTLY: '[Guarantor data not yet provided — please complete "
+        "the 2C_guarantor section in the analyst input form]'. "
+        "NEVER generate empty cells, '||', or blank rows. NEVER skip Table T3.\n\n"
+
         "Start directly with **EMC ([Period]):** — NO framing text before KPIs.\n"
         "- Cash balance: **[TWD + USD in billions]**, sufficient to cover Total Debt "
         "(including lease liabilities) of **[TWD + USD in billions]**\n"
@@ -340,6 +351,11 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
 
         "### C-4. Collateral Summary (CONDITIONAL — Table T4)\n"
         "Left: **Collateral Summary**. Right: phase-based.\n\n"
+
+        "⛔NULL DATA RULE for T4: If `2D_collateral` in the input JSON is null, empty, or absent → "
+        "T4 right cell MUST contain EXACTLY: '[Collateral data not yet provided — please complete "
+        "the 2D_collateral section in the analyst input form]'. "
+        "NEVER generate empty cells, '||', or blank rows. NEVER skip Table T4.\n\n"
 
         "**Pre-delivery:** (bold, separate row)\n"
         "- Assignment of Refund Guarantee (fully covering each pre-delivery installments during vessel "
@@ -355,6 +371,11 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
 
         "### C-5. Risk and Mitigants (MANDATORY — Table T5)\n"
         "Left: **Risk and Mitigants**. Right: risk entries.\n\n"
+
+        "⛔NULL DATA RULE for T5: If `2E_risk_and_mitigants` in the input JSON is null, empty, or absent → "
+        "T5 right cell MUST contain EXACTLY: '[Risk and mitigants data not yet provided — please "
+        "complete the 2E_risk_and_mitigants section in the analyst input form]'. "
+        "NEVER generate empty cells, '||', or blank rows. NEVER skip Table T5.\n\n"
 
         "⛔PRESERVE input's risk classification and count exactly. "
         "Do NOT add/split/merge/change Risk Levels.\n\n"
@@ -508,12 +529,23 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "  Row 0 (header): **Entity** | **[Period-1]** | **[Period-2]** | **[Interim]** | **[Current]** | **Remarks**\n"
         "  Row 1 (sub-header): (blank) | (blank) | (blank) | Generated | Generated | Proposed\n"
         "  Row 2+: Entity data rows\n\n"
+        "⛔ ENTITY ROW RULES (CRITICAL — READ CAREFULLY):\n"
+        "- EVERY entity present in `3B_internal_ratings` input MUST have its own row, regardless of "
+        "whether its MSR rating values are null or absent.\n"
+        "- If an MSR value for a specific period is null, empty, or absent → output '—' in that cell. "
+        "NEVER skip the entity row. NEVER omit a row because values are null.\n"
+        "- Example: borrower with null values for FY2022/23 and FY2024 but MSR 3 for interim/current "
+        "MUST appear as: | **[Borrower Name]** | — | — | MSR 3 | MSR 3 | [remarks] |\n"
+        "- Extract entity names from the 3B_internal_ratings JSON keys (borrower_* = Borrower entity, "
+        "guarantor_* = Guarantor entity). Map 'borrower' prefix to the full legal borrower name "
+        "from the input or preceding §1 output.\n\n"
         "⛔ COLUMN RULES:\n"
         "- Period column headers: Use EXACT display format from period_display_labels in input "
         "(e.g. '2022/23', '2024', 'Jul 2025', 'Nov 2025'). NEVER use JSON field names.\n"
         "- Entity: Full legal name + abbreviation + role (bold). ONE entity per row.\n"
         "- MSR values: EXACT. '6-' stays '6-'. '3+' stays '3+'. '(Override)' preserved where input shows.\n"
-        "- Sub-header row MANDATORY: 'Generated' under Interim+Current columns; 'Proposed' under Remarks.\n\n"
+        "- Sub-header row MANDATORY: 'Generated' under Interim+Current columns; 'Proposed' under Remarks.\n"
+        "- Null/missing MSR value → '—' (em dash). NEVER leave cell blank. NEVER skip row.\n\n"
         "⛔ PROHIBITED COLUMNS: Scorecard Type / Financial Basis / Role (separate) / Override Code / "
         "separate 'Final MSR' column.\n"
         "Include ALL borrowers + guarantors from §1.\n\n"
@@ -581,7 +613,8 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "NO financial metrics not in input. NO Override Codes not in input. "
         "NO rating actions for unrated entities. NO ESG expansion beyond image ref. "
         "NO content from other sections (§1/§2/§4–§10) beyond cross-refs. "
-        "NO duplicate sentences. Unavailable data → blank cell. NEVER infer.\n\n"
+        "NO duplicate sentences. Unavailable data → output '—' in that cell (NEVER leave blank, "
+        "NEVER skip the row, NEVER infer a value).\n\n"
 
         "## G. Prohibitions\n"
         "1. NO Scorecard Type column in MSR Table.\n"
