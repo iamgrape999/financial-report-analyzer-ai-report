@@ -227,7 +227,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
           <button class="btn btn-primary btn-sm" onclick="openReview()" data-i18n="rd.full_review">📖 Full Report Review</button>
           <button class="btn btn-outline-secondary btn-sm" onclick="loadReportDetail(currentRid)" data-i18n="rd.refresh">🔄 Refresh</button>
           <button class="btn btn-warning btn-sm" onclick="openConflictsModal()" id="conflictsBtn" style="display:none">
-            ⚠ <span id="conflictsCount">0</span> Conflicts
+            ⚠ <span id="conflictsCount">0</span> <span data-i18n="conflicts.btn_label">Conflicts</span>
           </button>
         </div>
       </div>
@@ -528,11 +528,11 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 <div class="modal fade" id="conflictsModal" tabindex="-1">
   <div class="modal-dialog modal-xl"><div class="modal-content">
     <div class="modal-header" style="background:#7c3aed;color:#fff;">
-      <h5 class="modal-title fw-bold">⚠ Fact Conflicts — Resolve Before Export</h5>
+      <h5 class="modal-title fw-bold" data-i18n="modal.conflicts_title">⚠ Fact Conflicts — Resolve Before Export</h5>
       <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
     </div>
     <div class="modal-body" id="conflictsModalBody" style="max-height:70vh;overflow-y:auto;">
-      <p class="text-muted">Loading conflicts…</p>
+      <p class="text-muted" data-i18n="conflicts.loading">Loading conflicts…</p>
     </div>
     <div class="modal-footer">
       <span class="text-muted small me-auto" id="conflictsModalStatus"></span>
@@ -545,15 +545,15 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 <div class="modal fade" id="etlMergeModal" tabindex="-1">
   <div class="modal-dialog modal-xl"><div class="modal-content">
     <div class="modal-header py-2" style="background:#1a1a1a;color:#fff;">
-      <h5 class="modal-title">📋 Review ETL Merge — §<span id="etlMergeSecNo"></span></h5>
+      <h5 class="modal-title">📋 <span data-i18n="modal.etl_merge_title_text">Review ETL Merge</span> — §<span id="etlMergeSecNo"></span></h5>
       <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
     </div>
     <div class="modal-body p-0" id="etlMergeBody" style="max-height:72vh;overflow-y:auto;"></div>
     <div class="modal-footer py-2 justify-content-between">
       <span class="text-muted small" id="etlMergeStatus"></span>
       <div class="d-flex gap-2">
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-primary btn-sm" id="etlMergeConfirmBtn" onclick="confirmEtlMerge()">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="etlMergeConfirmBtn" onclick="confirmEtlMerge()" data-i18n="modal.etl_merge_apply">
           ✅ Apply Merge
         </button>
       </div>
@@ -565,20 +565,20 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 <div class="modal fade" id="factInspectorModal" tabindex="-1">
   <div class="modal-dialog modal-xl"><div class="modal-content">
     <div class="modal-header" style="background:#1a1a1a;color:#fff;">
-      <h5 class="modal-title fw-bold">🔍 Fact Inspector</h5>
+      <h5 class="modal-title fw-bold" data-i18n="modal.fact_inspector_title">🔍 Fact Inspector</h5>
       <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
     </div>
     <div class="modal-body p-0">
       <!-- Filter tabs -->
       <div class="d-flex gap-1 p-2 border-bottom flex-wrap align-items-center">
         <span class="small fw-bold me-1">Filter:</span>
-        <button class="btn btn-sm btn-outline-secondary active" id="factTab-all" onclick="filterFacts('all')">All</button>
-        <button class="btn btn-sm btn-outline-success" id="factTab-validated" onclick="filterFacts('validated')">Validated</button>
-        <button class="btn btn-sm btn-outline-warning" id="factTab-conflicted" onclick="filterFacts('conflicted')">Conflicted</button>
-        <button class="btn btn-sm btn-outline-primary" id="factTab-user_overridden" onclick="filterFacts('user_overridden')">Overridden</button>
-        <button class="btn btn-sm btn-outline-secondary" id="factTab-deprecated" onclick="filterFacts('deprecated')">Deprecated</button>
+        <button class="btn btn-sm btn-outline-secondary active" id="factTab-all" onclick="filterFacts('all')" data-i18n="fact.filter_all">All</button>
+        <button class="btn btn-sm btn-outline-success" id="factTab-validated" onclick="filterFacts('validated')" data-i18n="fact.filter_validated">Validated</button>
+        <button class="btn btn-sm btn-outline-warning" id="factTab-conflicted" onclick="filterFacts('conflicted')" data-i18n="fact.filter_conflicted">Conflicted</button>
+        <button class="btn btn-sm btn-outline-primary" id="factTab-user_overridden" onclick="filterFacts('user_overridden')" data-i18n="fact.filter_overridden">Overridden</button>
+        <button class="btn btn-sm btn-outline-secondary" id="factTab-deprecated" onclick="filterFacts('deprecated')" data-i18n="fact.filter_deprecated">Deprecated</button>
         <div class="ms-auto">
-          <input type="text" id="factSearch" class="form-control form-control-sm" placeholder="Search metric / entity…"
+          <input type="text" id="factSearch" class="form-control form-control-sm" data-i18n-placeholder="fact.search_ph" placeholder="Search metric / entity…"
             oninput="renderFactsTable()" style="width:200px;">
         </div>
       </div>
@@ -586,8 +586,15 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <table class="table table-sm table-hover mb-0" style="font-size:12px;">
           <thead class="table-light sticky-top">
             <tr>
-              <th>§</th><th>Metric</th><th>Entity</th><th>Period</th>
-              <th>Value</th><th>Currency</th><th>Unit</th><th>State</th><th>Action</th>
+              <th>§</th>
+              <th data-i18n="fact.col_metric">Metric</th>
+              <th data-i18n="fact.col_entity">Entity</th>
+              <th data-i18n="fact.col_period">Period</th>
+              <th data-i18n="fact.col_value">Value</th>
+              <th data-i18n="fact.col_currency">Currency</th>
+              <th data-i18n="fact.col_unit">Unit</th>
+              <th data-i18n="fact.col_state">State</th>
+              <th data-i18n="fact.col_action">Action</th>
             </tr>
           </thead>
           <tbody id="factsTableBody"></tbody>
@@ -596,7 +603,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     </div>
     <div class="modal-footer justify-content-between py-2">
       <span class="small text-muted" id="factsCount">—</span>
-      <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal" data-i18n="modal.close">Close</button>
     </div>
   </div></div>
 </div>
@@ -604,28 +611,29 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 <!-- Improve Paragraph Panel -->
 <div id="improvePanel" class="improve-panel hidden">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <strong style="color:#00703C">Improve Paragraph</strong>
+    <strong style="color:#00703C" data-i18n="improve.title">✨ Improve Paragraph</strong>
     <button class="btn btn-sm btn-outline-secondary" onclick="closeImprovePanel()">&#x2715;</button>
   </div>
   <div class="mb-2">
-    <label class="form-label small fw-bold text-muted">Selected paragraph:</label>
+    <label class="form-label small fw-bold text-muted" data-i18n="improve.selected_label">Selected paragraph:</label>
     <div id="improveOriginalText" class="improve-original">—</div>
   </div>
   <div class="mb-2">
-    <label class="form-label small fw-bold">Instruction:</label>
+    <label class="form-label small fw-bold" data-i18n="improve.instruction_label">Instruction:</label>
     <textarea id="improveInstruction" class="form-control form-control-sm" rows="3"
+      data-i18n-placeholder="improve.instruction_ph"
       placeholder="e.g. Rewrite in a more conservative tone&#10;Emphasize downside risks&#10;Make this paragraph more concise"></textarea>
   </div>
   <button id="improveSubmitBtn" class="btn btn-success btn-sm w-100 mb-3" onclick="submitImprove()">
     <span id="improveSpin" class="spinner-border spinner-border-sm d-none me-1"></span>
-    Generate Improvement
+    <span data-i18n="improve.generate">✨ Generate Improvement</span>
   </button>
   <div id="improveSuggestionWrap" class="d-none">
-    <label class="form-label small fw-bold">AI Suggestion:</label>
+    <label class="form-label small fw-bold" data-i18n="improve.suggestion_label">AI Suggestion:</label>
     <div id="improveSuggestionText" class="improve-suggestion mb-2"></div>
     <div class="d-flex gap-2">
-      <button class="btn btn-primary btn-sm flex-fill" onclick="applyImprovement()">Apply</button>
-      <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="discardImprovement()">Discard</button>
+      <button class="btn btn-primary btn-sm flex-fill" onclick="applyImprovement()" data-i18n="improve.apply">✅ Apply</button>
+      <button class="btn btn-outline-secondary btn-sm flex-fill" onclick="discardImprovement()" data-i18n="improve.discard">✖ Discard</button>
     </div>
   </div>
   <div id="improveStatusMsg" class="small text-muted mt-2"></div>
@@ -779,6 +787,34 @@ const TRANSLATIONS={
     'modal.close':'Close',
     'etl.title':'🔍 AI Document ETL — Extracted Section Data',
     'etl.loading':'Running AI extraction… this may take 20-40 seconds',
+    'modal.conflicts_title':'⚠ Fact Conflicts — Resolve Before Export',
+    'modal.etl_merge_title_text':'Review ETL Merge',
+    'modal.etl_merge_apply':'✅ Apply Merge',
+    'modal.fact_inspector_title':'🔍 Fact Inspector',
+    'fact.filter_all':'All',
+    'fact.filter_validated':'Validated',
+    'fact.filter_conflicted':'Conflicted',
+    'fact.filter_overridden':'Overridden',
+    'fact.filter_deprecated':'Deprecated',
+    'fact.search_ph':'Search metric / entity…',
+    'fact.col_metric':'Metric',
+    'fact.col_entity':'Entity',
+    'fact.col_period':'Period',
+    'fact.col_value':'Value',
+    'fact.col_currency':'Currency',
+    'fact.col_unit':'Unit',
+    'fact.col_state':'State',
+    'fact.col_action':'Action',
+    'conflicts.btn_label':'Conflicts',
+    'conflicts.loading':'Loading conflicts…',
+    'improve.title':'✨ Improve Paragraph',
+    'improve.selected_label':'Selected paragraph:',
+    'improve.instruction_label':'Instruction:',
+    'improve.instruction_ph':'e.g. Rewrite in a more conservative tone\nEmphasize downside risks\nMake this paragraph more concise',
+    'improve.generate':'✨ Generate Improvement',
+    'improve.suggestion_label':'AI Suggestion:',
+    'improve.apply':'✅ Apply',
+    'improve.discard':'✖ Discard',
   },
   zh:{
     'app.title':'🏦 財務報告分析系統',
@@ -890,9 +926,39 @@ const TRANSLATIONS={
     'modal.close':'關閉',
     'etl.title':'🔍 AI文件ETL — 萃取段落資料',
     'etl.loading':'執行AI萃取中… 可能需要20-40秒',
+    'modal.conflicts_title':'⚠ 事實衝突 — 匯出前需解決',
+    'modal.etl_merge_title_text':'審查ETL合併',
+    'modal.etl_merge_apply':'✅ 確認合併',
+    'modal.fact_inspector_title':'🔍 事實查詢器',
+    'fact.filter_all':'全部',
+    'fact.filter_validated':'已驗證',
+    'fact.filter_conflicted':'衝突',
+    'fact.filter_overridden':'已覆蓋',
+    'fact.filter_deprecated':'已棄用',
+    'fact.search_ph':'搜尋指標 / 實體…',
+    'fact.col_metric':'指標',
+    'fact.col_entity':'實體',
+    'fact.col_period':'期間',
+    'fact.col_value':'數值',
+    'fact.col_currency':'幣別',
+    'fact.col_unit':'單位',
+    'fact.col_state':'狀態',
+    'fact.col_action':'操作',
+    'conflicts.btn_label':'衝突',
+    'conflicts.loading':'載入衝突中…',
+    'improve.title':'✨ 改善段落',
+    'improve.selected_label':'已選擇的段落：',
+    'improve.instruction_label':'指令：',
+    'improve.instruction_ph':'例如：以更保守的語氣改寫\n強調下行風險\n使此段落更簡潔',
+    'improve.generate':'✨ 產生改善建議',
+    'improve.suggestion_label':'AI 建議：',
+    'improve.apply':'✅ 套用',
+    'improve.discard':'✖ 捨棄',
   }
 };
 function t(key){return(TRANSLATIONS[lang]||TRANSLATIONS.en)[key]||(TRANSLATIONS.en)[key]||key;}
+// Inline bilingual helper for dynamic JS strings: tl(english, chinese)
+function tl(en,zh){return lang==='zh'?zh:en;}
 function setLang(l){
   lang=l;localStorage.setItem('lang',lang);
   const btn=document.getElementById('langBtn');
@@ -1864,18 +1930,18 @@ async function openStructuredForm(){
 
 async function saveFormInput(){
   const sec=currentPanelSec;if(!sec)return;
-  if(!currentRid){toast('No report loaded — please return to the dashboard and open a report.','danger');return;}
+  if(!currentRid){toast(tl('No report loaded — please return to the dashboard and open a report.','尚未載入報告 — 請返回主頁並開啟一份報告。'),'danger');return;}
   const data=collectFormData(sec);
-  if(!Object.keys(data).length){toast('No data entered','warning');return;}
+  if(!Object.keys(data).length){toast(tl('No data entered','尚未輸入任何資料'),'warning');return;}
   const{pct}=getCompleteness(sec,data);
   const finalized=finalizePayload(sec,data);
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:finalized})});
-    const d=await res.json();if(!res.ok)throw new Error(d.detail||'Save failed');
+    const d=await res.json();if(!res.ok)throw new Error(d.detail||tl('Save failed','儲存失敗'));
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
     sectionInputDataMap[sec]=finalized;
     document.getElementById('jsonEd').value=JSON.stringify(finalized,null,2);
-    renderSectionsTable();toast(`§${sec} saved via form ✓ (${pct}% of standard fields filled)`,'success');
+    renderSectionsTable();toast(tl(`§${sec} saved via form ✓ (${pct}% of standard fields filled)`,`§${sec} 已透過表單儲存 ✓（標準欄位完整度 ${pct}%）`),'success');
   }catch(e){toast(e.message,'danger');}
 }
 
@@ -1884,7 +1950,7 @@ function syncFormToJson(){
   const data=finalizePayload(sec,collectFormData(sec));
   document.getElementById('jsonEd').value=JSON.stringify(data,null,2);
   renderCompleteness(sec,data);
-  toast('Form synced to JSON editor','info');
+  toast(tl('Form synced to JSON editor','表單已同步至JSON編輯器'),'info');
   updateJsonPreview();
 }
 
@@ -2022,12 +2088,12 @@ async function showDashboard(){
 // ── Reports list ──────────────────────────────────────────────────────────────
 async function loadReports(){
   const tb=document.getElementById('rptBody');
-  tb.innerHTML='<tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>';
+  tb.innerHTML=`<tr><td colspan="6" class="text-center text-muted py-4">${tl('Loading…','載入中…')}</td></tr>`;
   try{
     const res=await fetch(API+'/reports?limit=50',{headers:H()});
     if(res.status===401){logout();return;}
     const data=await res.json();
-    if(!data.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted py-4">No reports yet.</td></tr>';return;}
+    if(!data.length){tb.innerHTML=`<tr><td colspan="6" class="text-center text-muted py-4">${tl('No reports yet.','尚無報告。')}</td></tr>`;return;}
     tb.innerHTML=data.map(r=>`<tr class="report-row" onclick="loadReportDetail('${r.id}')">
       <td class="ps-3 fw-semibold">${esc(r.borrower_name||'—')}</td>
       <td>${esc(r.report_type||'—')}</td><td>${esc(r.booking_branch||'—')}</td>
@@ -2040,12 +2106,12 @@ async function loadReports(){
 }
 
 async function deleteReport(id, label){
-  if(!confirm(`Delete report "${label}"?\n\nThis cannot be undone.`))return;
+  if(!confirm(tl(`Delete report "${label}"?\n\nThis cannot be undone.`,`確定要刪除報告「${label}」？\n\n此操作無法復原。`)))return;
   try{
     const res=await fetch(API+'/reports/'+id,{method:'DELETE',headers:H()});
-    if(res.status===204||res.ok){toast('Report deleted','success');await loadReports();}
-    else{const d=await res.json().catch(()=>({}));toast('Delete failed: '+(d.detail||res.status),'danger');}
-  }catch(e){toast('Delete error: '+e.message,'danger');}
+    if(res.status===204||res.ok){toast(tl('Report deleted','報告已刪除'),'success');await loadReports();}
+    else{const d=await res.json().catch(()=>({}));toast(tl('Delete failed: ','刪除失敗：')+(d.detail||res.status),'danger');}
+  }catch(e){toast(tl('Delete error: ','刪除錯誤：')+e.message,'danger');}
 }
 
 async function createReport(){
@@ -2055,7 +2121,7 @@ async function createReport(){
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Failed');
     bootstrap.Modal.getInstance(document.getElementById('createModal')).hide();
-    toast('Report created','success');await loadReportDetail(d.id);
+    toast(tl('Report created','報告已建立'),'success');await loadReportDetail(d.id);
   }catch(e){toast(e.message,'danger');}
 }
 
@@ -2063,8 +2129,8 @@ async function createReport(){
 async function loadReportDetail(rid){
   currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];uploadedDocs=[];_etlExtractedData={};closePanel();
   showView('viewReport');
-  document.getElementById('rptMeta').innerHTML='<span class="text-muted">Loading…</span>';
-  document.getElementById('secTable').innerHTML='<tr><td colspan="7" class="text-center py-3 text-muted">Loading…</td></tr>';
+  document.getElementById('rptMeta').innerHTML=`<span class="text-muted">${tl('Loading…','載入中…')}</span>`;
+  document.getElementById('secTable').innerHTML=`<tr><td colspan="7" class="text-center py-3 text-muted">${tl('Loading…','載入中…')}</td></tr>`;
   try{
     const [rRes,outRes,docRes,inpRes]=await Promise.all([
       fetch(API+'/reports/'+rid,{headers:H()}),
@@ -2182,7 +2248,7 @@ async function loadInputEditor(){
     if(!res.ok){renderCompleteness(sec,{});return;}
     const d=await res.json();
     ed.value=JSON.stringify(d.input_json,null,2);
-    document.getElementById('savedAt').textContent='Last saved: '+fd(d.saved_at);
+    document.getElementById('savedAt').textContent=tl('Last saved: ','上次儲存：')+fd(d.saved_at);
     sectionInputDataMap[sec]=d.input_json;
     renderCompleteness(sec,d.input_json);
   }catch(e){}
@@ -2192,38 +2258,38 @@ function loadTemplate(){
   const tpl=TEMPLATES[sec]||{};
   document.getElementById('jsonEd').value=JSON.stringify(tpl,null,2);
   renderCompleteness(sec,tpl);
-  toast(`Template loaded for §${sec}. Replace placeholder values with actual data, then Save.`,'info');
+  toast(tl(`Template loaded for §${sec}. Replace placeholder values with actual data, then Save.`,`§${sec} 範本已載入。請將佔位值替換為實際資料後儲存。`),'info');
 }
 async function saveSectionInput(){
   const sec=currentPanelSec;
-  if(!currentRid){toast('No report loaded — please return to the dashboard and open a report.','danger');return;}
+  if(!currentRid){toast(tl('No report loaded — please return to the dashboard and open a report.','尚未載入報告 — 請返回主頁並開啟一份報告。'),'danger');return;}
   const raw=document.getElementById('jsonEd').value.trim();
-  if(!raw){toast('Input is empty','warning');return;}
+  if(!raw){toast(tl('Input is empty','輸入內容為空'),'warning');return;}
   let parsed;
-  try{parsed=JSON.parse(raw);}catch(e){toast('Invalid JSON: '+e.message,'danger');return;}
-  if(typeof parsed!=='object'||Array.isArray(parsed)){toast('Input must be a JSON object {}','warning');return;}
+  try{parsed=JSON.parse(raw);}catch(e){toast(tl('Invalid JSON: ','無效的JSON：')+e.message,'danger');return;}
+  if(typeof parsed!=='object'||Array.isArray(parsed)){toast(tl('Input must be a JSON object {}','輸入必須為JSON物件 {}'),'warning');return;}
   const{pct}=getCompleteness(sec,parsed);
   renderCompleteness(sec,parsed);
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:parsed})});
     const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||'Save failed');
+    if(!res.ok)throw new Error(d.detail||tl('Save failed','儲存失敗'));
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
     sectionInputDataMap[sec]=parsed;
-    document.getElementById('savedAt').textContent='Saved: '+fd(d.saved_at);
+    document.getElementById('savedAt').textContent=tl('Saved: ','已儲存：')+fd(d.saved_at);
     renderSectionsTable();
-    toast(`§${sec} input saved ✓ (${pct}% of standard fields filled — ETL data is always usable)`,'success');
+    toast(tl(`§${sec} input saved ✓ (${pct}% of standard fields filled — ETL data is always usable)`,`§${sec} 輸入已儲存 ✓（標準欄位完整度 ${pct}% — ETL資料始終可用）`),'success');
   }catch(e){toast(e.message,'danger');}
 }
 
 async function loadSectionOutput(sec){
   const el=document.getElementById('outputContent');
-  el.innerHTML='<span class="text-muted small">Loading…</span>';
+  el.innerHTML=`<span class="text-muted small">${tl('Loading…','載入中…')}</span>`;
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/sections/'+sec+'/output',{headers:H()});
-    if(!res.ok){el.innerHTML='<p class="text-muted fst-italic">Not yet generated.<br>Fill in input data (✏ Input Data tab) then click Generate.</p>';return;}
+    if(!res.ok){el.innerHTML=`<p class="text-muted fst-italic">${tl('Not yet generated.<br>Fill in input data (✏ Input Data tab) then click Generate.','尚未生成。<br>請先填寫輸入資料（✏ 輸入資料標籤），然後點擊生成。')}</p>`;return;}
     const d=await res.json();
-    el.innerHTML=d.markdown?marked.parse(d.markdown):'<p class="text-muted fst-italic">No content yet.</p>';
+    el.innerHTML=d.markdown?marked.parse(d.markdown):`<p class="text-muted fst-italic">${tl('No content yet.','尚無內容。')}</p>`;
   }catch(e){el.innerHTML=`<p class="text-danger">${esc(e.message)}</p>`;}
 }
 
@@ -2260,7 +2326,7 @@ async function _pollFullReportTask(taskId, maxWaitMs=900000){
 
 async function generateCurrentSection(){
   const sec=currentPanelSec;if(!sec)return;
-  if(!currentRid){toast('No report loaded — please return to the dashboard and open a report.','danger');return;}
+  if(!currentRid){toast(tl('No report loaded — please return to the dashboard and open a report.','尚未載入報告 — 請返回主頁並開啟一份報告。'),'danger');return;}
   // Enforce 90% completeness gate using cached data (not the editor, which may show
   // a different section's JSON when the Output tab is opened directly).
   let cachedData=sectionInputDataMap[sec];
@@ -2274,18 +2340,18 @@ async function generateCurrentSection(){
     const{pct}=getCompleteness(sec,cachedData);
     // Completeness is informational only — ETL data uses different key names so pct may read 0%
     if(pct>0&&pct<50){
-      toast(`§${sec} completeness is ${pct}% — generating draft with available data (ETL fields not counted in completeness score).`,'info');
+      toast(tl(`§${sec} completeness is ${pct}% — generating draft with available data (ETL fields not counted in completeness score).`,`§${sec} 完整度為 ${pct}%，將以現有資料生成草稿（ETL欄位不計入分數）。`),'info');
     }
   }
   const sp=document.getElementById('secGenSpin');sp.classList.remove('d-none');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec+'?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    if(!res.ok)throw new Error(d.detail||tl('Generation failed','生成失敗'));
     // 202: background task — poll until done
-    toast(`§${sec} generation started… (${genOutputLang==='zh'?'繁中':'EN'})`,'info');
+    toast(tl(`§${sec} generation started… (${genOutputLang==='zh'?'繁中':'EN'})`,`§${sec} 生成中… (${genOutputLang==='zh'?'繁中':'EN'})`),'info');
     const result=await _pollGenerationTask(d.task_id,sec);
-    toast(`§${sec} generated — ${(result.tokens_used||0).toLocaleString()} tokens`,'success');
+    toast(tl(`§${sec} generated — ${(result.tokens_used||0).toLocaleString()} tokens`,`§${sec} 已生成 — ${(result.tokens_used||0).toLocaleString()} tokens`),'success');
     const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
     if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
     renderSectionsTable();await loadSectionOutput(sec);
@@ -2303,18 +2369,18 @@ async function preflight(){
   if(missingData.length===10){
     // No section input data detected — could be a race condition (sectionInputMap not yet loaded)
     // or genuinely no data. Show warning and proceed; backend will generate from uploaded evidence.
-    toast('No saved section input data found — generating from uploaded evidence only.','warning');
+    toast(tl('No saved section input data found — generating from uploaded evidence only.','未找到已儲存的段落輸入資料 — 將僅從上傳的佐證文件生成。'),'warning');
     document.getElementById('preflightMsg').innerHTML=
-      '<strong>Note:</strong> No section input data detected. Generating from uploaded evidence only. '+
-      'If you have filled in section data, wait for the page to finish loading and try again.';
+      tl('<strong>Note:</strong> No section input data detected. Generating from uploaded evidence only. If you have filled in section data, wait for the page to finish loading and try again.',
+         '<strong>注意：</strong>未偵測到段落輸入資料。將僅從上傳的佐證文件生成。若已填寫段落資料，請等待頁面載入完成後重試。');
     al.classList.remove('d-none');al.scrollIntoView({behavior:'smooth',block:'nearest'});
   }
   if(missingData.length>0){
     // Partial data — warn but proceed
     const readyCount=10-missingData.length;
     document.getElementById('preflightMsg').innerHTML=
-      `<strong>Note:</strong> §${missingData.join(', §')} have no input data and will be skipped. `+
-      `Generating <strong>${readyCount} section${readyCount!==1?'s':''}</strong> with available data.`;
+      tl(`<strong>Note:</strong> §${missingData.join(', §')} have no input data and will be skipped. Generating <strong>${readyCount} section${readyCount!==1?'s':''}</strong> with available data.`,
+         `<strong>注意：</strong>§${missingData.join('、§')} 無輸入資料，將略過。以現有資料生成 <strong>${readyCount} 個段落</strong>。`);
     al.classList.remove('d-none');
   } else {
     al.classList.add('d-none');
@@ -2323,7 +2389,7 @@ async function preflight(){
 }
 async function generateAll(){
   const sp=document.getElementById('genAllSpin');sp.classList.remove('d-none');
-  toast('Generating full report — this may take several minutes…','info');
+  toast(tl('Generating full report — this may take several minutes…','正在生成完整報告 — 可能需要數分鐘…'),'info');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/generate?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
@@ -2332,7 +2398,7 @@ async function generateAll(){
     const result=await _pollFullReportTask(d.task_id);
     const sections=result.sections||{};
     const ss=Object.entries(sections).map(([k,v])=>`§${k}:${v.split(':')[0]}`).join(' ');
-    toast('Generation complete. '+ss,'success');
+    toast(tl('Generation complete. ','生成完成。')+ss,'success');
     await loadReportDetail(currentRid);
   }catch(e){toast(e.message,'danger');}
   finally{sp.classList.add('d-none');}
@@ -2399,7 +2465,7 @@ async function submitForReview(){
     const r=await fetch(API+'/reports/'+currentRid+'/submit-for-review',{method:'POST',headers:H()});
     const d=await r.json();
     if(!r.ok)throw new Error(d.detail||'Submit failed');
-    toast('Report submitted for review ✓','success');
+    toast(tl('Report submitted for review ✓','報告已提交審查 ✓'),'success');
     await loadReviewProgress();
   }catch(e){toast(e.message,'danger');}
   finally{sp.classList.add('d-none');}
@@ -2411,7 +2477,7 @@ async function approveReport(){
     const r=await fetch(API+'/reports/'+currentRid+'/approve',{method:'POST',headers:H()});
     const d=await r.json();
     if(!r.ok)throw new Error(d.detail||'Approve failed');
-    toast('Report approved ✓','success');
+    toast(tl('Report approved ✓','報告已核准 ✓'),'success');
     await loadReviewProgress();
   }catch(e){toast(e.message,'danger');}
   finally{sp.classList.add('d-none');}
@@ -2422,7 +2488,7 @@ async function recallReport(){
     const r=await fetch(API+'/reports/'+currentRid+'/recall',{method:'POST',headers:H()});
     const d=await r.json();
     if(!r.ok)throw new Error(d.detail||'Recall failed');
-    toast('Report recalled to draft','info');
+    toast(tl('Report recalled to draft','報告已撤回至草稿'),'info');
     await loadReviewProgress();
   }catch(e){toast(e.message,'danger');}
 }
@@ -2490,21 +2556,21 @@ async function generateFromReview(secNo){
     const{pct}=getCompleteness(secNo,data);
     // Completeness is informational only — ETL data uses different key names so pct may read 0%
     if(pct>0&&pct<50){
-      toast(`§${secNo} completeness is ${pct}% — generating draft with available data.`,'info');
+      toast(tl(`§${secNo} completeness is ${pct}% — generating draft with available data.`,`§${secNo} 完整度為 ${pct}%，將以現有資料生成草稿。`),'info');
     }
   } else if(!sectionInputMap[secNo]?.has_data){
     // No data at all — proceed anyway, AI will use uploaded evidence
-    toast(`§${secNo} has no structured input — AI will generate from uploaded documents.`,'info');
+    toast(tl(`§${secNo} has no structured input — AI will generate from uploaded documents.`,`§${secNo} 無結構化輸入 — AI 將從上傳文件生成。`),'info');
   }
   const sp=document.getElementById('revSpin'+secNo);if(sp)sp.classList.remove('d-none');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/generate/'+secNo+'?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||'Generation failed');
+    if(!res.ok)throw new Error(d.detail||tl('Generation failed','生成失敗'));
     // 202: background task — poll until done
-    toast(`§${secNo} generation started… (${genOutputLang==='zh'?'繁中':'EN'})`,'info');
+    toast(tl(`§${secNo} generation started… (${genOutputLang==='zh'?'繁中':'EN'})`,`§${secNo} 生成中… (${genOutputLang==='zh'?'繁中':'EN'})`),'info');
     const result=await _pollGenerationTask(d.task_id,secNo);
-    toast(`§${secNo} generated ✓ — ${(result.tokens_used||0).toLocaleString()} tokens`,'success');
+    toast(tl(`§${secNo} generated ✓ — ${(result.tokens_used||0).toLocaleString()} tokens`,`§${secNo} 已生成 ✓ — ${(result.tokens_used||0).toLocaleString()} tokens`),'success');
     const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
     if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
     // Reload blocks for the newly generated section so improve panel has real IDs
@@ -2681,12 +2747,12 @@ function renderQualityReport(){
 
 async function regenSec2(){
   const sp=document.getElementById('regenSpin');sp.classList.remove('d-none');
-  toast('Regenerating §2 Overall Comments with full report context…','info');
+  toast(tl('Regenerating §2 Overall Comments with full report context…','正在重新生成第2段綜合評述（含全文脈絡）…'),'info');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/generate/2?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
-    toast(`§2 regenerated — ${(d.tokens_used||0).toLocaleString()} tokens`,'success');
+    toast(tl(`§2 regenerated — ${(d.tokens_used||0).toLocaleString()} tokens`,`§2 已重新生成 — ${(d.tokens_used||0).toLocaleString()} tokens`),'success');
     const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
     if(outRes.ok){const outs=await outRes.json();outs.forEach(o=>sectionOutputMap[o.section_no]=o);allOutputs=outs;}
     renderReview();
@@ -2697,31 +2763,31 @@ async function regenSec2(){
 // ── Upload PDF ────────────────────────────────────────────────────────────────
 async function uploadPDF(){
   const inp=document.getElementById('pdfInput');
-  if(!inp.files.length){toast('Select a file','warning');return;}
+  if(!inp.files.length){toast(tl('Select a file','請選擇檔案'),'warning');return;}
   const file=inp.files[0];
   const docType=document.getElementById('docType').value||'other';
   // Duplicate detection — warn if same filename already uploaded
   const dup=uploadedDocs.find(d=>d.original_filename===file.name);
-  if(dup){if(!confirm(`"${file.name}" is already uploaded to this report.\nUpload again as a separate copy?`))return;}
+  if(dup){if(!confirm(tl(`"${file.name}" is already uploaded to this report.\nUpload again as a separate copy?`,`「${file.name}」已上傳至此報告。\n是否再次上傳為獨立副本？`)))return;}
   const form=new FormData();
   form.append('file',file);
   form.append('document_type',docType);
-  toast(`Uploading ${file.name}…`,'info');
+  toast(tl(`Uploading ${file.name}…`,`正在上傳 ${file.name}…`),'info');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/documents',{method:'POST',headers:H(),body:form});
     const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||'Upload failed');
-    toast(`✓ Uploaded: ${file.name}`,'success');inp.value='';
+    if(!res.ok)throw new Error(d.detail||tl('Upload failed','上傳失敗'));
+    toast(tl(`✓ Uploaded: ${file.name}`,`✓ 已上傳：${file.name}`),'success');inp.value='';
     await loadReportDetail(currentRid);
   }catch(e){toast(e.message,'danger');}
 }
 
 async function deleteDocument(docId){
-  if(!confirm('Delete this document from the report? This cannot be undone.'))return;
+  if(!confirm(tl('Delete this document from the report? This cannot be undone.','確定要從報告中刪除此文件嗎？此操作無法復原。')))return;
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId,{method:'DELETE',headers:H()});
-    if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||'Delete failed');}
-    toast('Document deleted','success');
+    if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||tl('Delete failed','刪除失敗'));}
+    toast(tl('Document deleted','文件已刪除'),'success');
     await loadReportDetail(currentRid);
   }catch(e){toast(e.message,'danger');}
 }
@@ -2730,7 +2796,7 @@ async function etlDocument(docId,filename){
   const modal=new bootstrap.Modal(document.getElementById('etlModal'));
   const body=document.getElementById('etlModalBody');
   const st=document.getElementById('etlModalStatus');
-  body.innerHTML=`<div class="text-center py-5"><div class="spinner-border text-success" style="width:3rem;height:3rem;"></div><div class="mt-3 text-muted fw-semibold">Running AI extraction on: <strong>${esc(filename)}</strong><br><small>This may take 20-60 seconds…</small></div></div>`;
+  body.innerHTML=`<div class="text-center py-5"><div class="spinner-border text-success" style="width:3rem;height:3rem;"></div><div class="mt-3 text-muted fw-semibold">${tl('Running AI extraction on:','正在執行AI萃取：')} <strong>${esc(filename)}</strong><br><small>${tl('This may take 20-60 seconds…','可能需要20-60秒…')}</small></div></div>`;
   st.textContent='';
   modal.show();
   try{
@@ -2738,8 +2804,8 @@ async function etlDocument(docId,filename){
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'ETL failed');
     if(!d.sections_extracted||!d.sections_extracted.length){
-      body.innerHTML='<div class="alert alert-warning m-3">No structured data could be extracted from this document. The document may be an image-only scan or have no recognisable credit report data.</div>';
-      st.textContent='No data extracted';
+      body.innerHTML=`<div class="alert alert-warning m-3">${tl('No structured data could be extracted from this document. The document may be an image-only scan or have no recognisable credit report data.','無法從此文件萃取結構化資料。文件可能為純圖像掃描件，或不含可辨識的信貸報告資料。')}</div>`;
+      st.textContent=tl('No data extracted','未萃取到任何資料');
       return;
     }
     // Build rows using raw d.data directly (never pass JSON through onclick attributes)
@@ -2752,9 +2818,9 @@ async function etlDocument(docId,filename){
         <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:#e8f5ee;">
           <span class="fw-bold">§${sec} — ${esc(snm(sec))}</span>
           <div class="d-flex align-items-center gap-2">
-            <span class="badge bg-success">${fcount} field${fcount!==1?'s':''} extracted</span>
+            <span class="badge bg-success">${fcount} ${tl(`field${fcount!==1?'s':''} extracted`,`個欄位已萃取`)}</span>
             <button class="btn btn-sm btn-primary" onclick="previewEtlMerge(${sec})">
-              Apply to §${sec}</button>
+              ${tl(`Apply to §${sec}`,`套用至 §${sec}`)}</button>
           </div>
         </div>
         <div class="card-body p-2">
@@ -2764,8 +2830,8 @@ async function etlDocument(docId,filename){
         </div>
       </div>`;
     }).join('');
-    body.innerHTML=`<div class="alert alert-success m-3 py-2"><strong>✓ AI ETL Complete</strong> — ${d.sections_extracted.length} section(s) extracted from <em>${esc(filename)}</em><br><small class="text-muted">Review extracted data below. Click "Apply to §N" to save fields as section input (merges with existing data).</small></div>${rows}`;
-    st.textContent=`${d.sections_extracted.length} sections extracted`;
+    body.innerHTML=`<div class="alert alert-success m-3 py-2"><strong>✓ ${tl('AI ETL Complete','AI ETL 完成')}</strong> — ${tl(`${d.sections_extracted.length} section(s) extracted from`,`已從 <em>${esc(filename)}</em> 萃取 ${d.sections_extracted.length} 個段落`)} ${tl(`<em>${esc(filename)}</em>`,'')}<br><small class="text-muted">${tl('Review extracted data below. Click "Apply to §N" to save fields as section input (merges with existing data).','請在下方審查萃取資料，點擊「套用至 §N」以將欄位儲存為段落輸入（將與現有資料合併）。')}</small></div>${rows}`;
+    st.textContent=tl(`${d.sections_extracted.length} sections extracted`,`已萃取 ${d.sections_extracted.length} 個段落`);
     await loadReportDetail(currentRid); // refresh etl_status badge — this resets _etlExtractedData
     // Re-populate AFTER loadReportDetail so Apply buttons have data when the user clicks them
     _etlExtractedData = {};
@@ -2774,8 +2840,8 @@ async function etlDocument(docId,filename){
       _etlExtractedData[sec]=d.data[String(sec)]||{};
     });
   }catch(e){
-    body.innerHTML=`<div class="alert alert-danger m-3"><strong>ETL Failed:</strong> ${esc(e.message)}</div>`;
-    st.textContent='Error';
+    body.innerHTML=`<div class="alert alert-danger m-3"><strong>${tl('ETL Failed:','ETL 失敗：')}</strong> ${esc(e.message)}</div>`;
+    st.textContent=tl('Error','錯誤');
   }
 }
 
@@ -2787,7 +2853,7 @@ let _etlExtractedData={};  // {section_no: data_object} — populated after ETL,
 
 async function previewEtlMerge(secNo){
   const newData=_etlExtractedData[secNo];
-  if(!newData||typeof newData!=='object'){toast('No extracted data found for §'+secNo,'danger');return;}
+  if(!newData||typeof newData!=='object'){toast(tl('No extracted data found for §','找不到 §')+secNo,'danger');return;}
   _etlMergeSecNo=secNo;
   _etlMergeNewData=newData;
   _etlMergeExisting={};
@@ -2819,15 +2885,15 @@ async function previewEtlMerge(secNo){
   let html='<div class="p-3">';
   // Summary bar
   html+=`<div class="d-flex gap-3 mb-3 flex-wrap">
-    <span class="badge bg-success fs-6">${newFields.length} new field${newFields.length!==1?'s':''}</span>
-    <span class="badge bg-warning text-dark fs-6">${conflicts.length} conflict${conflicts.length!==1?'s':''}</span>
-    <span class="badge bg-secondary fs-6">${unchanged.length} unchanged</span>
+    <span class="badge bg-success fs-6">${newFields.length} ${tl(`new field${newFields.length!==1?'s':''}`,`個新欄位`)}</span>
+    <span class="badge bg-warning text-dark fs-6">${conflicts.length} ${tl(`conflict${conflicts.length!==1?'s':''}`,`個衝突`)}</span>
+    <span class="badge bg-secondary fs-6">${unchanged.length} ${tl('unchanged','個未變更')}</span>
   </div>`;
 
   if(conflicts.length){
-    html+=`<h6 class="text-warning">⚠ Conflicts — extracted value will overwrite existing</h6>
+    html+=`<h6 class="text-warning">⚠ ${tl('Conflicts — extracted value will overwrite existing','衝突 — 萃取值將覆蓋現有值')}</h6>
     <table class="table table-sm table-bordered mb-3" style="font-size:12px;">
-      <thead class="table-warning"><tr><th>Field</th><th>Existing Value</th><th>→ New Value</th></tr></thead><tbody>`;
+      <thead class="table-warning"><tr><th>${tl('Field','欄位')}</th><th>${tl('Existing Value','現有值')}</th><th>→ ${tl('New Value','新值')}</th></tr></thead><tbody>`;
     conflicts.forEach(c=>{
       html+=`<tr>
         <td class="fw-bold">${esc(c.key)}</td>
@@ -2838,18 +2904,18 @@ async function previewEtlMerge(secNo){
     html+='</tbody></table>';
   }
   if(newFields.length){
-    html+=`<h6 class="text-success">✚ New Fields</h6>
+    html+=`<h6 class="text-success">✚ ${tl('New Fields','新增欄位')}</h6>
     <table class="table table-sm table-bordered mb-3" style="font-size:12px;">
-      <thead class="table-success"><tr><th>Field</th><th>Value</th></tr></thead><tbody>`;
+      <thead class="table-success"><tr><th>${tl('Field','欄位')}</th><th>${tl('Value','值')}</th></tr></thead><tbody>`;
     newFields.forEach(f=>{
       html+=`<tr><td class="fw-bold">${esc(f.key)}</td><td>${esc(JSON.stringify(f.val))}</td></tr>`;
     });
     html+='</tbody></table>';
   }
   if(unchanged.length){
-    html+=`<details><summary class="text-muted small" style="cursor:pointer">${unchanged.length} unchanged field${unchanged.length!==1?'s':''} (click to expand)</summary>
+    html+=`<details><summary class="text-muted small" style="cursor:pointer">${unchanged.length} ${tl(`unchanged field${unchanged.length!==1?'s':''} (click to expand)`,`個未變更欄位（點擊展開）`)}</summary>
     <table class="table table-sm table-bordered mt-2" style="font-size:11px;">
-      <thead class="table-secondary"><tr><th>Field</th><th>Value</th></tr></thead><tbody>`;
+      <thead class="table-secondary"><tr><th>${tl('Field','欄位')}</th><th>${tl('Value','值')}</th></tr></thead><tbody>`;
     unchanged.forEach(f=>{
       html+=`<tr><td>${esc(f.key)}</td><td>${esc(JSON.stringify(f.val))}</td></tr>`;
     });
@@ -2859,7 +2925,8 @@ async function previewEtlMerge(secNo){
 
   document.getElementById('etlMergeBody').innerHTML=html;
   document.getElementById('etlMergeStatus').textContent=
-    `Merging ${Object.keys(newData).length} extracted fields into §${secNo}`;
+    tl(`Merging ${Object.keys(newData).length} extracted fields into §${secNo}`,
+       `正在將 ${Object.keys(newData).length} 個萃取欄位合併至 §${secNo}`);
   new bootstrap.Modal(document.getElementById('etlMergeModal')).show();
 }
 
@@ -2877,11 +2944,12 @@ async function confirmEtlMerge(){
     sectionInputDataMap[secNo]=merged;
     renderSectionsTable();
     bootstrap.Modal.getInstance(document.getElementById('etlMergeModal'))?.hide();
-    toast(`§${secNo} updated with ${Object.keys(_etlMergeNewData).length} extracted fields ✓`,'success');
+    toast(tl(`§${secNo} updated with ${Object.keys(_etlMergeNewData).length} extracted fields ✓`,
+             `§${secNo} 已成功合併 ${Object.keys(_etlMergeNewData).length} 個萃取欄位 ✓`),'success');
     _etlMergeSecNo=null;_etlMergeNewData=null;_etlMergeExisting=null;
   }catch(e){
     toast(e.message,'danger');
-    document.getElementById('etlMergeStatus').textContent='Error: '+e.message;
+    document.getElementById('etlMergeStatus').textContent=tl('Error: ','錯誤：')+e.message;
   }finally{
     document.getElementById('etlMergeConfirmBtn').disabled=false;
   }
@@ -2890,8 +2958,8 @@ async function confirmEtlMerge(){
 // ── Export ────────────────────────────────────────────────────────────────────
 function exportReport(){
   const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
-  if(!outs.length){toast('No generated sections to export','warning');return;}
-  const body=outs.map(o=>`<h1>Section ${o.section_no} — ${SNAMES[o.section_no]}</h1>${marked.parse(o.markdown)}`).join('<hr>');
+  if(!outs.length){toast(tl('No generated sections to export','尚無已生成的段落可匯出'),'warning');return;}
+  const body=outs.map(o=>`<h1>${tl('Section','段落')} ${o.section_no} — ${snm(o.section_no)}</h1>${marked.parse(o.markdown)}`).join('<hr>');
   dlBlob(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Report</title>
 <style>body{font-family:Georgia,serif;max-width:900px;margin:40px auto;padding:0 20px;line-height:1.75;}
 table{border-collapse:collapse;width:100%;margin:1rem 0;}th,td{border:1px solid #ccc;padding:6px 10px;}th{background:#f0f0f0;}
@@ -2901,14 +2969,14 @@ h2{font-size:1.2rem;}h3{font-size:1.05rem;color:#00703C;}</style></head>
 }
 function exportMarkdown(){
   const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
-  if(!outs.length){toast('No generated sections to export','warning');return;}
-  dlBlob(outs.map(o=>`# Section ${o.section_no} — ${SNAMES[o.section_no]}\n\n${o.markdown}`).join('\n\n---\n\n'),'credit_report.md','text/markdown');
+  if(!outs.length){toast(tl('No generated sections to export','尚無已生成的段落可匯出'),'warning');return;}
+  dlBlob(outs.map(o=>`# ${tl('Section','段落')} ${o.section_no} — ${snm(o.section_no)}\n\n${o.markdown}`).join('\n\n---\n\n'),'credit_report.md','text/markdown');
 }
 // ── DOCX export — backend primary, html-docx-js CDN fallback ─────────────────
 async function exportDocx(){
-  if(!currentRid){toast('No report loaded','warning');return;}
+  if(!currentRid){toast(tl('No report loaded','尚未載入報告'),'warning');return;}
   const sp=document.getElementById('docxSpin');sp.classList.remove('d-none');
-  toast('Generating DOCX…','info');
+  toast(tl('Generating DOCX…','正在生成 DOCX…'),'info');
   try{
     // ── Primary: backend python-docx endpoint ─────────────────────────────
     const res=await fetch(API+'/reports/'+currentRid+'/export/docx',{headers:H()});
@@ -2917,7 +2985,7 @@ async function exportDocx(){
       const cd=res.headers.get('Content-Disposition')||'';
       const fname=(cd.match(/filename="([^"]+)"/)||[])[1]||'credit_report.docx';
       _dlBlobSafe(blob,fname);
-      toast('DOCX downloaded ✓ (server-generated)','success');
+      toast(tl('DOCX downloaded ✓ (server-generated)','DOCX 已下載 ✓（伺服器生成）'),'success');
       return;
     }
     // 503 = python-docx not on server → use client-side fallback
@@ -2930,7 +2998,7 @@ async function exportDocx(){
   }catch(err){
     if(!(err instanceof TypeError)&&!String(err.message).startsWith('Server error 503')){
       // Real error (not network failure or 503) — stop here
-      toast('DOCX export failed: '+err.message,'danger');sp.classList.add('d-none');return;
+      toast(tl('DOCX export failed: ','DOCX 匯出失敗：')+err.message,'danger');sp.classList.add('d-none');return;
     }
     console.warn('Backend unreachable — trying client-side DOCX fallback');
   }
@@ -2938,15 +3006,15 @@ async function exportDocx(){
   // ── Fallback: html-docx-js (loaded via CDN script tag) ───────────────────
   try{
     if(typeof htmlDocx==='undefined'){
-      toast('Client-side DOCX library not loaded yet — try again in a moment','warning');
+      toast(tl('Client-side DOCX library not loaded yet — try again in a moment','用戶端 DOCX 函式庫尚未載入，請稍後再試'),'warning');
       sp.classList.add('d-none');return;
     }
     const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
-    if(!outs.length){toast('No generated sections to export','warning');sp.classList.add('d-none');return;}
+    if(!outs.length){toast(tl('No generated sections to export','尚無已生成的段落可匯出'),'warning');sp.classList.add('d-none');return;}
 
     const body=outs.map(o=>`
       <h1 style="color:#00703C;border-bottom:2px solid #00703C;padding-bottom:6px;">
-        §${o.section_no} — ${esc(SNAMES[o.section_no])}
+        §${o.section_no} — ${esc(snm(o.section_no))}
       </h1>
       ${marked.parse(o.markdown)}
     `).join('<hr style="border-top:1px dashed #ccc;margin:24px 0;">');
@@ -2966,8 +3034,8 @@ async function exportDocx(){
 
     const blob=htmlDocx.asBlob(html,{orientation:'portrait',margins:{top:720,right:720,bottom:720,left:1080}});
     _dlBlobSafe(blob,'credit_report.docx');
-    toast('DOCX downloaded ✓ (client-side fallback)','success');
-  }catch(e){toast('DOCX fallback failed: '+e.message,'danger');}
+    toast(tl('DOCX downloaded ✓ (client-side fallback)','DOCX 已下載 ✓（用戶端備援）'),'success');
+  }catch(e){toast(tl('DOCX fallback failed: ','DOCX 備援失敗：')+e.message,'danger');}
   finally{sp.classList.add('d-none');}
 }
 
@@ -2984,34 +3052,34 @@ function stripMarkdown(md){
 }
 function exportTxt(){
   const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
-  if(!outs.length){toast('No generated sections','warning');return;}
-  dlBlob(outs.map(o=>`\n${'='.repeat(60)}\nSECTION ${o.section_no} — ${SNAMES[o.section_no]}\n${'='.repeat(60)}\n\n${stripMarkdown(o.markdown)}`).join('\n\n'),'credit_report.txt','text/plain');
+  if(!outs.length){toast(tl('No generated sections','尚無已生成的段落'),'warning');return;}
+  dlBlob(outs.map(o=>`\n${'='.repeat(60)}\n${tl('SECTION','段落')} ${o.section_no} — ${snm(o.section_no)}\n${'='.repeat(60)}\n\n${stripMarkdown(o.markdown)}`).join('\n\n'),'credit_report.txt','text/plain');
 }
 async function exportPdf(){
-  if(!currentRid){toast('No report loaded','warning');return;}
-  toast('Generating PDF…','info');
+  if(!currentRid){toast(tl('No report loaded','尚未載入報告'),'warning');return;}
+  toast(tl('Generating PDF…','正在生成 PDF…'),'info');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/export/pdf',{headers:H()});
     if(res.ok){
       const blob=await res.blob();
       _dlBlobSafe(blob,'credit_report.pdf');
-      toast('PDF downloaded ✓','success');
+      toast(tl('PDF downloaded ✓','PDF 已下載 ✓'),'success');
       return;
     }
     if(res.status===503){
-      toast('Server PDF unavailable — opening print dialog','warning');
+      toast(tl('Server PDF unavailable — opening print dialog','伺服器 PDF 不可用 — 正在開啟列印視窗'),'warning');
       _exportPdfFallback();return;
     }
-    toast('PDF export failed ('+res.status+')','danger');
+    toast(tl('PDF export failed (','PDF 匯出失敗（')+res.status+')','danger');
   }catch(e){
-    toast('PDF error: '+e.message,'danger');
+    toast(tl('PDF error: ','PDF 錯誤：')+e.message,'danger');
     _exportPdfFallback();
   }
 }
 function _exportPdfFallback(){
   const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
-  if(!outs.length){toast('No generated sections','warning');return;}
-  const body=outs.map(o=>`<h1>§${o.section_no} — ${esc(SNAMES[o.section_no])}</h1>${marked.parse(o.markdown)}`).join('<hr>');
+  if(!outs.length){toast(tl('No generated sections','尚無已生成的段落'),'warning');return;}
+  const body=outs.map(o=>`<h1>§${o.section_no} — ${esc(snm(o.section_no))}</h1>${marked.parse(o.markdown)}`).join('<hr>');
   const win=window.open('','_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Report</title>
 <style>body{font-family:Georgia,serif;max-width:920px;margin:40px auto;padding:0 24px;line-height:1.75;}
@@ -3020,7 +3088,7 @@ h1{font-size:1.4rem;border-bottom:3px solid #00703C;padding-bottom:6px;margin-to
 @media print{.noprint{display:none!important;}}
 </style></head><body>
 <div class="noprint" style="padding:12px;background:#e8f5ee;border-radius:6px;margin-bottom:20px;">
-<button onclick="window.print()" style="padding:7px 18px;background:#00703C;color:#fff;border:none;border-radius:4px;cursor:pointer;">🖨 Print / Save as PDF</button>
+<button onclick="window.print()" style="padding:7px 18px;background:#00703C;color:#fff;border:none;border-radius:4px;cursor:pointer;">🖨 ${tl('Print / Save as PDF','列印 / 另存為 PDF')}</button>
 </div>${body}</body></html>`);
   win.document.close();
 }
@@ -3032,8 +3100,8 @@ function _dlBlobSafe(blob,filename){
   if(_isIOS()){
     // iOS Safari: a.download is ignored — open in new tab so user can Share → Save to Files
     const win=window.open(url,'_blank');
-    if(!win)toast('Pop-up blocked — allow pop-ups to download files','warning');
-    else toast(`Tap Share → Save to Files to save ${filename}`,'info');
+    if(!win)toast(tl('Pop-up blocked — allow pop-ups to download files','彈出視窗被封鎖 — 請允許彈出視窗以下載檔案'),'warning');
+    else toast(tl(`Tap Share → Save to Files to save ${filename}`,`點擊「分享」→「儲存至檔案」以儲存 ${filename}`),'info');
     setTimeout(()=>URL.revokeObjectURL(url),90000);
   }else{
     const a=document.createElement('a');
@@ -3044,11 +3112,15 @@ function _dlBlobSafe(blob,filename){
 }
 function dlBlob(content,filename,mime){
   _dlBlobSafe(new Blob([content],{type:mime}),filename);
-  toast(`Downloaded ${filename}`,'success');
+  toast(tl(`Downloaded ${filename}`,`已下載 ${filename}`),'success');
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
-function sbadge(s){const m={draft:'secondary',validated:'info',review_in_progress:'warning',approved:'success'};return`<span class="badge bg-${m[s]||'secondary'}">${s}</span>`;}
+function sbadge(s){
+  const m={draft:'secondary',validated:'info',review_in_progress:'warning',approved:'success'};
+  const lbl={draft:tl('Draft','草稿'),validated:tl('Validated','已驗證'),review_in_progress:tl('In Review','審核中'),approved:tl('Approved','已核准')};
+  return`<span class="badge bg-${m[s]||'secondary'}">${lbl[s]||s}</span>`;
+}
 function fd(iso){if(!iso)return'—';return new Date(iso).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
 function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -3100,12 +3172,12 @@ function closeImprovePanel(){
 }
 
 async function submitImprove(){
-  if(!_improveBlockId){toast('Select a paragraph first','warning');return;}
+  if(!_improveBlockId){toast(tl('Select a paragraph first','請先選擇一個段落'),'warning');return;}
   const instruction=document.getElementById('improveInstruction').value.trim();
-  if(!instruction){toast('Please enter an improvement instruction','warning');return;}
+  if(!instruction){toast(tl('Please enter an improvement instruction','請輸入改善指令'),'warning');return;}
   const spin=document.getElementById('improveSpin');
   spin.classList.remove('d-none');
-  document.getElementById('improveStatusMsg').textContent='Calling AI…';
+  document.getElementById('improveStatusMsg').textContent=tl('Calling AI…','呼叫 AI 中…');
   document.getElementById('improveSuggestionWrap').classList.add('d-none');
   try{
     // If clicked on a synthetic fallback ID (no blocks parsed yet), resolve it now
@@ -3132,10 +3204,10 @@ async function submitImprove(){
     _improveBlockId=effectiveBlockId;
     document.getElementById('improveSuggestionText').textContent=data.suggested_content;
     document.getElementById('improveSuggestionWrap').classList.remove('d-none');
-    document.getElementById('improveStatusMsg').textContent='Suggestion ready';
+    document.getElementById('improveStatusMsg').textContent=tl('Suggestion ready','建議已就緒');
   }catch(e){
-    document.getElementById('improveStatusMsg').textContent='Error: '+e.message;
-    toast('Improvement failed: '+e.message,'danger');
+    document.getElementById('improveStatusMsg').textContent=tl('Error: ','錯誤：')+e.message;
+    toast(tl('Improvement failed: ','改善失敗：')+e.message,'danger');
   }finally{spin.classList.add('d-none');}
 }
 
@@ -3152,7 +3224,7 @@ async function applyImprovement(){
       body:JSON.stringify({content:_improveSuggestedContent,reason:'AI improvement: '+instruction,expected_version:_improveVersion})
     });
     if(!res.ok)throw new Error((await res.json()).detail||'Patch failed');
-    toast('Paragraph updated','success');
+    toast(tl('Paragraph updated ✓','段落已更新 ✓'),'success');
     closeImprovePanel();
     // Force fresh block reload for that section so renderReview shows updated content
     if(secNo){
@@ -3164,22 +3236,22 @@ async function applyImprovement(){
     }
     renderReview();
     attachBlockClickHandlers();
-  }catch(e){toast('Apply failed: '+e.message,'danger');}
+  }catch(e){toast(tl('Apply failed: ','套用失敗：')+e.message,'danger');}
 }
 
 function discardImprovement(){
   _improveSuggestedContent=null;
   document.getElementById('improveSuggestionWrap').classList.add('d-none');
-  document.getElementById('improveStatusMsg').textContent='Discarded';
+  document.getElementById('improveStatusMsg').textContent=tl('Discarded','已捨棄');
 }
 
 // ── FX Rates ──────────────────────────────────────────────────────────────────
 async function openFxModal(){
-  if(!currentRid){toast('No report loaded','warning');return;}
+  if(!currentRid){toast(tl('No report loaded','尚未載入報告'),'warning');return;}
   try{
     const el=document.getElementById('fxModal');
     (bootstrap.Modal.getInstance(el)||new bootstrap.Modal(el)).show();
-  }catch(e){toast('Cannot open FX modal: '+e.message,'danger');return;}
+  }catch(e){toast(tl('Cannot open FX modal: ','無法開啟匯率視窗：')+e.message,'danger');return;}
   document.getElementById('fxDate').value=new Date().toISOString().slice(0,10);
   await loadFxRates();
 }
@@ -3191,9 +3263,9 @@ async function loadFxRates(){
     if(!res.ok)return;
     const rates=await res.json();
     const el=document.getElementById('fxRateList');
-    if(!rates.length){el.innerHTML='<p class="text-muted small">No rates set yet.</p>';return;}
+    if(!rates.length){el.innerHTML=`<p class="text-muted small">${tl('No rates set yet.','尚未設定匯率。')}</p>`;return;}
     el.innerHTML=`<table class="table table-sm table-hover"><thead><tr>
-      <th>From</th><th>To</th><th>Rate</th><th>Date</th><th>Source</th></tr></thead><tbody>`+
+      <th>${tl('From','來源貨幣')}</th><th>${tl('To','目標貨幣')}</th><th>${tl('Rate','匯率')}</th><th>${tl('Date','日期')}</th><th>${tl('Source','來源')}</th></tr></thead><tbody>`+
       rates.map(r=>`<tr>
         <td>${esc(r.from_currency)}</td><td>${esc(r.to_currency)}</td>
         <td>${r.rate}</td><td>${esc(r.rate_date)}</td>
@@ -3209,21 +3281,21 @@ async function saveFxRate(){
   const rate=parseFloat(document.getElementById('fxRate').value);
   const rate_date=document.getElementById('fxDate').value;
   if(!from_currency||!to_currency||!rate||!rate_date){
-    toast('Fill all FX rate fields','warning');return;
+    toast(tl('Fill all FX rate fields','請填寫所有匯率欄位'),'warning');return;
   }
   const status=document.getElementById('fxModalStatus');
-  status.textContent='Saving…';
+  status.textContent=tl('Saving…','儲存中…');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/fx-rates',{
       method:'PUT',
       headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
       body:JSON.stringify({from_currency,to_currency,rate,rate_date,source:'analyst_manual'})
     });
-    if(!res.ok)throw new Error((await res.json()).detail||'Save failed');
-    status.textContent='Saved ✓';
-    toast(`FX rate ${from_currency}/${to_currency} = ${rate} saved`,'success');
+    if(!res.ok)throw new Error((await res.json()).detail||tl('Save failed','儲存失敗'));
+    status.textContent=tl('Saved ✓','已儲存 ✓');
+    toast(tl(`FX rate ${from_currency}/${to_currency} = ${rate} saved`,`匯率 ${from_currency}/${to_currency} = ${rate} 已儲存`),'success');
     await loadFxRates();
-  }catch(e){status.textContent='Error: '+e.message;toast(e.message,'danger');}
+  }catch(e){status.textContent=tl('Error: ','錯誤：')+e.message;toast(e.message,'danger');}
 }
 
 // ── Block Data Quality ────────────────────────────────────────────────────────
@@ -3239,10 +3311,10 @@ async function toggleDQPanel(){
 async function loadDQStats(){
   if(!currentRid)return;
   const content=document.getElementById('dqPanelContent');
-  content.innerHTML='<p class="text-muted small">Loading…</p>';
+  content.innerHTML=`<p class="text-muted small">${tl('Loading…','載入中…')}</p>`;
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/blocks/stats',{headers:H()});
-    if(!res.ok){content.innerHTML='<p class="text-danger small">Could not load stats.</p>';return;}
+    if(!res.ok){content.innerHTML=`<p class="text-danger small">${tl('Could not load stats.','無法載入統計資料。')}</p>`;return;}
     const s=await res.json();
     const bindPct=s.binding_rate_pct||0;
     const bindColor=bindPct>=80?'success':bindPct>=50?'warning':'danger';
@@ -3251,18 +3323,18 @@ async function loadDQStats(){
     content.innerHTML=`
       <div class="row g-3">
         <div class="col-md-6">
-          <div class="small fw-bold mb-1">Block Validation</div>
+          <div class="small fw-bold mb-1">${tl('Block Validation','區塊驗證')}</div>
           <div class="progress mb-1" style="height:14px;">
             <div class="progress-bar bg-${valColor}" style="width:${valPct}%">${valPct}%</div>
           </div>
-          <div class="small text-muted">${s.passed} passed · ${s.pending} pending · ${s.failed} failed · ${s.stale} stale / ${s.total_blocks} total</div>
+          <div class="small text-muted">${s.passed} ${tl('passed','通過')} · ${s.pending} ${tl('pending','待處理')} · ${s.failed} ${tl('failed','失敗')} · ${s.stale} ${tl('stale','過期')} / ${s.total_blocks} ${tl('total','總計')}</div>
         </div>
         <div class="col-md-6">
-          <div class="small fw-bold mb-1">Cell Fact Binding</div>
+          <div class="small fw-bold mb-1">${tl('Cell Fact Binding','儲存格事實綁定')}</div>
           <div class="progress mb-1" style="height:14px;">
             <div class="progress-bar bg-${bindColor}" style="width:${bindPct}%">${bindPct}%</div>
           </div>
-          <div class="small text-muted">${s.bound_cells} bound · ${s.unbound_cells} unbound / ${s.total_cells} cells</div>
+          <div class="small text-muted">${s.bound_cells} ${tl('bound','已綁定')} · ${s.unbound_cells} ${tl('unbound','未綁定')} / ${s.total_cells} ${tl('cells','儲存格')}</div>
         </div>
       </div>`;
   }catch(e){content.innerHTML=`<p class="text-danger small">${e.message}</p>`;}
@@ -3272,9 +3344,9 @@ async function validateSection(secNo){
   if(!currentRid)return;
   try{
     const br=await fetch(API+'/reports/'+currentRid+'/sections/'+secNo+'/blocks',{headers:H()});
-    if(!br.ok)throw new Error('Could not load blocks');
+    if(!br.ok)throw new Error(tl('Could not load blocks','無法載入區塊'));
     const blocks=await br.json();
-    if(!blocks.length){toast('No blocks yet — generate section first','warning');return;}
+    if(!blocks.length){toast(tl('No blocks yet — generate section first','尚無區塊 — 請先生成段落'),'warning');return;}
     // Validate all blocks in the section — throw on any non-2xx response
     await Promise.all(blocks.map(async b=>{
       const r=await fetch(API+'/reports/'+currentRid+'/blocks/'+b.id+'/validate',{method:'POST',headers:H()});
@@ -3282,9 +3354,9 @@ async function validateSection(secNo){
     }));
     const badge=document.getElementById('vstatus-'+secNo);
     if(badge){badge.textContent='passed';badge.className='badge bg-success';badge.style.fontSize='10px';}
-    toast(`§${secNo} validated`,'success');
+    toast(tl(`§${secNo} validated`,`§${secNo} 已驗證`),'success');
     if(!document.getElementById('dqPanel').classList.contains('d-none'))await loadDQStats();
-  }catch(e){toast('Validation failed: '+e.message,'danger');}
+  }catch(e){toast(tl('Validation failed: ','驗證失敗：')+e.message,'danger');}
 }
 
 // ── Fact Conflicts ────────────────────────────────────────────────────────────
@@ -3376,21 +3448,21 @@ async function toggleCalcsPanel(){
 async function loadCalculations(){
   if(!currentRid)return;
   const content=document.getElementById('calcsPanelContent');
-  content.innerHTML='<p class="text-muted small p-3">Loading…</p>';
+  content.innerHTML=`<p class="text-muted small p-3">${tl('Loading…','載入中…')}</p>`;
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/calculations',{headers:H()});
-    if(!res.ok){content.innerHTML='<p class="text-danger small p-3">Could not load calculations.</p>';return;}
+    if(!res.ok){content.innerHTML=`<p class="text-danger small p-3">${tl('Could not load calculations.','無法載入計算結果。')}</p>`;return;}
     const calcs=await res.json();
     if(!calcs.length){
-      content.innerHTML='<p class="text-muted small p-3">No calculations yet — click ↻ Recalculate to derive ratios from saved facts.</p>';
+      content.innerHTML=`<p class="text-muted small p-3">${tl('No calculations yet — click ↻ Recalculate to derive ratios from saved facts.','尚無計算結果 — 點擊 ↻ 重新計算以從儲存的事實推導比率。')}</p>`;
       return;
     }
     // Stale banner
     const staleCount=calcs.filter(c=>c.is_stale).length;
     const staleBanner=staleCount>0
       ?`<div class="alert alert-warning alert-sm d-flex align-items-center gap-2 mx-2 mt-2 mb-0 py-1 px-2" style="font-size:12px;">
-          <span>⚠ ${staleCount} ratio${staleCount>1?'s':''} are stale — a fact was updated after last recalculation.</span>
-          <button class="btn btn-warning btn-sm py-0 ms-auto" onclick="runRecalculate()">↻ Recalculate now</button>
+          <span>⚠ ${staleCount} ${tl(`ratio${staleCount>1?'s':''}`,`個比率`)} ${tl('are stale — a fact was updated after last recalculation.','已過期 — 事實在上次重算後已更新。')}</span>
+          <button class="btn btn-warning btn-sm py-0 ms-auto" onclick="runRecalculate()">↻ ${tl('Recalculate now','立即重算')}</button>
         </div>`
       :'';
     // Group by entity
@@ -3405,7 +3477,7 @@ async function loadCalculations(){
           <td class="fw-bold">${c.value!=null?c.value.toFixed(3):'—'}</td>
           <td><span title="${esc(c.formula||'')}" style="cursor:help;border-bottom:1px dotted #888;"
             class="small text-muted">${(c.formula||'').slice(0,40)}${(c.formula||'').length>40?'…':''}</span></td>
-          <td><span class="${stateColor(c.is_stale)}">${c.is_stale?'⚠ stale':'✓'}</span></td>
+          <td><span class="${stateColor(c.is_stale)}">${c.is_stale?tl('⚠ stale','⚠ 過期'):'✓'}</span></td>
         </tr>`).join('');
       return `<tr class="table-light fw-bold"><td colspan="5" style="background:#e8f5ee">
         <small>${esc(entity)}</small></td></tr>${itemRows}`;
@@ -3413,8 +3485,8 @@ async function loadCalculations(){
     content.innerHTML=staleBanner+`
       <table class="table table-sm table-hover mb-0" style="font-size:12px;">
         <thead class="table-light"><tr>
-          <th>Metric</th><th>Period</th><th>Value</th>
-          <th>Formula</th><th>Status</th>
+          <th>${tl('Metric','指標')}</th><th>${tl('Period','期間')}</th><th>${tl('Value','數值')}</th>
+          <th>${tl('Formula','公式')}</th><th>${tl('Status','狀態')}</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
@@ -3422,16 +3494,16 @@ async function loadCalculations(){
 }
 
 async function runRecalculate(){
-  if(!currentRid){toast('No report loaded','warning');return;}
+  if(!currentRid){toast(tl('No report loaded','尚未載入報告'),'warning');return;}
   const spin=document.getElementById('calcSpin');
   spin.classList.remove('d-none');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/recalculate',{method:'POST',headers:H()});
-    if(!res.ok)throw new Error((await res.json()).detail||'Recalculate failed');
+    if(!res.ok)throw new Error((await res.json()).detail||tl('Recalculate failed','重新計算失敗'));
     const d=await res.json();
-    toast(`Recalculated ${d.calculations_computed} ratios across ${d.entity_period_pairs} entity-period pairs ✓`,'success');
+    toast(tl(`Recalculated ${d.calculations_computed} ratios across ${d.entity_period_pairs} entity-period pairs ✓`,`已重新計算 ${d.entity_period_pairs} 個實體-期間組合的 ${d.calculations_computed} 個比率 ✓`),'success');
     await loadCalculations();
-  }catch(e){toast('Recalculate failed: '+e.message,'danger');}
+  }catch(e){toast(tl('Recalculate failed: ','重新計算失敗：')+e.message,'danger');}
   finally{spin.classList.add('d-none');}
 }
 
@@ -3440,12 +3512,12 @@ function toggleLtvPanel(){
 }
 
 async function computeLtvAcr(){
-  if(!currentRid){toast('No report loaded','warning');return;}
+  if(!currentRid){toast(tl('No report loaded','尚未載入報告'),'warning');return;}
   const facility=parseFloat(document.getElementById('ltvFacility').value);
   const assetVal=parseFloat(document.getElementById('ltvAssetVal').value);
   const balloonRaw=document.getElementById('ltvBalloon').value.trim();
   const balloon=balloonRaw?parseFloat(balloonRaw):null;
-  if(!facility||!assetVal){toast('Enter facility and asset value','warning');return;}
+  if(!facility||!assetVal){toast(tl('Enter facility and asset value','請輸入融資金額和資產價值'),'warning');return;}
   const schedText=document.getElementById('ltvSchedule').value;
   let schedule;
   try{
@@ -3456,7 +3528,7 @@ async function computeLtvAcr(){
       return{year:parts[0],outstanding_pct:parts[1]};
     });
   }catch(e){toast(e.message,'warning');return;}
-  if(!schedule.length){toast('Enter at least one amortization row','warning');return;}
+  if(!schedule.length){toast(tl('Enter at least one amortization row','請至少輸入一行攤還計畫'),'warning');return;}
   const spin=document.getElementById('ltvSpin');
   spin.classList.remove('d-none');
   try{
@@ -3466,13 +3538,13 @@ async function computeLtvAcr(){
     const res=await fetch(API+'/reports/'+currentRid+'/calculations/ltv-acr',{
       method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)
     });
-    if(!res.ok)throw new Error((await res.json()).detail||'LTV computation failed');
+    if(!res.ok)throw new Error((await res.json()).detail||tl('LTV computation failed','LTV 計算失敗'));
     const d=await res.json();
     let html=`<table class="table table-sm" style="font-size:11px;">
       <thead class="table-light"><tr>
-        <th>Year</th><th>Loan (USD m)</th><th>Loan %</th>
-        <th>Val 25yr</th><th>LTV 25yr %</th>
-        <th>Val 20yr</th><th>LTV 20yr %</th>
+        <th>${tl('Year','年份')}</th><th>${tl('Loan (USD m)','貸款（USD m）')}</th><th>${tl('Loan %','貸款比%')}</th>
+        <th>${tl('Val 25yr','估值25年')}</th><th>${tl('LTV 25yr %','LTV 25年%')}</th>
+        <th>${tl('Val 20yr','估值20年')}</th><th>${tl('LTV 20yr %','LTV 20年%')}</th>
       </tr></thead><tbody>`;
     d.ltv_table.forEach(r=>{
       const warn25=r.ltv_25yr_pct>70?'class="table-warning"':'';
@@ -3487,13 +3559,13 @@ async function computeLtvAcr(){
     if(d.balloon_summary){
       const b=d.balloon_summary;
       html+=`<div class="alert alert-info mt-2 mb-0 py-2 small">
-        <strong>Balloon LTV:</strong> ${b.balloon_amount.toFixed(1)} USD m &nbsp;|&nbsp;
+        <strong>${tl('Balloon LTV:','氣球款LTV：')}</strong> ${b.balloon_amount.toFixed(1)} USD m &nbsp;|&nbsp;
         25yr: LTV ${b.ltv_25yr_pct}% · ACR ${b.acr_25yr_pct}% &nbsp;|&nbsp;
         20yr: LTV ${b.ltv_20yr_pct}% · ACR ${b.acr_20yr_pct}%
       </div>`;
     }
     document.getElementById('ltvTableWrap').innerHTML=html;
-  }catch(e){toast('LTV error: '+e.message,'danger');}
+  }catch(e){toast(tl('LTV error: ','LTV 錯誤：')+e.message,'danger');}
   finally{spin.classList.add('d-none');}
 }
 
@@ -3502,20 +3574,20 @@ let _allFacts=[];
 let _factFilter='all';
 
 async function openFactInspector(){
-  if(!currentRid){toast('No report loaded','warning');return;}
+  if(!currentRid){toast(tl('No report loaded','尚未載入報告'),'warning');return;}
   _allFacts=[];
-  document.getElementById('factsTableBody').innerHTML='<tr><td colspan="9" class="text-center text-muted">Loading…</td></tr>';
-  document.getElementById('factsCount').textContent='Loading…';
+  document.getElementById('factsTableBody').innerHTML=`<tr><td colspan="9" class="text-center text-muted">${tl('Loading…','載入中…')}</td></tr>`;
+  document.getElementById('factsCount').textContent=tl('Loading…','載入中…');
   new bootstrap.Modal(document.getElementById('factInspectorModal')).show();
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/facts',{headers:H()});
-    if(!res.ok)throw new Error('Could not load facts');
+    if(!res.ok)throw new Error(tl('Could not load facts','無法載入事實資料'));
     _allFacts=await res.json();
   }catch(e){
     _allFacts=[];
     _factFilter='all';
     document.getElementById('factsTableBody').innerHTML=`<tr><td colspan="9" class="text-danger">${esc(e.message)}</td></tr>`;
-    document.getElementById('factsCount').textContent='Error';
+    document.getElementById('factsCount').textContent=tl('Error','錯誤');
     return;
   }
   filterFacts('all');
@@ -3536,10 +3608,11 @@ function renderFactsTable(){
   if(search)facts=facts.filter(f=>(f.metric_name||'').toLowerCase().includes(search)||(f.entity||'').toLowerCase().includes(search));
   const stateClass={validated:'success',conflicted:'danger',user_overridden:'primary',
     deprecated:'secondary',approved:'success'};
+  const stateLabel={validated:tl('Validated','已驗證'),conflicted:tl('Conflicted','衝突'),user_overridden:tl('Overridden','已覆蓋'),deprecated:tl('Deprecated','已棄用'),approved:tl('Approved','已核准')};
   const tbody=document.getElementById('factsTableBody');
   if(!facts.length){
-    tbody.innerHTML='<tr><td colspan="9" class="text-center text-muted py-3">No facts found.</td></tr>';
-    document.getElementById('factsCount').textContent='0 facts';
+    tbody.innerHTML=`<tr><td colspan="9" class="text-center text-muted py-3">${tl('No facts found.','找不到事實資料。')}</td></tr>`;
+    document.getElementById('factsCount').textContent=tl('0 facts','0 筆事實');
     return;
   }
   tbody.innerHTML=facts.map(f=>`
@@ -3551,13 +3624,13 @@ function renderFactsTable(){
       <td class="fw-bold">${f.value!=null?f.value:esc(f.value_text||'—')}</td>
       <td>${esc(f.currency||'—')}</td>
       <td>${esc(f.unit||'—')}</td>
-      <td><span class="badge bg-${stateClass[f.state]||'secondary'}">${esc(f.state)}</span></td>
+      <td><span class="badge bg-${stateClass[f.state]||'secondary'}">${stateLabel[f.state]||esc(f.state)}</span></td>
       <td>
         ${f.state!=='deprecated'?`<button class="btn btn-outline-secondary btn-sm py-0 px-1"
-          style="font-size:10px" onclick="overrideFact('${f.id}',${f.version||1})">Override</button>`:''}
+          style="font-size:10px" onclick="overrideFact('${f.id}',${f.version||1})">${tl('Override','覆蓋')}</button>`:''}
       </td>
     </tr>`).join('');
-  document.getElementById('factsCount').textContent=`${facts.length} / ${_allFacts.length} facts`;
+  document.getElementById('factsCount').textContent=`${facts.length} / ${_allFacts.length} ${tl('facts','筆事實')}`;
 }
 
 // Apply saved language on load
@@ -3573,9 +3646,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 async function overrideFact(factId, currentVersion){
-  const newVal=prompt('Enter override value:');
+  const newVal=prompt(tl('Enter override value:','請輸入覆蓋值：'));
   if(newVal===null)return;
-  const reason=prompt('Reason for override (optional):')||'Manual analyst override';
+  const reason=prompt(tl('Reason for override (optional):','覆蓋原因（選填）：'))||tl('Manual analyst override','分析師手動覆蓋');
   const numericVal=parseFloat(newVal);
   const body={reason, expected_version:currentVersion||1};
   if(!isNaN(numericVal)){
@@ -3589,36 +3662,36 @@ async function overrideFact(factId, currentVersion){
       headers:{...H(),'Content-Type':'application/json'},
       body:JSON.stringify(body)
     });
-    if(!res.ok)throw new Error((await res.json()).detail||'Override failed');
-    toast('Fact overridden ✓','success');
+    if(!res.ok)throw new Error((await res.json()).detail||tl('Override failed','覆蓋失敗'));
+    toast(tl('Fact overridden ✓','事實已覆蓋 ✓'),'success');
     await openFactInspector();
-  }catch(e){toast('Override failed: '+e.message,'danger');}
+  }catch(e){toast(tl('Override failed: ','覆蓋失敗：')+e.message,'danger');}
 }
 
 async function resolveConflict(conflictId, chosenId, rejectedId){
   const reason=document.getElementById('reason-'+conflictId)?.value||'Manual resolution';
   const status=document.getElementById('conflictsModalStatus');
-  status.textContent='Resolving…';
+  status.textContent=tl('Resolving…','解決中…');
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/facts/conflicts/'+conflictId+'/resolve',{
       method:'POST',
       headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
       body:JSON.stringify({chosen_fact_id:chosenId,rejected_fact_ids:[rejectedId],resolution_reason:reason})
     });
-    if(!res.ok)throw new Error((await res.json()).detail||'Resolve failed');
+    if(!res.ok)throw new Error((await res.json()).detail||tl('Resolve failed','解決失敗'));
     document.getElementById('conflict-card-'+conflictId)?.remove();
     _conflicts=_conflicts.filter(c=>c.id!==conflictId);
     document.getElementById('conflictsCount').textContent=_conflicts.length;
     if(!_conflicts.length){
       document.getElementById('conflictsBtn').style.display='none';
       document.getElementById('conflictsModalBody').innerHTML=
-        '<div class="alert alert-success">All conflicts resolved.</div>';
+        `<div class="alert alert-success">${tl('All conflicts resolved.','所有衝突已解決。')}</div>`;
     }
-    status.textContent='Resolved ✓';
-    toast('Conflict resolved','success');
+    status.textContent=tl('Resolved ✓','已解決 ✓');
+    toast(tl('Conflict resolved','衝突已解決'),'success');
   }catch(e){
-    status.textContent='Error: '+e.message;
-    toast('Resolve failed: '+e.message,'danger');
+    status.textContent=tl('Error: ','錯誤：')+e.message;
+    toast(tl('Resolve failed: ','解決失敗：')+e.message,'danger');
   }
 }
 </script>
