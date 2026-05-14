@@ -963,7 +963,10 @@ function getCompleteness(secNo,data){
 function renderCompleteness(secNo,data){
   const panel=document.getElementById('completenessPanel');if(!panel)return;
   if(!data||typeof data!=='object'||Object.keys(data).length===0){panel.style.display='none';return;}
-  const{filled,total,pct,missing}=getCompleteness(secNo,data);
+  // Normalize to pre-finalization (form) format so REQUIRED_FIELDS paths always match FIELD_DEFS.
+  // This handles stored JSON which may be in post-finalization (rows[]/risk_factors[]) format.
+  const norm=expandPayload(secNo,data);
+  const{filled,total,pct,missing}=getCompleteness(secNo,norm);
   const allFields=REQUIRED_FIELDS[secNo]||[];if(!allFields.length){panel.style.display='none';return;}
   const barColor=pct>=50?'#00703C':pct>=30?'#f59e0b':'#dc2626';
   const badgeCls=pct>=50?'bg-success':pct>=30?'bg-warning text-dark':'bg-secondary';
@@ -973,7 +976,7 @@ function renderCompleteness(secNo,data){
     <span class="badge ${badgeCls}">${pct>=50?'✓ Ready to generate':pct+'% filled (ETL fields not counted)'}</span>
   </div>
   <div class="completeness-bar"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width .3s;"></div></div>
-  <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(data,f.p);
+  <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(norm,f.p);
     return`<div class="${ok?'field-filled':'field-missing'}">${ok?'✓':'✗'} ${f.l}${!ok?' <span class="text-muted fst-italic small"> — 資料源缺漏，待補 (Data source missing, pending upload)</span>':''}</div>`;
   }).join('')}</div>`;
 }
