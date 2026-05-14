@@ -65,7 +65,7 @@ def _extract_field_defs(html: str) -> dict[int, list[dict]]:
         if m:
             section_text = m.group(1)
             fields = []
-            for fm in re.finditer(r"\{p:'([^']+)',l:'([^']+)',t:'([^']+)'([^}]*)\}", section_text):
+            for fm in re.finditer(r"\{p:'([^']+)',l:'([^']+)'(?:,lz:'[^']*')?,t:'([^']+)'([^}]*)\}", section_text):
                 entry: dict = {"p": fm.group(1), "l": fm.group(2), "t": fm.group(3)}
                 opts_m = re.search(r"opts:\[([^\]]+)\]", fm.group(4))
                 if opts_m:

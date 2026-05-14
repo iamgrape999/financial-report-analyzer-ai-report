@@ -601,7 +601,7 @@ class TestFieldDefsCompleteness:
             if m:
                 section_text = m.group(1)
                 fields = []
-                for fm in re.finditer(r"\{p:'([^']+)',l:'([^']+)',t:'([^']+)'([^}]*)\}", section_text):
+                for fm in re.finditer(r"\{p:'([^']+)',l:'([^']+)'(?:,lz:'[^']*')?,t:'([^']+)'([^}]*)\}", section_text):
                     entry = {"p": fm.group(1), "l": fm.group(2), "t": fm.group(3)}
                     opts_m = re.search(r"opts:\[([^\]]+)\]", fm.group(4))
                     if opts_m:
@@ -1093,7 +1093,7 @@ class TestJsonHintParseability:
                 continue
             sec_text = m.group(1)
             # Extract {p:'path', l:'label', t:'json', h:'...hint...'} entries
-            for fm in re.finditer(r"\{p:'([^']+)',l:'[^']+',t:'json',h:'", sec_text):
+            for fm in re.finditer(r"\{p:'([^']+)',l:'[^']+'(?:,lz:'[^']*')?,t:'json',h:'", sec_text):
                 path = fm.group(1)
                 # Extract the hint value (handle escaped single quotes)
                 hint_start = fm.end()
