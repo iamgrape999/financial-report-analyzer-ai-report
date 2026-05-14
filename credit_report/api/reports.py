@@ -220,9 +220,9 @@ async def save_section_input(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        )
+        ).order_by(SectionInput.id)
     )
-    si = si_result.scalar_one_or_none()
+    si = si_result.scalars().first()
     if si:
         si.input_json = json.dumps(payload.input_json, ensure_ascii=False)
         si.saved_by = current_user.id
@@ -314,9 +314,9 @@ async def get_section_input(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        )
+        ).order_by(SectionInput.id)
     )
-    si = result.scalar_one_or_none()
+    si = result.scalars().first()
     if not si:
         raise HTTPException(status_code=404, detail="Section input not found")
 

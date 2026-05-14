@@ -47,6 +47,27 @@ async def _safe_add_columns(conn) -> None:
         except Exception:
             pass  # Column already exists — expected on subsequent startups
 
+    # Deduplicate section_inputs and section_outputs: keep the row with the lowest id
+    # per (report_id, section_no). Duplicate rows arise from concurrent generation
+    # requests both inserting when no row existed yet (race condition).
+    for tbl in ("section_inputs", "section_outputs"):
+        try:
+            await conn.execute(text(
+                f"DELETE FROM {tbl} WHERE id NOT IN ("
+                f"  SELECT MIN(id) FROM {tbl} GROUP BY report_id, section_no"
+                f")"
+            ))
+            try:
+                await conn.execute(text(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS uq_{tbl}_report_section "
+                    f"ON {tbl} (report_id, section_no)"
+                ))
+                logger.info("_safe_add_columns: unique index created on %s", tbl)
+            except Exception:
+                pass  # Index may already exist
+        except Exception as e:
+            logger.warning("_safe_add_columns: dedup %s failed (non-critical): %s", tbl, e)
+
 # Initialise logging before anything else logs
 setup_logging()
 logger = logging.getLogger(__name__)

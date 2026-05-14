@@ -35,9 +35,9 @@ async def get_section_output(
         select(SectionOutput).where(
             SectionOutput.report_id == report_id,
             SectionOutput.section_no == section_no,
-        )
+        ).order_by(SectionOutput.id)
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def check_hard_dependencies(
@@ -80,9 +80,9 @@ async def run_section_generation(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        )
+        ).order_by(SectionInput.id)
     )
-    si = si_result.scalar_one_or_none()
+    si = si_result.scalars().first()
     input_json: dict = json.loads(si.input_json) if si and si.input_json else {}
 
     if not input_json:

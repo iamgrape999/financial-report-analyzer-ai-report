@@ -3095,19 +3095,28 @@ async function submitImprove(){
 async function applyImprovement(){
   if(!_improveSuggestedContent||!_improveBlockId)return;
   const instruction=document.getElementById('improveInstruction').value.trim();
+  // Save before closeImprovePanel() nulls _improveBlockId
+  const blockId=_improveBlockId;
+  const secEl=document.querySelector(`[data-block-id="${blockId}"]`);
+  const secNo=secEl?.dataset.section?parseInt(secEl.dataset.section):null;
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+_improveBlockId,{
+    const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+blockId,{
       method:'PATCH',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
       body:JSON.stringify({content:_improveSuggestedContent,reason:'AI improvement: '+instruction,expected_version:_improveVersion})
     });
     if(!res.ok)throw new Error((await res.json()).detail||'Patch failed');
     toast('Paragraph updated','success');
-    document.getElementById('improveStatusMsg').textContent='Applied';
     closeImprovePanel();
-    // Clear cached blocks for that section so renderReview picks up new content
-    const _sec=document.querySelector(`[data-block-id="${_improveBlockId}"]`)?.dataset.section;
-    if(_sec)delete sectionBlocksMap[parseInt(_sec)];
-    openReview();
+    // Force fresh block reload for that section so renderReview shows updated content
+    if(secNo){
+      delete sectionBlocksMap[secNo];
+      try{
+        const r=await fetch(API+'/reports/'+currentRid+'/sections/'+secNo+'/blocks',{headers:H()});
+        if(r.ok){const bl=await r.json();if(bl.length)sectionBlocksMap[secNo]=bl;}
+      }catch(e){}
+    }
+    renderReview();
+    attachBlockClickHandlers();
   }catch(e){toast('Apply failed: '+e.message,'danger');}
 }
 
@@ -3119,7 +3128,11 @@ function discardImprovement(){
 
 // ── FX Rates ──────────────────────────────────────────────────────────────────
 async function openFxModal(){
-  new bootstrap.Modal(document.getElementById('fxModal')).show();
+  if(!currentRid){toast('No report loaded','warning');return;}
+  try{
+    const el=document.getElementById('fxModal');
+    (bootstrap.Modal.getInstance(el)||new bootstrap.Modal(el)).show();
+  }catch(e){toast('Cannot open FX modal: '+e.message,'danger');return;}
   document.getElementById('fxDate').value=new Date().toISOString().slice(0,10);
   await loadFxRates();
 }
@@ -3170,7 +3183,10 @@ async function saveFxRate(){
 async function toggleDQPanel(){
   const panel=document.getElementById('dqPanel');
   panel.classList.toggle('d-none');
-  if(!panel.classList.contains('d-none'))await loadDQStats();
+  if(!panel.classList.contains('d-none')){
+    panel.scrollIntoView({behavior:'smooth',block:'start'});
+    await loadDQStats();
+  }
 }
 
 async function loadDQStats(){
@@ -3304,7 +3320,10 @@ function renderConflicts(){
 async function toggleCalcsPanel(){
   const panel=document.getElementById('calcsPanel');
   panel.classList.toggle('d-none');
-  if(!panel.classList.contains('d-none'))await loadCalculations();
+  if(!panel.classList.contains('d-none')){
+    panel.scrollIntoView({behavior:'smooth',block:'start'});
+    await loadCalculations();
+  }
 }
 
 async function loadCalculations(){
