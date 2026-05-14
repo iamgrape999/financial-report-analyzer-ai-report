@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.audit.events import write_event
 from credit_report.database import get_db
 from credit_report.fact_store import repository as repo
+from credit_report.fact_store.models import FactConflict
 from credit_report.fact_store.repository import OptimisticLockError
 from credit_report.schemas import (
     FactApproveRequest,
@@ -49,6 +51,18 @@ async def resolve_conflict(
     current_user: User = Depends(require_analyst),
 ):
     """Resolve a fact conflict: approve the chosen fact, deprecate the rejected ones."""
+    result = await db.execute(
+        select(FactConflict).where(
+            FactConflict.id == conflict_id,
+            FactConflict.report_id == report_id,
+        )
+    )
+    existing = result.scalar_one_or_none()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Conflict not found")
+    if existing.status != "open":
+        raise HTTPException(status_code=400, detail=f"Conflict is already '{existing.status}'")
+
     try:
         conflict = await repo.resolve_conflict(
             db,
