@@ -984,7 +984,7 @@ function renderCompleteness(secNo,data){
   panel.style.display='block';
   panel.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-1">
     <strong style="font-size:12px">欄位完整度 Field Completeness: ${filled}/${total} (${pct}%)</strong>
-    <span class="badge ${badgeCls}">${pct>=50?'✓ Ready to generate':pct+'% filled (ETL fields not counted)'}</span>
+    <span class="badge ${badgeCls}">${pct>=50?'✓ 可以生成':pct+'% 已填寫（ETL欄位不計入）'}</span>
   </div>
   <div class="completeness-bar"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width .3s;"></div></div>
   <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(norm,f.p);
@@ -2524,8 +2524,14 @@ function _extractFacts(obj,nums=[],strs=[]){
     if(typeof v==='number'&&v!==0&&isFinite(v))nums.push(v);
     else if(typeof v==='string'&&v.trim().length>1&&v.length<120){
       const t=v.trim();
-      if(!t.startsWith('To be generated')&&t!=='APPROVE/DECLINE'&&t!=='—')strs.push(t);
-    }else if(Array.isArray(v))v.forEach(item=>{if(typeof item==='object'&&item)_extractFacts(item,nums,strs);else if(typeof item==='string'&&item.length>1)strs.push(item);});
+      // Skip placeholders, snake_case internal keys stored as values, and ALL_CAPS tokens
+      if(!t.startsWith('To be generated')&&t!=='APPROVE/DECLINE'&&t!=='—'
+         &&!t.includes('_')&&!/^[A-Z][A-Z0-9]+$/.test(t))
+        strs.push(t);
+    }else if(Array.isArray(v))v.forEach(item=>{
+      if(typeof item==='object'&&item)_extractFacts(item,nums,strs);
+      else if(typeof item==='string'&&item.trim().length>1&&!item.includes('_'))strs.push(item.trim());
+    });
     else if(typeof v==='object'&&v)_extractFacts(v,nums,strs);
   }
   return{nums,strs};
@@ -2537,44 +2543,53 @@ function redTeamCheck(secNo,inputData,markdown){
 
   // 1. Unfilled placeholders
   if(/\[TBD\]|\[INSERT\]|\[PLACEHOLDER\]|\[FILL\]/i.test(markdown))
-    issues.push({sev:'danger',msg:'Unfilled placeholders detected in output — AI failed to generate content'});
+    issues.push({sev:'danger',msg:'輸出中發現未填寫的佔位符 — AI 未能正確生成內容'});
 
   // 2. Lorem ipsum
   if(/lorem ipsum/i.test(markdown))
-    issues.push({sev:'danger',msg:'Lorem ipsum text found — output is placeholder, not real content'});
+    issues.push({sev:'danger',msg:'發現 lorem ipsum 文字 — 輸出為佔位符，非真實內容'});
 
   // 3. Very short output
   if(markdown.length<200)
-    issues.push({sev:'danger',msg:`Output very short (${markdown.length} chars) — likely incomplete or generation failed`});
+    issues.push({sev:'danger',msg:`輸出內容過短（${markdown.length} 字元）— 可能不完整或生成失敗`});
 
   // 4. §2 staleness
   if(secNo===2&&checkSection2Stale())
-    issues.push({sev:'warning',msg:'§2 Overall Comments is stale — regenerate after all other sections are finalised'});
+    issues.push({sev:'warning',msg:'§2 綜合評語已過時 — 請在所有段落完成後重新生成'});
 
   if(!inputData)return issues;
   const{nums,strs}=_extractFacts(inputData);
 
-  // 5. Key numeric grounding check
-  const critNums=nums.filter(n=>Math.abs(n)>=0.1);
+  // 5. Key numeric grounding check (only flag if an overwhelming majority are missing)
+  const critNums=nums.filter(n=>Math.abs(n)>=1);
   if(critNums.length){
     let ungrounded=0;
     for(const n of critNums){
-      const fmts=[String(n),n.toFixed(1),n.toFixed(2),n.toLocaleString()];
+      const abs=Math.abs(n);
+      const fmts=[String(n),n.toFixed(1),n.toFixed(2),abs.toFixed(0),abs.toFixed(1),abs.toFixed(2),
+                  abs.toLocaleString('en-US'),abs.toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})];
       if(!fmts.some(f=>markdown.includes(f)))ungrounded++;
     }
     const ungroundedPct=Math.round(ungrounded/critNums.length*100);
-    if(ungroundedPct>50)
-      issues.push({sev:'danger',msg:`${ungrounded}/${critNums.length} key numbers from input not found in output — high hallucination risk`});
-    else if(ungroundedPct>25)
-      issues.push({sev:'warning',msg:`${ungrounded}/${critNums.length} key numbers from input not referenced in output — verify content`});
+    if(ungroundedPct>80)
+      issues.push({sev:'danger',msg:`${ungrounded}/${critNums.length} 個關鍵數字未出現在輸出中 — 高度幻覺風險`});
+    else if(ungroundedPct>60)
+      issues.push({sev:'warning',msg:`${ungrounded}/${critNums.length} 個關鍵數字未出現在輸出中 — 請驗證內容`});
   }
 
-  // 6. Key named entity grounding (company/vessel names, legal terms)
-  const keyNames=strs.filter(s=>/^[A-Z]/.test(s)&&s.length>3&&!/^(USD|SGD|EUR|GBP|JPY|Clear|Passed|N\/A|Yes|No|True|False)$/.test(s));
+  // 6. Key named entity grounding (company/vessel names) — strict filter to avoid false positives
+  const _GENERIC_RE=/^(USD|SGD|EUR|GBP|JPY|TWD|HKD|AUD|CHF|Clear|Passed|Failed|Yes|No|True|False|Low|Medium|High|None|Active|Compliant|Standard|Performing|Approved|Pending|Completed|Unqualified|Secured|Unsecured|Spot|Singapore|China|Korea|Japan|Taiwan|British|Islands|English|Aligned|Compliant)$/;
+  const keyNames=strs.filter(s=>
+    s.length>=5&&         // minimum length to avoid short tokens
+    /^[A-Z]/.test(s)&&   // starts with capital (proper noun)
+    /[a-z]/.test(s)&&    // contains lowercase (real word, not acronym)
+    !s.includes('_')&&   // no underscores (internal key patterns)
+    !_GENERIC_RE.test(s) // not a generic status/currency word
+  );
   if(keyNames.length>=2){
-    const missing=keyNames.slice(0,6).filter(name=>!markdown.includes(name));
+    const missing=keyNames.slice(0,8).filter(name=>!markdown.includes(name));
     if(missing.length>=3)
-      issues.push({sev:'warning',msg:`Key entities from input not found in output: "${missing.slice(0,3).join('", "')}" — possible hallucination or incorrect names`});
+      issues.push({sev:'warning',msg:`輸入中的關鍵實體未出現在輸出中：「${missing.slice(0,3).join('」、「')}」— 可能為幻覺或名稱錯誤`});
   }
 
   return issues;
@@ -2592,20 +2607,22 @@ function renderQualityReport(){
     const hasInput=inp?.has_data;
     const hasOutput=out?.status==='done'&&out.markdown;
     const inputData=sectionInputDataMap[n]||null;
+    // Expand to form-format paths before completeness/red-team checks
+    const normData=inputData?expandPayload(n,inputData):null;
 
-    // Completeness check on cached input data
-    const{pct:compPct=null}=inputData?getCompleteness(n,inputData):{};
+    // Completeness check on expanded (form-format) input data
+    const{pct:compPct=null}=normData?getCompleteness(n,normData):{};
 
     const issues=[];
-    if(!hasInput)issues.push({sev:'danger',msg:'No analyst input data — section output will contain hallucinations'});
-    if(hasInput&&compPct!==null&&compPct<50)issues.push({sev:'warning',msg:`Input only ${compPct}% complete — draft report may have gaps; ETL fields not counted in score`});
-    if(hasInput&&!hasOutput)issues.push({sev:'warning',msg:'Input ready but section not yet generated'});
-    if(hasOutput)issues.push(...redTeamCheck(n,inputData,out.markdown));
+    if(!hasInput)issues.push({sev:'danger',msg:'無分析師輸入資料 — 段落輸出將包含幻覺內容'});
+    if(hasInput&&compPct!==null&&compPct<50)issues.push({sev:'warning',msg:`輸入完整度僅 ${compPct}% — 草稿報告可能有缺漏；ETL 欄位不計入分數`});
+    if(hasInput&&!hasOutput)issues.push({sev:'warning',msg:'輸入已就緒，但段落尚未生成'});
+    if(hasOutput)issues.push(...redTeamCheck(n,normData,out.markdown));
     totalIssues+=issues.length;
 
     const hasDanger=issues.some(i=>i.sev==='danger');
     const statusCls=hasDanger?'danger':issues.length?'warning':'success';
-    const statusLabel=hasDanger?'⚠ Issues':issues.length?'⚡ Review':'✓ OK';
+    const statusLabel=hasDanger?'⚠ 有問題':issues.length?'⚡ 待審閱':'✓ 通過';
     const compBadge=compPct===null?'<span class="text-muted small">—</span>'
       :`<span class="badge ${compPct>=50?'bg-success':compPct>=30?'bg-warning text-dark':'bg-secondary'}">${compPct}%</span>`;
     return `<tr>
@@ -2631,33 +2648,33 @@ function renderQualityReport(){
     <div class="row g-3 mb-3">
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${inputReady===10?'#00703C':'#dc2626'}">${inputReady}/10</div>
-        <div class="small text-muted">Sections with Input Data</div>
-        <div class="small ${inputReady===10?'text-success':'text-danger'}">欄位缺漏率 Field Missing Rate: ${missingInputRate}%</div>
+        <div class="small text-muted">已輸入資料的段落</div>
+        <div class="small ${inputReady===10?'text-success':'text-danger'}">欄位缺漏率：${missingInputRate}%</div>
       </div>
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${outputDone===10?'#00703C':'#f59e0b'}">${outputDone}/10</div>
-        <div class="small text-muted">Sections Generated</div>
-        <div class="small ${outputDone===10?'text-success':'text-warning'}">Output Missing Rate: ${missingOutputRate}%</div>
+        <div class="small text-muted">已生成的段落</div>
+        <div class="small ${outputDone===10?'text-success':'text-warning'}">輸出缺漏率：${missingOutputRate}%</div>
       </div>
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${dangerCount===0?'#00703C':'#dc2626'}">${dangerCount}</div>
-        <div class="small text-muted">Red Team Issues Found</div>
-        <div class="small ${dangerCount===0?'text-success':'text-danger'}">${dangerCount===0?'No hallucinations detected':'Requires correction before export'}</div>
+        <div class="small text-muted">紅隊審核發現的問題</div>
+        <div class="small ${dangerCount===0?'text-success':'text-danger'}">${dangerCount===0?'未發現幻覺內容':'匯出前需修正'}</div>
       </div>
     </div>
     <table class="table table-sm table-bordered mb-0">
       <thead class="table-light"><tr>
-        <th class="ps-2" style="width:36px">§</th><th>Section</th>
-        <th class="text-center" style="width:52px">Input</th>
-        <th class="text-center" style="width:60px">Complete</th>
-        <th class="text-center" style="width:60px">Output</th>
-        <th>Red Team Check</th>
+        <th class="ps-2" style="width:36px">§</th><th>段落名稱</th>
+        <th class="text-center" style="width:52px">輸入</th>
+        <th class="text-center" style="width:60px">完整度</th>
+        <th class="text-center" style="width:60px">輸出</th>
+        <th>紅隊審核</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${dangerCount>0
-      ?`<div class="alert alert-danger mt-3 mb-0 small"><strong>⚠ Red Team Review — Action Required:</strong> ${dangerCount} issue(s) found. Fix all <strong>danger</strong> items before export: correct input data, regenerate affected sections, and verify numbers/names in generated output match the input JSON.</div>`
-      :'<div class="alert alert-success mt-3 mb-0 small"><strong>✓ Red Team Review Passed</strong> — No hallucinations, placeholder text, or grounding errors detected. Report is ready for export.</div>'}
+      ?`<div class="alert alert-danger mt-3 mb-0 small"><strong>⚠ 紅隊審核 — 需要處理：</strong> 發現 ${dangerCount} 個問題。請在匯出前修正所有<strong>危險</strong>項目：修正輸入資料、重新生成受影響段落，並驗證輸出內容中的數字與名稱是否與輸入 JSON 一致。</div>`
+      :'<div class="alert alert-success mt-3 mb-0 small"><strong>✓ 紅隊審核通過</strong> — 未發現幻覺內容、佔位符文字或數據錨定錯誤。報告已可匯出。</div>'}
   `;
   container.style.display='block';
 }
