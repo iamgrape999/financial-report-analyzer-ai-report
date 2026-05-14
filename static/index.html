@@ -99,6 +99,17 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
   border-radius:0 6px 6px 0;padding:12px;overflow-y:auto;max-height:calc(100vh - 220px);
   border-left:2px solid #313244;display:none;position:sticky;top:0;}
 .form-split-wrap.split-on #jsonPreviewPanel{display:block;}
+/* ── Generation Progress Modal ── */
+.gen-progress-row{border-left:3px solid #e2e8f0;padding:8px 12px;margin-bottom:4px;border-radius:0 6px 6px 0;transition:border-color .3s,background .3s;}
+.gen-progress-row.gpr-waiting{border-left-color:#cbd5e1;opacity:.55;}
+.gen-progress-row.gpr-generating{border-left-color:#f59e0b;background:#fffbeb;}
+.gen-progress-row.gpr-done{border-left-color:#00703C;background:#f0fff4;}
+.gen-progress-row.gpr-error{border-left-color:#dc2626;background:#fef2f2;}
+.gpr-preview{font-size:10.5px;color:#444;margin-top:5px;font-family:Georgia,serif;line-height:1.6;max-height:52px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;}
+.gpr-tokens{font-size:9.5px;color:#00703C;font-weight:bold;margin-right:6px;}
+.gpr-status-icon{font-size:1.05rem;min-width:26px;text-align:center;flex-shrink:0;}
+#genProgressModal .modal-header{background:#00703C;color:#fff;padding:10px 16px;}
+#genProgressModal .modal-body{padding:14px 16px;}
 </style>
 </head>
 <body>
