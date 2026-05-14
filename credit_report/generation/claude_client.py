@@ -74,6 +74,7 @@ async def generate_section_markdown(
     preceding_outputs: Optional[dict[int, str]] = None,
     api_key: Optional[str] = None,
     model_id: Optional[str] = None,
+    output_language: str = "en",
 ) -> tuple[str, int]:
     """
     Call Gemini and assemble multi-part section Markdown with continuation support.
@@ -102,6 +103,7 @@ async def generate_section_markdown(
             preceding_outputs=preceding_outputs,
             is_continuation=is_continuation,
             continuation_resume_token=resume_token,
+            output_language=output_language,
         )
 
         cfg = genai_types.GenerateContentConfig(

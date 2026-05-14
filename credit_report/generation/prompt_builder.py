@@ -1506,6 +1506,17 @@ OUTPUT_INSTRUCTIONS = """\
 """
 
 
+_ZH_INSTRUCTION = (
+    "\n\nLANGUAGE DIRECTIVE — MANDATORY: Write the ENTIRE response in Traditional Chinese "
+    "(繁體中文). This applies to ALL headings, table headers, table cells, bullet points, "
+    "narrative paragraphs, footnotes, and labels. Use professional banking and financial "
+    "terminology in Traditional Chinese. Number formatting rules remain unchanged "
+    "(e.g. USD 2,791m, 1,234,567). Entity names (company names, bank names, vessel names) "
+    "may be kept in English where a standard Chinese equivalent does not exist. "
+    "Do NOT produce any English prose or headings — only Traditional Chinese."
+)
+
+
 def build_section_prompt(
     section_no: int,
     input_json: dict,
@@ -1513,6 +1524,7 @@ def build_section_prompt(
     preceding_outputs: Optional[dict[int, str]] = None,
     is_continuation: bool = False,
     continuation_resume_token: Optional[str] = None,
+    output_language: str = "en",
 ) -> tuple[str, str]:
     """
     Build (system_prompt, user_prompt) for a single section generation call.
@@ -1572,4 +1584,5 @@ def build_section_prompt(
             f"{OUTPUT_INSTRUCTIONS}"
         )
 
-    return SYSTEM_PROMPT, user_prompt
+    system_prompt = SYSTEM_PROMPT + (_ZH_INSTRUCTION if output_language == "zh" else "")
+    return system_prompt, user_prompt

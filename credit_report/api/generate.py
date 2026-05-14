@@ -7,7 +7,7 @@ import uuid
 from functools import partial
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -441,6 +441,7 @@ async def generate_section(
     report_id: str,
     section_no: int,
     background_tasks: BackgroundTasks,
+    gen_language: str = Query(default="en", description="Output language: 'en' for English, 'zh' for Traditional Chinese"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
@@ -467,6 +468,7 @@ async def generate_section(
     task_id = str(uuid.uuid4())
     _generation_tasks[task_id] = {"status": "running", "section_no": section_no}
     user_id, user_role = current_user.id, current_user.role
+    output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
     async def _bg_generate_section():
         from credit_report.database import AsyncSessionLocal
@@ -482,8 +484,8 @@ async def generate_section(
                         preceding[n] = ctx.markdown
 
                 logger.info(
-                    "generate_section[bg]: starting section=%d report=%s user=%s preceding=%s",
-                    section_no, report_id, user_id, list(preceding.keys()),
+                    "generate_section[bg]: starting section=%d report=%s user=%s preceding=%s lang=%s",
+                    section_no, report_id, user_id, list(preceding.keys()), output_lang,
                 )
                 output = await run_section_generation(
                     db=bg_db,
@@ -492,6 +494,7 @@ async def generate_section(
                     actor_user_id=user_id,
                     actor_role=user_role,
                     preceding_outputs=preceding or None,
+                    output_language=output_lang,
                 )
                 await bg_db.commit()
                 _generation_tasks[task_id].update({
@@ -525,6 +528,7 @@ async def generate_section(
 async def generate_full_report(
     report_id: str,
     background_tasks: BackgroundTasks,
+    gen_language: str = Query(default="en", description="Output language: 'en' for English, 'zh' for Traditional Chinese"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
@@ -565,20 +569,22 @@ async def generate_full_report(
     task_id = str(uuid.uuid4())
     _generation_tasks[task_id] = {"status": "running"}
     user_id, user_role = current_user.id, current_user.role
+    full_output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
     async def _bg_generate_full_report():
         from credit_report.database import AsyncSessionLocal
         async with AsyncSessionLocal() as bg_db:
             try:
                 logger.info(
-                    "generate_full_report[bg]: starting report=%s user=%s task=%s",
-                    report_id, user_id, task_id,
+                    "generate_full_report[bg]: starting report=%s user=%s task=%s lang=%s",
+                    report_id, user_id, task_id, full_output_lang,
                 )
                 results = await run_full_report_generation(
                     db=bg_db,
                     report_id=report_id,
                     actor_user_id=user_id,
                     actor_role=user_role,
+                    output_language=full_output_lang,
                 )
                 await bg_db.commit()
                 done = sum(1 for v in results.values() if v == "done")

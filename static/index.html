@@ -212,6 +212,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <div class="card-body d-flex flex-column gap-2">
           <button class="btn btn-success btn-sm fw-semibold" onclick="preflight()">
             <span id="genAllSpin" class="spinner-border spinner-sm d-none me-1"></span><span data-i18n="rd.gen_all">⚡ Generate Full Report</span></button>
+          <button class="btn btn-outline-info btn-sm gen-lang-btn" onclick="toggleGenLang()" title="AI output: English — click to switch to Traditional Chinese">🌐 EN</button>
           <button class="btn btn-primary btn-sm" onclick="openReview()" data-i18n="rd.full_review">📖 Full Report Review</button>
           <button class="btn btn-outline-secondary btn-sm" onclick="loadReportDetail(currentRid)" data-i18n="rd.refresh">🔄 Refresh</button>
           <button class="btn btn-warning btn-sm" onclick="openConflictsModal()" id="conflictsBtn" style="display:none">
@@ -296,6 +297,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
         <button class="btn btn-success btn-sm" onclick="generateCurrentSection()">
           <span id="secGenSpin" class="spinner-border spinner-sm d-none me-1"></span><span data-i18n="sp.gen_section">⚡ Generate This Section</span></button>
+        <button class="btn btn-outline-info btn-sm gen-lang-btn" onclick="toggleGenLang()" title="AI output: English — click to switch to Traditional Chinese">🌐 EN</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="loadSectionOutput(currentPanelSec)" data-i18n="sp.refresh">🔄 Refresh</button>
         <span id="sec2Notice" class="badge bg-warning text-dark d-none" data-i18n="sp.sec2_notice">§2 should be regenerated after all other sections are done</span>
       </div>
@@ -635,6 +637,7 @@ let sectionBlocksMap={};    // {n: ReportBlock[]} — real block IDs for improve
 let allOutputs=[];
 let uploadedDocs=[];        // cached document list for duplicate detection
 let lang=localStorage.getItem('lang')||'en';
+let genOutputLang=localStorage.getItem('genOutputLang')||'en';
 
 const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix',11:'Analyst / External Research Report'};
 const SNAMES_ZH={1:'融資結構與主要條款',2:'綜合評述',3:'信用風險評估',4:'借款人背景',5:'擔保品評估',6:'船舶融資概覽',7:'財務分析',8:'法律文件與抵押',9:'法規遵循清單',10:'附錄',11:'外部研究報告參考資料'};
@@ -890,6 +893,16 @@ function setLang(l){
   try{if(document.getElementById('viewReview')?.classList.contains('active')&&typeof renderReview==='function')renderReview();}catch(e){}
 }
 function toggleLang(){setLang(lang==='zh'?'en':'zh');}
+
+function toggleGenLang(){
+  genOutputLang=genOutputLang==='zh'?'en':'zh';
+  localStorage.setItem('genOutputLang',genOutputLang);
+  document.querySelectorAll('.gen-lang-btn').forEach(btn=>{
+    btn.textContent=genOutputLang==='zh'?'🌐 繁中':'🌐 EN';
+    btn.title=genOutputLang==='zh'?'AI output: Traditional Chinese — click to switch to English':'AI output: English — click to switch to Traditional Chinese';
+  });
+  toast(genOutputLang==='zh'?'AI報告將以繁體中文產生':'AI report will be generated in English','info');
+}
 
 const TEMPLATES={
   1:{"report_type":"new_deal","facility_summary":{"rows":[{"item_no":1,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"SG","current_facility_usd_m":null,"proposed_facility_usd_m":178.5,"is_new":true,"outstanding_usd_m":0,"outstanding_as_at":"end Oct 2025","currency":"USD","tenor":"7 years after Vessel Delivery Date or 11 years after Initial Drawdown Date, whichever earlier (Expected Delivery: 30 Jun 2028)","facility_type":"Committed Bilateral Term Loan (SLL)","collateral_pre":"Refund Guarantee issued by Korea Development Bank, assigned to CUB","collateral_post":"One 20,000 TEU dual fuel (LNG, Diesel) containership (Hull No. 2891)","guarantor":"Evergreen Marine Corporation (Taiwan) Ltd. (EMC)","is_psr":false,"is_lapsing":false},{"item_no":2,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"SG","current_facility_usd_m":128.75,"proposed_facility_usd_m":128.75,"is_new":false,"outstanding_usd_m":0,"currency":"USD","tenor":"7 years after Vessel Delivery Date or 11 years after Initial Drawdown Date, whichever earlier","facility_type":"Committed Bilateral Term Loan (SLL)","collateral_pre":"Refund Guarantee issued by Export-Import Bank of Korea, assigned to CUB","collateral_post":"One 14,000 TEU methanol dual fuel containership (Hull No. K712)","guarantor":"Evergreen Marine Corporation (Taiwan) Ltd. (EMC)","is_psr":false,"is_lapsing":false},{"item_no":3,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"SG","current_facility_usd_m":25.0,"proposed_facility_usd_m":25.0,"is_new":false,"outstanding_usd_m":0,"currency":"USD","tenor":"3 years; maturity 15 Aug 2026","facility_type":"Committed Revolving Credit Facility","collateral_pre":"NIL","collateral_post":"NIL","guarantor":"Evergreen Marine Corporation (Taiwan) Ltd. (EMC)","is_psr":false,"is_lapsing":false},{"item_no":4,"borrower_full_name":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","booking_location":"HO","current_facility_usd_m":85.0,"proposed_facility_usd_m":85.0,"is_new":false,"outstanding_usd_m":0,"currency":"USD","tenor":"7 years after Delivery Date; maturity 15 Mar 2033","facility_type":"Committed Bilateral Term Loan","collateral_pre":"NIL","collateral_post":"One 12,500 TEU container ship (M/V Tree Pioneer)","guarantor":"Evergreen Marine Corporation (Taiwan) Ltd. (EMC)","is_psr":false,"is_lapsing":false}],"totals":{"total_credit_limit_usd_m":307.25,"psr_spot_limit_usd_m":0.88,"credit_limit_total_current_usd_m":238.75,"credit_limit_total_proposed_usd_m":417.25,"outstanding_total_usd_m":0},"footnotes":[{"symbol":"[1]","text_verbatim":"Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period. Latest Vessel Delivery Date 27 Dec 2028."},{"symbol":"[2]","text_verbatim":"PSR limit is advised to client. ISDA not signed yet as client advised they do not require IRS in the near term."},{"symbol":"[4]","text_verbatim":"Please refer to Appendix I for total CUB's exposure to Evergreen Group."}],"appendix_ref":"Please refer to Appendix I for total CUB exposure to Evergreen Group."},"regulatory_compliance":{"bank_net_worth_twd_bn":275,"single_borrower_limit_pct":5,"single_borrower_limit_twd_bn":13.75,"usd_equivalent_usd_m":436,"exchange_rate":31.52,"exchange_rate_date":"2025-12-12","china_invested_enterprise":false,"compliance_status":"Compliant","unsecured_drawdown_cap_pct":32,"unsecured_drawdown_cap_usd_m":71.4,"credit_breakdown":[{"facility":"New vessel loan (Item 1)","credit_limit_usd_m":178.5,"unsecured_usd_m":71.4,"secured":"After delivery: 60% of appraised value"},{"facility":"Existing vessel loan (Item 2)","credit_limit_usd_m":128.75,"unsecured_usd_m":128.75,"secured":"—"},{"facility":"RCF (Item 3)","credit_limit_usd_m":25.0,"unsecured_usd_m":25.0,"secured":"—"},{"facility":"Existing vessel loan (Item 4)","credit_limit_usd_m":85.0,"unsecured_usd_m":23.62,"secured":61.38}],"group_limit":{"approved_group_limit_usd_m":750,"total_proposed_group_utilization_usd_m":673.13,"ema_proposed_exposure_usd_m":418.13,"within_limit":true}},"purpose_and_recommendation":{"purpose_verbatim":"This report seeks approval for a new USD178.50m committed secured 11-year sustainability-linked bilateral term loan facility to EMA to finance one 20,000 TEU dual fuel (LNG, Diesel) containership under construction by Samsung Heavy Industries Co., Ltd. in South Korea. The facility amount represents 80% of vessel contract price of USD223.13m and is guaranteed by EMC. Pre-delivery security is Assignment of Refund Guarantee; post-delivery security is first priority vessel mortgage with ACR >= 120% / LTV < 83%. This report also proposes aligning the USD0.88m FX spot facility maturity with the Evergreen Group Annual Review date of 28 Feb 2026.","recommendation":"APPROVE"},"terms_and_conditions":{"borrower":"Evergreen Marine (Asia) Pte. Ltd. (EMA)","guarantors":["Evergreen Marine Corporation (Taiwan) Ltd. (EMC)"],"lender":"Cathay United Bank Singapore Branch (CUB SG)","facility_type":"Committed Bilateral Term Loan (Sustainability-Linked)","facility_amount_usd_m":178.5,"facility_amount_formula":"Lesser of USD178,500,000 and 80% of Initial Market Value of Vessel","ltc_percent":80,"tenor_years":11,"tenor_structure":"4+7 (pre-delivery + post-delivery)","purpose":"Acquisition of one 20,000 TEU dual fuel (LNG, Diesel) containership (Hull No. 2891) under construction at Samsung Heavy Industries Co., Ltd., South Korea","availability_period":"Till 6 months from vessel delivery date; undrawn limits automatically cancelled","repayment_schedule":"First 5% repayment 6 months from delivery; subsequent 12 semi-annual instalments of 5% each; final 35% balloon at maturity","balloon_percent":35,"interest_rate_basis":"Term SOFR","margin_bps":85,"interest_period":"3 months or 1 month, not exceeding 3 months","upfront_fee_pct":0.1,"upfront_fee_usd":178500,"annual_renewal_fee_usd":10000,"security_pre_delivery":"Assignment of Refund Guarantee issued by Korea Development Bank (KDB), fully covering each pre-delivery installment, assigned to CUB SG","security_post_delivery":"First priority perfected mortgage on Vessel for 120% of Facility Amount plus interest and costs, and assignment of insurances","value_maintenance_clause":{"acr_minimum_pct":120,"ltv_maximum_pct":83,"testing_frequency":"Every 2 years post delivery","cure_period_days":21,"cure_mechanism":"Partial prepayment or provision of additional collateral"},"sustainability_linked_kpi":{"description":"Annual testing; KPIs cover EMC fleet Scope 1 CO2 intensity reduction, MSCI ESG rating, and DJSI inclusion","max_margin_ratchet_bps":5,"ratchet_direction":"Margin increase on KPI miss / decrease on KPI achievement"},"financial_covenants":"NIL","drawdown_conditions":{"max_drawdowns":5,"per_drawdown_cap_pct_of_cost":80,"aggregate_cap_usd_m":178.5,"pre_delivery_cap_usd_m":71.4},"conditions_precedent":["Execution of facility and security documents","EMC Corporate Guarantee","Assignment of Refund Guarantee from KDB to CUB SG","Satisfactory legal opinions","Evidence of upfront fee payment","KYC/AML completion","EMA and EMC board resolutions","Evidence of vessel construction contract and insurance arrangements"],"other_conditions":["EMC to remain listed throughout the loan facility"],"governing_law":"Singapore","deal_comparison":[{"term":"Guarantor","proposed":"EMC","previous":"EMC"},{"term":"Amount","proposed":"USD178.50m (80% LTC)","previous":"USD128.75m (80% LTC)"},{"term":"Purpose","proposed":"One 20,000 TEU newbuild","previous":"One 14,000 TEU newbuild"},{"term":"Vessel Type","proposed":"20,000 TEU LNG dual fuel","previous":"14,000 TEU methanol dual fuel"},{"term":"Tenor","proposed":"11 years (4+7)","previous":"11 years (4+7)"},{"term":"Margin","proposed":"0.85% p.a.","previous":"0.85% p.a."},{"term":"Upfront Fee","proposed":"0.10%","previous":"0.10%"},{"term":"SLL Ratchet","proposed":"Max 5bps p.a.","previous":"Max 5bps p.a."},{"term":"Drawdowns","proposed":"<=5","previous":"<=5"},{"term":"Availability Period","proposed":"Till 6 months post delivery; undrawn cancelled","previous":"Till 6 months post delivery; undrawn cancelled"},{"term":"Security","proposed":"Pre: RG (KDB); Post: First mortgage","previous":"Pre: RG (KEXIM); Post: First mortgage"},{"term":"FMV Maintenance","proposed":">=120%","previous":">=120%"}]},"account_strategy":{"wallet":{"bank_market":"NII USD7.5m p.a.","capital_market":"USD 20m (bonds/ECM)","treasury":"FX / IRS hedging","deposit":"EMA USD1.9bn; EMC NTD198bn"},"current_relationship":"NII USD7.5m p.a.; utilization 55%","immediate_opportunities":"FX hedging for pre-delivery installments; upfront fee USD178,500","future_opportunities":"Capital markets bond USD100m; syndication lead role","other_opportunities":"Cross-sell trade finance; ESG advisory"},"sll_kpi_performance":{"kpis":[{"kpi_name":"CO2 Intensity (gCO2/dwt-nm)","target_value":"<=8.5","actual_value":"7.2","period":"2024","on_track":true,"ratchet_bps":-5},{"kpi_name":"MSCI ESG Rating","target_value":"AA","actual_value":"A","period":"2024","on_track":false,"ratchet_bps":0},{"kpi_name":"DJSI Inclusion","target_value":"Included","actual_value":"Included","period":"2024","on_track":true,"ratchet_bps":-5}]}},
@@ -2252,11 +2265,11 @@ async function generateCurrentSection(){
   }
   const sp=document.getElementById('secGenSpin');sp.classList.remove('d-none');
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec,{method:'POST',headers:H()});
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec+'?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
     // 202: background task — poll until done
-    toast(`§${sec} generation started…`,'info');
+    toast(`§${sec} generation started… (${genOutputLang==='zh'?'繁中':'EN'})`,'info');
     const result=await _pollGenerationTask(d.task_id,sec);
     toast(`§${sec} generated — ${(result.tokens_used||0).toLocaleString()} tokens`,'success');
     const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
@@ -2295,7 +2308,7 @@ async function generateAll(){
   const sp=document.getElementById('genAllSpin');sp.classList.remove('d-none');
   toast('Generating full report — this may take several minutes…','info');
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/generate',{method:'POST',headers:H()});
+    const res=await fetch(API+'/reports/'+currentRid+'/generate?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
     // 202: background task — poll until done
@@ -2468,11 +2481,11 @@ async function generateFromReview(secNo){
   }
   const sp=document.getElementById('revSpin'+secNo);if(sp)sp.classList.remove('d-none');
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+secNo,{method:'POST',headers:H()});
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/'+secNo+'?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
     // 202: background task — poll until done
-    toast(`§${secNo} generation started…`,'info');
+    toast(`§${secNo} generation started… (${genOutputLang==='zh'?'繁中':'EN'})`,'info');
     const result=await _pollGenerationTask(d.task_id,secNo);
     toast(`§${secNo} generated ✓ — ${(result.tokens_used||0).toLocaleString()} tokens`,'success');
     const outRes=await fetch(API+'/reports/'+currentRid+'/outputs',{headers:H()});
@@ -2636,7 +2649,7 @@ async function regenSec2(){
   const sp=document.getElementById('regenSpin');sp.classList.remove('d-none');
   toast('Regenerating §2 Overall Comments with full report context…','info');
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/generate/2',{method:'POST',headers:H()});
+    const res=await fetch(API+'/reports/'+currentRid+'/generate/2?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
     toast(`§2 regenerated — ${(d.tokens_used||0).toLocaleString()} tokens`,'success');
@@ -3514,7 +3527,16 @@ function renderFactsTable(){
 }
 
 // Apply saved language on load
-document.addEventListener('DOMContentLoaded',()=>setLang(lang));
+document.addEventListener('DOMContentLoaded',()=>{
+  setLang(lang);
+  // Sync gen-lang buttons to saved preference
+  if(genOutputLang==='zh'){
+    document.querySelectorAll('.gen-lang-btn').forEach(btn=>{
+      btn.textContent='🌐 繁中';
+      btn.title='AI output: Traditional Chinese — click to switch to English';
+    });
+  }
+});
 
 async function overrideFact(factId, currentVersion){
   const newVal=prompt('Enter override value:');
