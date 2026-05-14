@@ -322,12 +322,11 @@ async def test_api_generate_full_report_partial_data_proceeds(db):
 # ── 7. generate.py API: generate_full_report still 422 if ALL sections empty ─────
 
 @pytest.mark.asyncio
-async def test_api_generate_full_report_all_empty_still_422(db):
-    """generate_full_report must still return 422 when literally no sections have data.
-    This is the only case where the hard block should remain."""
+async def test_api_generate_full_report_all_empty_still_202(db):
+    """generate_full_report must return 202 even when no sections have input data.
+    The pipeline generates from uploaded evidence (evidence-only mode)."""
     from credit_report.api.generate import generate_full_report
     from credit_report.security.models import User
-    from fastapi import HTTPException
 
     rid = _make_report_id()
     # NO SectionInput for any section
@@ -349,14 +348,12 @@ async def test_api_generate_full_report_all_empty_still_422(db):
 
     from fastapi import BackgroundTasks
     bg = BackgroundTasks()
-    with pytest.raises(HTTPException) as exc_info:
-        with patch("credit_report.api.generate.GEMINI_API_KEY", "mock-key"):
-            await generate_full_report(
-                report_id=rid, background_tasks=bg, db=db, current_user=mock_user
-            )
+    with patch("credit_report.api.generate.GEMINI_API_KEY", "mock-key"):
+        result = await generate_full_report(
+            report_id=rid, background_tasks=bg, db=db, current_user=mock_user
+        )
 
-    assert exc_info.value.status_code == 422
-    assert "No sections have saved input data" in exc_info.value.detail
+    assert result.status == "running"
 
 
 # ── 8. Full end-to-end workflow simulation: ETL → save → generate ────────────────

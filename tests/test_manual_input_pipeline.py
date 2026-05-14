@@ -1528,10 +1528,11 @@ async def test_generate_section_hard_dep_missing_returns_409(db):
 
 
 @pytest.mark.asyncio
-async def test_generate_full_report_no_inputs_returns_422(db):
-    """generate_full_report with no section inputs must return HTTP 422."""
-    from fastapi import BackgroundTasks, HTTPException
+async def test_generate_full_report_no_inputs_returns_202(db):
+    """generate_full_report with no section inputs returns 202 (evidence-only mode)."""
+    from fastapi import BackgroundTasks
     from credit_report.api.generate import generate_full_report
+    from unittest.mock import patch
 
     rid = str(uuid.uuid4())
     report, owner_id = await _seed_report(db, rid)
@@ -1539,12 +1540,10 @@ async def test_generate_full_report_no_inputs_returns_422(db):
     user.id = owner_id
 
     bg = BackgroundTasks()
-    with pytest.raises(HTTPException) as exc_info:
-        await generate_full_report(report_id=rid, background_tasks=bg,
-                                   db=db, current_user=user)
-    assert exc_info.value.status_code == 422, (
-        f"Expected 422 when no inputs, got {exc_info.value.status_code}"
-    )
+    with patch("credit_report.api.generate.GEMINI_API_KEY", "mock-key"):
+        result = await generate_full_report(report_id=rid, background_tasks=bg,
+                                            db=db, current_user=user)
+    assert result.status == "running"
 
 
 @pytest.mark.asyncio

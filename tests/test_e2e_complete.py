@@ -616,9 +616,10 @@ class TestGeneration:
         assert r.status_code == 404
 
     async def test_generate_full_report_no_data(self, ac, admin_hdrs, report):
-        """Full report generation fails with 422 if no sections have input data."""
-        r = await ac.post(f"{REPORTS}/{report['id']}/generate", headers=admin_hdrs)
-        assert r.status_code == 422
+        """Full report generation returns 202 even with no section input data (evidence-only mode)."""
+        with _mock_gemini("## Section\n\nContent."):
+            r = await ac.post(f"{REPORTS}/{report['id']}/generate", headers=admin_hdrs)
+        assert r.status_code == 202
 
     async def test_generate_full_report_with_data(self, ac, admin_hdrs, report_with_input):
         """Full report generation returns 202 when data is present."""

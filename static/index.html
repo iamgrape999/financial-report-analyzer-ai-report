@@ -2290,10 +2290,13 @@ async function preflight(){
   }
   const al=document.getElementById('preflightAlert');
   if(missingData.length===10){
-    // Nothing at all — hard block
+    // No section input data detected — could be a race condition (sectionInputMap not yet loaded)
+    // or genuinely no data. Show warning and proceed; backend will generate from uploaded evidence.
+    toast('No saved section input data found — generating from uploaded evidence only.','warning');
     document.getElementById('preflightMsg').innerHTML=
-      '<strong>No section data found.</strong> Run ETL on uploaded documents, or fill in section input data manually and save, before generating.';
-    al.classList.remove('d-none');al.scrollIntoView({behavior:'smooth',block:'nearest'});return;
+      '<strong>Note:</strong> No section input data detected. Generating from uploaded evidence only. '+
+      'If you have filled in section data, wait for the page to finish loading and try again.';
+    al.classList.remove('d-none');al.scrollIntoView({behavior:'smooth',block:'nearest'});
   }
   if(missingData.length>0){
     // Partial data — warn but proceed

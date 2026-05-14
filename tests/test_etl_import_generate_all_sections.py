@@ -575,9 +575,8 @@ async def test_generate_full_report_202_with_partial_data(db):
 
 
 @pytest.mark.asyncio
-async def test_generate_full_report_422_when_no_data(db):
-    """generate_full_report must return 422 when absolutely no section has data."""
-    from fastapi import HTTPException
+async def test_generate_full_report_202_when_no_data(db):
+    """generate_full_report must return 202 even when no section has input data (evidence-only mode)."""
     from credit_report.api.generate import generate_full_report
 
     rid = str(uuid.uuid4())
@@ -587,14 +586,12 @@ async def test_generate_full_report_422_when_no_data(db):
     user = _make_user()
     bg = BackgroundTasks()
 
-    with pytest.raises(HTTPException) as exc_info:
-        with patch("credit_report.api.generate.GEMINI_API_KEY", "mock-key"):
-            await generate_full_report(
-                report_id=rid, background_tasks=bg, db=db, current_user=user
-            )
+    with patch("credit_report.api.generate.GEMINI_API_KEY", "mock-key"):
+        result = await generate_full_report(
+            report_id=rid, background_tasks=bg, db=db, current_user=user
+        )
 
-    assert exc_info.value.status_code == 422
-    assert "No sections have saved input data" in exc_info.value.detail
+    assert result.status == "running"
 
 
 # ── 10. ETL data → save → load round-trip integrity for all sections ──────────

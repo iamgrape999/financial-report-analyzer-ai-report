@@ -159,9 +159,9 @@ async def _load_section_input(db: AsyncSession, report_id: str, section_no: int)
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        )
+        ).order_by(SectionInput.id.desc())
     )
-    si = result.scalar_one_or_none()
+    si = result.scalars().first()
     if not si or not si.input_json:
         return {}
     try:
@@ -540,25 +540,19 @@ async def generate_full_report(
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
-    # Preflight data check — fast, in request context before 202 is returned
+    # Preflight data check — collect which sections have structured input (informational only)
     sections_with_data: list[int] = []
     for sec_no in range(1, 11):
         data = await _load_section_input(db, report_id, sec_no)
         if data:
             sections_with_data.append(sec_no)
 
-    if not sections_with_data:
-        logger.warning(
-            "generate_full_report: no input data for any section report=%s user=%s",
-            report_id, current_user.id,
-        )
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "No sections have saved input data. "
-                "Run ETL on uploaded documents or fill in section data manually before generating."
-            ),
-        )
+    logger.info(
+        "generate_full_report: sections_with_data=%s report=%s user=%s",
+        sections_with_data, report_id, current_user.id,
+    )
+    # Note: sections without structured JSON can still generate from uploaded evidence (ETL chunks).
+    # We do NOT block here — the pipeline handles missing input_json gracefully.
 
     if not GEMINI_API_KEY:
         raise HTTPException(
