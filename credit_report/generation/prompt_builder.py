@@ -273,7 +273,10 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "T5 = Risk and Mitigants (including Changes from Previous Review + Additional Risk Factors)\n\n"
 
         "Heading **exactly**: \"2. Overall Comments\" (bold, no §, no sub-numbering).\n"
-        "Each table: left = section label (row 1 only; rows 2+ left blank), right = content.\n"
+        "Each table has 2 columns: column 1 = section label (row 1 only; rows 2+ blank), column 2 = content.\n"
+        "⛔ COLUMN HEADER RULE: NEVER use the words 'Left' or 'Right' as column headers or cell values. "
+        "The section label (e.g. **Credit Overview**) IS the first cell of the first data row — "
+        "it is NOT a column header. The table header row uses the section label directly as shown in the format examples below.\n"
         "Credit Overview: each bullet = separate row. Do NOT merge bullets into one cell.\n\n"
 
         "## B. Input\n"
@@ -286,9 +289,18 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "## C. Output Rules\n\n"
 
         "### C-1. Credit Overview (MANDATORY — Table T1)\n"
-        "Left: **Credit Overview** (row 1 only).\n"
-        "Right: numbered bullets, each in its own row.\n\n"
-
+        "⛔NULL DATA RULE for T1: If `2A_credit_overview` in the input JSON is null, empty, or absent → "
+        "the right cell of row 1 MUST contain EXACTLY: '[Credit overview data not yet provided — please "
+        "complete the 2A_credit_overview section in the analyst input form]'. "
+        "NEVER generate empty cells, '||', or blank rows. NEVER skip Table T1.\n\n"
+        "EXACT TABLE FORMAT (copy this structure precisely — do NOT use 'Left'/'Right' as headers):\n"
+        "| **Credit Overview** | 1. [first bullet text] |\n"
+        "|---|---|\n"
+        "| | 2. [second bullet text] |\n"
+        "| | 3. [third bullet text] |\n"
+        "| | (one row per bullet, left cell BLANK for rows 2+) |\n\n"
+        "Column 1 header = **Credit Overview** (bold, first row only; all subsequent rows in col 1 are empty).\n"
+        "Column 2 = one numbered bullet per row, no merging.\n\n"
         "**EXACTLY the number of bullets in input. NO additional bullets.**\n"
         "Order: 1.Market position → 2.Transaction purpose → 3.Financial strength → "
         "4.Pre-delivery security → 5.Latest results → 6.Track record\n\n"
@@ -310,7 +322,8 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "- Bullet #6: MUST include \"past vessel financing transactions\"\n\n"
 
         "### C-2. Solvency (MANDATORY — Table T2)\n"
-        "Left: **Solvency**. Right: by entity.\n\n"
+        "Column 1 header = **Solvency** (row 1 only, blank for rows 2+). Column 2 = content by entity.\n"
+        "⛔ NEVER use 'Left' or 'Right' as column headers.\n\n"
 
         "⛔NULL DATA RULE for T2: If `2B_solvency` in the input JSON is null, empty, or absent → "
         "T2 right cell MUST contain EXACTLY: '[Solvency data not yet provided — please complete "
@@ -335,7 +348,8 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
 
         "### C-3. Guarantor (CONDITIONAL — Table T3)\n"
         "Trigger: guarantor ≠ \"NIL\".\n"
-        "Left: **The Guarantor and their Supportive Performance**.\n\n"
+        "Column 1 header = **The Guarantor and their Supportive Performance** (row 1 only, blank for rows 2+). Column 2 = content.\n"
+        "⛔ NEVER use 'Left' or 'Right' as column headers.\n\n"
 
         "⛔NULL DATA RULE for T3: If `2C_guarantor` in the input JSON is null, empty, or absent → "
         "T3 right cell MUST contain EXACTLY: '[Guarantor data not yet provided — please complete "
@@ -350,7 +364,8 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "No guarantor → \"N/A – No Guarantor\"\n\n"
 
         "### C-4. Collateral Summary (CONDITIONAL — Table T4)\n"
-        "Left: **Collateral Summary**. Right: phase-based.\n\n"
+        "Column 1 header = **Collateral Summary** (row 1 only, blank for rows 2+). Column 2 = content by phase.\n"
+        "⛔ NEVER use 'Left' or 'Right' as column headers.\n\n"
 
         "⛔NULL DATA RULE for T4: If `2D_collateral` in the input JSON is null, empty, or absent → "
         "T4 right cell MUST contain EXACTLY: '[Collateral data not yet provided — please complete "
@@ -370,7 +385,8 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "Unsecured → \"N/A – No Collateral\"\n\n"
 
         "### C-5. Risk and Mitigants (MANDATORY — Table T5)\n"
-        "Left: **Risk and Mitigants**. Right: risk entries.\n\n"
+        "Column 1 header = **Risk and Mitigants** (row 1 only, blank for rows 2+). Column 2 = risk entries.\n"
+        "⛔ NEVER use 'Left' or 'Right' as column headers.\n\n"
 
         "⛔NULL DATA RULE for T5: If `2E_risk_and_mitigants` in the input JSON is null, empty, or absent → "
         "T5 right cell MUST contain EXACTLY: '[Risk and mitigants data not yet provided — please "
@@ -1557,6 +1573,96 @@ _ZH_INSTRUCTION = (
 )
 
 
+def _normalize_section3_ratings(input_json: dict) -> dict:
+    """
+    Normalize §3 3B_internal_ratings FORMAT C to FORMAT A (flat MSR strings).
+
+    FORMAT C stores period values as nested objects, e.g.:
+      "interim": {"generated_msr": "4+", "override_applied": true, "override_to": "4+"}
+      "current": {"proposed_assessment": {"generated_msr": "3", "proposed_final_msr": "3+"}}
+
+    The AI prompt only describes FORMAT A (flat string) and FORMAT B (flat keys).
+    When FORMAT C is present the AI sees dicts where it expects strings and outputs
+    "—" for every period — this function flattens FORMAT C → FORMAT A so the AI
+    receives plain MSR strings ("4+", "3+", etc.) as it expects.
+    """
+    ratings = input_json.get("3B_internal_ratings")
+    if not isinstance(ratings, dict):
+        return input_json
+    rows = ratings.get("rows")
+    if not isinstance(rows, list):
+        return input_json
+
+    period_fields = ("fy2022_23", "fy2024", "interim", "current")
+    normalized_rows = []
+
+    for row in rows:
+        if not isinstance(row, dict):
+            normalized_rows.append(row)
+            continue
+
+        new_row = dict(row)
+        row_override_flag = bool(row.get("override_flag"))
+        row_override_remarks: list[str] = []
+
+        for field in period_fields:
+            val = row.get(field)
+            if not isinstance(val, dict):
+                continue  # already a flat value — keep as-is
+
+            msr_str: Optional[str] = None
+            this_override = False
+            this_generated: Optional[str] = None
+
+            # Extract from proposed_assessment sub-object (FORMAT C variant 2)
+            proposed = val.get("proposed_assessment")
+            if isinstance(proposed, dict):
+                this_generated = proposed.get("generated_msr") or this_generated
+                # proposed_final_msr is the authoritative override result
+                if proposed.get("proposed_final_msr"):
+                    msr_str = str(proposed["proposed_final_msr"])
+                    this_override = True
+                elif proposed.get("generated_msr"):
+                    msr_str = str(proposed["generated_msr"])
+
+            # Extract from top-level period object keys (FORMAT C variant 1)
+            if val.get("generated_msr"):
+                this_generated = str(val["generated_msr"])
+            if val.get("override_applied"):
+                this_override = True
+                if val.get("override_to") and msr_str is None:
+                    msr_str = str(val["override_to"])
+            if msr_str is None and val.get("override_to"):
+                msr_str = str(val["override_to"])
+            if msr_str is None and this_generated:
+                msr_str = this_generated
+
+            if this_override:
+                row_override_flag = True
+                nested_remarks = val.get("override_remarks") or ""
+                if nested_remarks:
+                    row_override_remarks.append(str(nested_remarks))
+                elif this_generated and msr_str and this_generated != msr_str:
+                    row_override_remarks.append(
+                        f"Generated MSR {this_generated}; override applied, final MSR {msr_str}."
+                    )
+
+            new_row[field] = msr_str  # Replace dict with flat string (or None → "—")
+
+        if row_override_flag and not new_row.get("override_flag"):
+            new_row["override_flag"] = True
+        if row_override_remarks and not new_row.get("override_remarks"):
+            new_row["override_remarks"] = " ".join(row_override_remarks)
+
+        normalized_rows.append(new_row)
+
+    import copy
+    result = copy.deepcopy(input_json)
+    result["3B_internal_ratings"] = dict(ratings)
+    result["3B_internal_ratings"]["rows"] = normalized_rows
+    return result
+
+
 def build_section_prompt(
     section_no: int,
     input_json: dict,
@@ -1594,6 +1700,12 @@ def build_section_prompt(
     # Remove from input_json so they don't appear as raw JSON — render them as a
     # dedicated block instead so the AI uses them directly without re-deriving.
     calc_results: list[dict] = input_json.pop("__calc_results", [])
+
+    # Normalize §3 internal ratings: flatten FORMAT C nested objects → flat MSR strings
+    # so the AI receives plain "3+", "4+", etc. instead of dicts that trigger "—" output.
+    if section_no == 3:
+        input_json = _normalize_section3_ratings(input_json)
+
     calc_block = ""
     if calc_results:
         lines = [

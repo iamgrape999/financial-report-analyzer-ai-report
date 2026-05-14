@@ -99,7 +99,7 @@ def upgrade() -> None:
     sa.Column('block_id', sa.String(length=100), nullable=False),
     sa.Column('row_id', sa.String(length=100), nullable=False),
     sa.Column('column_id', sa.String(length=100), nullable=False),
-    sa.Column('display_value', sa.String(length=255), nullable=True),
+    sa.Column('display_value', sa.Text(), nullable=True),
     sa.Column('numeric_value', sa.Float(), nullable=True),
     sa.Column('fact_id', sa.String(length=36), nullable=True),
     sa.Column('binding_status', sa.String(length=20), nullable=False),
