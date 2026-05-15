@@ -141,6 +141,49 @@ async def run_section_generation(
         output.generated_at = datetime.now(timezone.utc)
         logger.info("run_section_generation: done section=%d report=%s tokens=%d model=%s chars=%d", section_no, report_id, tokens_used, GEMINI_MODEL, len(markdown))
 
+        # ── Completeness check + auto-fill for sections with mandatory sub-tables ──
+        try:
+            from credit_report.generation.completeness import (
+                check_section_completeness,
+                fill_missing_tables,
+            )
+            missing = check_section_completeness(section_no, markdown)
+            if missing:
+                missing_labels = [label for _, label in missing]
+                logger.warning(
+                    "[Completeness] section=%d report=%s missing=%s — triggering fill",
+                    section_no, report_id, missing_labels,
+                )
+                fill_text, fill_tokens = await fill_missing_tables(
+                    section_no=section_no,
+                    existing_markdown=markdown,
+                    missing=missing,
+                    input_json=input_json,
+                    output_language=output_language,
+                )
+                if fill_text:
+                    markdown = markdown.rstrip() + "\n\n" + fill_text
+                    tokens_used += fill_tokens
+                    output.markdown = markdown
+                    output.tokens_used = tokens_used
+                    logger.info(
+                        "[Completeness] fill done section=%d report=%s fill_chars=%d total_tokens=%d",
+                        section_no, report_id, len(fill_text), tokens_used,
+                    )
+                    # Verify fill resolved all gaps; warn if still incomplete
+                    still_missing = check_section_completeness(section_no, markdown)
+                    if still_missing:
+                        logger.warning(
+                            "[Completeness] still missing after fill section=%d report=%s missing=%s",
+                            section_no, report_id, [l for _, l in still_missing],
+                        )
+        except Exception as _comp_err:
+            logger.warning(
+                "[Completeness] check/fill failed section=%d report=%s: %s",
+                section_no, report_id, _comp_err,
+            )
+        # ─────────────────────────────────────────────────────────────────────
+
         # ── Block AST parsing (isolated session — failure must not abort main tx) ──
         try:
             from credit_report.block_ast.builder import build_blocks
