@@ -126,10 +126,10 @@ class TestCheckSectionCompleteness:
         missing = check_section_completeness(2, "")
         assert len(missing) == 5
 
-    def test_sections_4_to_10_have_no_requirements(self):
+    def test_sections_5_to_10_have_no_requirements(self):
         from credit_report.generation.completeness import check_section_completeness
-        # §1, §2, §3 have completeness checks; §4-§10 have none
-        for sec_no in [4, 5, 6, 7, 8, 9, 10]:
+        # §1, §2, §3, §4 have completeness checks; §5-§10 have none
+        for sec_no in [5, 6, 7, 8, 9, 10]:
             result = check_section_completeness(sec_no, "some markdown")
             assert result == [], f"§{sec_no} should have no completeness requirements"
 
@@ -284,10 +284,10 @@ class TestPipelineCompletenessIntegration:
         await db.flush()
 
         fill_spy = AsyncMock(return_value=("", 0))
-        short_md = "§4 Corporate Background\n\nFoo bar."
+        short_md = "§6 New Shipbuilding\n\nFoo bar."
         with _mock_generate(short_md), _mock_evidence(), _mock_quota(), _mock_record(), \
              patch("credit_report.generation.completeness.fill_missing_tables", new=fill_spy):
-            output = await run_section_generation(db, rid, section_no=4, actor_user_id=_uid())
+            output = await run_section_generation(db, rid, section_no=6, actor_user_id=_uid())
 
         assert output.status == "done"
         fill_spy.assert_not_called()

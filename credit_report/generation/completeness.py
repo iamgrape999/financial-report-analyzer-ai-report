@@ -24,6 +24,27 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# §4 — Nine unconditional sub-sections (C-1 to C-9) + Banking Relationships
+# QA gates G-3 through G-7 confirm all items are mandatory for every report.
+# Truncation risk is highest at C-8, C-9 and Banking Relationships (end of
+# section), which is why the prompt budget is already raised to 12 288.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_S4_REQUIRED: list[tuple[str, str]] = [
+    ("**C-1.",            "C-1 Corporate Identity"),
+    ("**C-2.",            "C-2 Ownership & Group Structure"),
+    ("**C-3.",            "C-3 Key Management"),
+    ("**C-4.",            "C-4 Business Overview"),
+    ("**C-5.",            "C-5 Revenue & Financial Highlights"),
+    ("**C-6.",            "C-6 Fleet Profile"),
+    ("**C-7.",            "C-7 Debt Profile"),
+    ("**C-8.",            "C-8 Market Analysis"),
+    ("**C-9.",            "C-9 Peer Comparison"),
+    ("banking relationships", "Banking Relationships Table (Section E)"),
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # §3 — Four unconditional sub-sections (prompt Section I)
 # "§3 is NOT complete until: External Ratings + MSR Table (with Remarks) +
 #  MAS 612 (all paragraphs) + ESG are ALL present."
@@ -162,6 +183,14 @@ def check_section_completeness(
     if section_no == 1:
         return _check_section1(markdown, input_json or {})
 
+    if section_no == 4:
+        md_lower = markdown.lower()
+        return [
+            (marker, label)
+            for marker, label in _S4_REQUIRED
+            if marker.lower() not in md_lower
+        ]
+
     if section_no == 2:
         md_lower = markdown.lower()
         return [
@@ -186,6 +215,32 @@ def check_section_completeness(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_fill_system_prompt(section_no: int) -> str:
+    if section_no == 4:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §4 'Corporate History and Overview' section. "
+            "The caller specifies exactly which sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble, no summary.\n"
+            "2. Use bold sub-headers exactly matching the labels: "
+            "**C-1. Corporate Identity**, **C-2. Ownership & Group Structure**, "
+            "**C-3. Key Management**, **C-4. Business Overview**, "
+            "**C-5. Revenue & Financial Highlights**, **C-6. Fleet Profile**, "
+            "**C-7. Debt Profile**, **C-8. Market Analysis**, **C-9. Peer Comparison**.\n"
+            "3. For Banking Relationships (Section E): bold heading '**Banking Relationships**' "
+            "followed by a table: Bank | Product | Limit (USD m) | Since\n"
+            "4. C-1: two-column Markdown table (Item | Detail) with ≥8 rows.\n"
+            "5. C-2: shareholders table (Name | Stake % | Country | Notes) + UBO statement + "
+            "group structure narrative.\n"
+            "6. C-3: management table (Name | Title | Experience (years) | Background) + "
+            "stability assessment.\n"
+            "7. C-9: peer table (Company | Fleet TEU | Market Share % | Alliance | Listed) — "
+            "top-5 global lines + borrower row bolded.\n"
+            "8. Preserve ALL numbers, percentages, dates, and entity names exactly as given.\n"
+            "9. NEVER use source-referencing phrases ('as per the input', 'according to', etc.).\n"
+            "10. Start immediately with the first missing sub-section — no introductory text."
+        )
+
     if section_no == 3:
         return (
             "You are a credit report engine for CUB Singapore Branch. "
@@ -261,6 +316,23 @@ def _build_fill_user_prompt(
 
     missing_labels = ", ".join(label for _, label in missing)
     existing_tail = existing_markdown[-1500:] if len(existing_markdown) > 1500 else existing_markdown
+
+    if section_no == 4:
+        return (
+            f"The following sub-sections are MISSING from the already-generated §4 output:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 1500 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:7000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES for missing sub-sections:\n"
+            "- C-9: peer table must have borrower row in bold; include top-5 global container lines.\n"
+            "- Banking Relationships: heading '**Banking Relationships**' + table.\n"
+            "- NEVER use source-referencing phrases. State facts as established truth.\n"
+            "- All tables use pipe-format Markdown with header separator row.\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
 
     if section_no == 1:
         return (
@@ -338,11 +410,14 @@ async def fill_missing_tables(
 
     # §1: Deal Comparison + Account Strategy are non-compressible → 10 240 tokens
     # §3: MAS 612 (4 paragraphs) + MSR Table can be verbose → 6 144 tokens
+    # §4: C-9 Peer Comparison table + Banking Relationships can be verbose → 8 192 tokens
     # others: 8 192 cap
     if section_no == 1:
         max_tokens = 10240
     elif section_no == 3:
         max_tokens = 6144
+    elif section_no == 4:
+        max_tokens = 8192
     else:
         max_tokens = min(CR_SECTION_MAX_TOKENS, 8192)
 

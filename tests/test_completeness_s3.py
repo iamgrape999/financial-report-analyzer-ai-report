@@ -252,9 +252,10 @@ class TestSection3Isolation:
         # Confirms §3 detection is independent of §2
         assert "T1 Credit Overview" in labels
 
-    def test_sections_4_to_10_unaffected(self):
+    def test_sections_5_to_10_unaffected(self):
         from credit_report.generation.completeness import check_section_completeness
-        for sec in [4, 5, 6, 7, 8, 9, 10]:
+        # §4 now has its own completeness check; verify §5-§10 have none
+        for sec in [5, 6, 7, 8, 9, 10]:
             result = check_section_completeness(sec, "any content")
             assert result == [], f"§{sec} should have no completeness requirements"
 
