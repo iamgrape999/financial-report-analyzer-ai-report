@@ -65,14 +65,73 @@ _S4_REQUIRED: list[tuple[str, str]] = [
 # §3 — Four unconditional sub-sections (prompt Section I)
 # "§3 is NOT complete until: External Ratings + MSR Table (with Remarks) +
 #  MAS 612 (all paragraphs) + ESG are ALL present."
+#
+# Special case: the MSR table header (**Internal ratings:**) can be present but
+# the table body (entity data rows) can be missing — the AI generates only the
+# table column headers and separator row without any entity rows. This produces
+# a rendered table with a header but no data, causing the "weird format" where
+# the table header appears but no rows follow it.
+# Detection: after finding **Internal ratings:** in the markdown, extract the
+# block up to the next bold section header and count non-separator pipe rows.
+# Fewer than 2 non-separator pipe rows (header row only) → MSR table is empty.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _S3_REQUIRED: list[tuple[str, str]] = [
     ("**External ratings:**",       "External Ratings"),
-    ("**Internal ratings:**",       "Internal Ratings (MSR Table)"),
     ("**MAS 612 Loan Grading:**",   "MAS 612 Loan Grading (4 paragraphs)"),
     ("**ESG ratings:**",            "ESG Rating"),
 ]
+
+
+def _check_section3(markdown: str) -> list[tuple[str, str]]:
+    """
+    Return (marker, label) pairs for §3 sub-sections absent or incomplete.
+
+    Extends the simple marker check with MSR table body validation:
+    if **Internal ratings:** is present but the table block contains fewer than
+    2 non-separator pipe rows (i.e. only the column header row was generated),
+    the MSR table is treated as missing and flagged for a fill call.
+    """
+    md_lower = markdown.lower()
+    missing: list[tuple[str, str]] = []
+
+    # ① External Ratings
+    if "**external ratings:**" not in md_lower:
+        missing.append(("**External ratings:**", "External Ratings"))
+
+    # ② Internal Ratings — header presence + non-empty table body
+    has_ratings_header = "**internal ratings:**" in md_lower
+    if not has_ratings_header:
+        missing.append(("**Internal ratings:**", "Internal Ratings (MSR Table with entity rows)"))
+    else:
+        # Extract the block between "**internal ratings:**" and the next bold section
+        start = md_lower.find("**internal ratings:**")
+        # Next bold marker could be MAS 612 or ESG
+        next_section = len(markdown)
+        for next_marker in ("**mas 612", "**esg ratings"):
+            pos = md_lower.find(next_marker, start + 1)
+            if pos != -1 and pos < next_section:
+                next_section = pos
+        ratings_block = markdown[start:next_section]
+        # Count pipe rows that are NOT the separator row (lines with |---|)
+        non_sep_rows = [
+            line for line in ratings_block.splitlines()
+            if line.strip().startswith("|") and "---" not in line
+        ]
+        # A populated MSR table has at minimum: column header row + sub-header row + ≥1 entity row
+        # Requiring ≥2 non-separator rows catches the "header only" truncation case
+        if len(non_sep_rows) < 2:
+            missing.append(("**Internal ratings:**", "Internal Ratings (MSR Table — entity data rows missing)"))
+
+    # ③ MAS 612 Loan Grading
+    if "**mas 612 loan grading:**" not in md_lower:
+        missing.append(("**MAS 612 Loan Grading:**", "MAS 612 Loan Grading (4 paragraphs)"))
+
+    # ④ ESG Rating
+    if "**esg ratings:**" not in md_lower:
+        missing.append(("**ESG ratings:**", "ESG Rating"))
+
+    return missing
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -492,12 +551,7 @@ def check_section_completeness(
         ]
 
     if section_no == 3:
-        md_lower = markdown.lower()
-        return [
-            (marker, label)
-            for marker, label in _S3_REQUIRED
-            if marker.lower() not in md_lower
-        ]
+        return _check_section3(markdown)
 
     return []
 

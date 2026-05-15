@@ -196,7 +196,7 @@ class TestSection3Detection:
         from credit_report.generation.completeness import check_section_completeness
         missing = check_section_completeness(3, PARTIAL_S3_ONLY_EXTERNAL)
         labels = [l for _, l in missing]
-        assert "Internal Ratings (MSR Table)" in labels
+        assert any("Internal Ratings" in l for l in labels)
         assert "MAS 612 Loan Grading (4 paragraphs)" in labels
         assert "ESG Rating" in labels
 
@@ -220,15 +220,51 @@ class TestSection3Detection:
 
     def test_all_four_present_counted_correctly(self):
         from credit_report.generation.completeness import check_section_completeness
-        # Minimal markdown with all 4 markers
+        # Minimal markdown with all 4 markers — MSR table must include at least one entity row
         md = (
             "**External ratings:** NIL.\n\n"
-            "**Internal ratings:**\n| Entity | 2024 | Remarks |\n|---|---|---|\n\n"
+            "**Internal ratings:**\n"
+            "| Entity | 2024 | Remarks |\n"
+            "|---|---|---|\n"
+            "| EMA — Borrower | MSR 5 | Generated. |\n\n"
             "**MAS 612 Loan Grading:**\n\nPara 1.\n\nPara 2.\n\n"
             "**ESG ratings:**\nEMA:\nESG Rating Date: 1 Jan 2025\n[image]\n"
         )
         missing = check_section_completeness(3, md)
         assert missing == []
+
+    def test_msr_table_header_only_flagged(self):
+        """MSR header + separator row but NO entity data rows → flagged as missing."""
+        from credit_report.generation.completeness import check_section_completeness
+        # This is the exact "weird format" bug from production: table header rendered
+        # but no rows below it
+        md = (
+            "**External ratings:** NIL.\n\n"
+            "**Internal ratings:**\n"
+            "| Entity | FY2023 | FY2024 | Aug 2025 | Dec 2025 |\n"
+            "|--------|--------|--------|----------|----------|\n\n"
+            "**MAS 612 Loan Grading:**\n\nPara 1.\n\n"
+            "**ESG ratings:**\nEMA:\nESG Rating Date: 1 Jan 2025\n[image]\n"
+        )
+        missing = check_section_completeness(3, md)
+        labels = [l for _, l in missing]
+        assert any("Internal Ratings" in l for l in labels), (
+            "MSR table with header-only (no entity data rows) must be detected as incomplete"
+        )
+
+    def test_msr_header_only_no_separator_flagged(self):
+        """MSR header row only (no separator, no data) → flagged as missing."""
+        from credit_report.generation.completeness import check_section_completeness
+        md = (
+            "**External ratings:** NIL.\n\n"
+            "**Internal ratings:**\n"
+            "| Entity | FY2023 | FY2024 | Aug 2025 | Dec 2025 |\n\n"
+            "**MAS 612 Loan Grading:**\n\nPara 1.\n\n"
+            "**ESG ratings:**\nEMA:\nESG Rating Date: 1 Jan 2025\n[image]\n"
+        )
+        missing = check_section_completeness(3, md)
+        labels = [l for _, l in missing]
+        assert any("Internal Ratings" in l for l in labels)
 
 
 # ── B. §3 only, not other sections ────────────────────────────────────────────
