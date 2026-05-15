@@ -126,11 +126,17 @@ class TestCheckSectionCompleteness:
         missing = check_section_completeness(2, "")
         assert len(missing) == 5
 
-    def test_section_10_has_no_requirements(self):
+    def test_section_10_no_input_data_has_no_requirements(self):
         from credit_report.generation.completeness import check_section_completeness
-        # §1–§9 have completeness checks; §10 has none
+        # §10 has conditional checks — when no 10A/10B/10C input, all appendices
+        # are skipped and the result is [] (same as no requirements configured).
         result = check_section_completeness(10, "some markdown")
-        assert result == [], "§10 should have no completeness requirements"
+        assert result == [], "§10 with no input data should return no requirements"
+
+    def test_section_11_has_no_requirements(self):
+        from credit_report.generation.completeness import check_section_completeness
+        result = check_section_completeness(11, "some markdown")
+        assert result == [], "§11 has no completeness requirements configured"
 
     def test_case_insensitive_detection(self):
         from credit_report.generation.completeness import check_section_completeness

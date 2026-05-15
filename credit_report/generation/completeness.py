@@ -566,6 +566,214 @@ def _check_section7(markdown: str, input_json: dict) -> list[tuple[str, str]]:
 # Primary token budget stays at default (8 192) — §8 is typically compact.
 # Fill budget: 6 144 tokens.
 # ─────────────────────────────────────────────────────────────────────────────
+# §10 — Appendix (3 conditional appendices)
+# Appendix I   (CUB Group Exposure)      — requires 10A_group_exposure.rows
+# Appendix II  (Fleet Capacity Growth)   — requires 10B_fleet_growth.rows
+# Appendix III (EMA Detailed Projections)— requires 10C_projections to be truthy
+#
+# Each appendix is only checked when the corresponding input block is present
+# and non-empty.  Empty 10A/10B/10C means the appendix is not applicable and
+# must not be flagged as missing.
+#
+# Appendix III is the densest block: Key Assumptions table + narrative,
+# Base Case P&L (≥12 rows) / BS (≥16 rows) / CF (≥6 rows), DSCR table
+# (separate from CF!) + DSCR commentary, Worse Case stress comparison table
+# + summary table + Worse Case commentary.  All 10 sub-components are checked.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_section10(markdown: str, input_json: dict) -> list[tuple[str, str]]:
+    """
+    Return (marker, label) pairs for §10 sub-sections absent from *markdown*.
+
+    Appendix I  — conditional on 10A_group_exposure rows
+    Appendix II — conditional on 10B_fleet_growth rows
+    Appendix III — conditional on 10C_projections being truthy
+
+    Truncation risk is highest at the Appendix III tail (Worse Case commentary
+    and Worse Case Summary Table) and at Appendix II Key Note #5 (CAPEX note).
+    """
+    md_lower = markdown.lower()
+    missing: list[tuple[str, str]] = []
+
+    # ─── Appendix I: CUB Group Exposure Table ────────────────────────────────
+    exposure_sec = input_json.get("10A_group_exposure") or {}
+    if exposure_sec and (exposure_sec.get("rows") or exposure_sec.get("group_limit_sub_table")):
+
+        # ① Appendix I heading
+        has_app1_heading = (
+            "appendix i" in md_lower
+            or ("cub" in md_lower and "exposure" in md_lower)
+        )
+        if not has_app1_heading:
+            missing.append((
+                "Appendix I",
+                "A-I Heading (Appendix I: CUB's Exposure to [Group Name])",
+            ))
+
+        # ② 10-column exposure table — "current approved" is a unique column label
+        if "current approved" not in md_lower:
+            missing.append((
+                "Current Approved",
+                "A-I Exposure Table (10 cols: Entity | Branch | Facility Type | "
+                "Current Approved | Proposed | Outstanding | Collateral | Guarantor | Maturity | MSR)",
+            ))
+
+        # ③ Group Limit sub-table
+        if "group limit" not in md_lower:
+            missing.append((
+                "Group Limit",
+                "A-I Group Limit Sub-table (Approved Group Limit | Proposed Total | "
+                "**Utilization** | Headroom)",
+            ))
+
+    # ─── Appendix II: EMC Fleet Capacity Growth ───────────────────────────────
+    fleet_sec = input_json.get("10B_fleet_growth") or {}
+    if fleet_sec and fleet_sec.get("rows"):
+
+        # ④ Appendix II heading
+        has_app2_heading = (
+            "appendix ii" in md_lower
+            or ("fleet" in md_lower and "capacity growth" in md_lower)
+        )
+        if not has_app2_heading:
+            missing.append((
+                "Appendix II",
+                "A-II Heading (Appendix II: EMC Capacity Growth Targets [Year Range])",
+            ))
+
+        # ⑤ 5-column fleet table (Owned% is the key mandatory 5th column)
+        has_fleet_table = "owned" in md_lower and (
+            "total fleet" in md_lower or "total vessels" in md_lower
+        )
+        if not has_fleet_table:
+            missing.append((
+                "Owned Fleet",
+                "A-II Fleet Table (5 cols: Year | Owned Fleet (TEU m) | Total Fleet (TEU m) | "
+                "Total Vessels | Owned%)",
+            ))
+
+        # ⑥ CAPEX Key Note #5 — most commonly truncated mandatory bullet
+        if "capex" not in md_lower:
+            missing.append((
+                "CAPEX",
+                "A-II Key Note #5: EMC CAPEX plan (USD amount) + EMA capital commitment "
+                "(USD amount + date) — MANDATORY",
+            ))
+
+    # ─── Appendix III: EMA Detailed Financial Projections ────────────────────
+    proj_sec = input_json.get("10C_projections") or {}
+    if proj_sec:
+
+        # ⑦ Key Assumptions table
+        has_assumptions = (
+            "key assumptions" in md_lower
+            or "| assumption |" in md_lower
+        )
+        if not has_assumptions:
+            missing.append((
+                "Key Assumptions",
+                "A-III Key Assumptions Table (| Assumption | FY[Y]E | … | — one row per assumption, no 'Same' cells)",
+            ))
+
+        # ⑧ Assumptions narrative (italic paragraph below the table)
+        has_assumptions_narrative = (
+            "revenue growth assumes" in md_lower
+            or "cogs reflects" in md_lower
+            or "assumptions narrative" in md_lower
+        )
+        if not has_assumptions_narrative:
+            missing.append((
+                "Assumptions Narrative",
+                "A-III Assumptions Narrative (italic: 'Revenue growth assumes… COGS reflects… CAPEX per…')",
+            ))
+
+        # ⑨ Base Case P&L — detect via first and last bold subtotals
+        has_base_pl = "gross profit" in md_lower and "net income" in md_lower
+        if not has_base_pl:
+            missing.append((
+                "Gross Profit",
+                "A-III Base Case P&L (≥12 rows: Revenue | COGS | Gross Profit | … | Net Income)",
+            ))
+
+        # ⑩ Base Case Balance Sheet — first and last bold subtotals
+        has_base_bs = "total current assets" in md_lower and "total equity" in md_lower
+        if not has_base_bs:
+            missing.append((
+                "Total Current Assets",
+                "A-III Base Case Balance Sheet (≥16 rows: Total Current Assets → Total Equity)",
+            ))
+
+        # ⑪ Base Case Cash Flow — detect via unique Opening/Closing cash pair
+        has_base_cf = "operating cash flow" in md_lower and "closing cash" in md_lower
+        if not has_base_cf:
+            missing.append((
+                "Operating Cash Flow",
+                "A-III Base Case Cash Flow (≥6 rows: Operating CF | Investing CF | "
+                "Financing CF | Net Change | Opening Cash | Closing Cash)",
+            ))
+
+        # ⑫ DSCR Analysis table — must be SEPARATE from CF
+        #    Detect "debt service" + "dscr" in same document (table-header phrases)
+        has_dscr_table = (
+            "debt service" in md_lower and "dscr" in md_lower
+        ) or "total debt service" in md_lower
+        if not has_dscr_table:
+            missing.append((
+                "DSCR",
+                "A-III DSCR Analysis Table (SEPARATE from CF: OCF | Total Debt Service (P+I) | DSCR — 'x' suffix)",
+            ))
+
+        # ⑬ DSCR commentary (italic paragraph)
+        has_dscr_commentary = (
+            "dscr remains" in md_lower
+            or "minimum dscr" in md_lower
+        )
+        if not has_dscr_commentary:
+            missing.append((
+                "DSCR Commentary",
+                "A-III DSCR Commentary (italic: 'DSCR remains above Xx throughout… Minimum DSCR of Xx in [years]')",
+            ))
+
+        # ⑭ Worse Case stress assumptions comparison table
+        has_wc_stress = (
+            "stress magnitude" in md_lower
+            or ("worse case" in md_lower and "base case" in md_lower and "stress" in md_lower)
+        )
+        if not has_wc_stress:
+            missing.append((
+                "Stress Magnitude",
+                "A-III Worse Case Stress Assumptions Table "
+                "(Assumption | Base Case | Worse Case | Stress Magnitude — ≥4 rows)",
+            ))
+
+        # ⑮ Worse Case summary table
+        has_wc_summary = (
+            "worse case summary" in md_lower
+            or "stressed summary" in md_lower
+            or ("worse case" in md_lower and "net income" in md_lower and "dscr" in md_lower)
+        )
+        if not has_wc_summary:
+            missing.append((
+                "Worse Case Summary",
+                "A-III Worse Case Stressed Summary Table "
+                "(Revenue | Operating Profit | Net Income | OCF | Cash Balance | DSCR)",
+            ))
+
+        # ⑯ Worse Case commentary (italic paragraph)
+        has_wc_commentary = (
+            "under worse case" in md_lower
+            or "under the worse case" in md_lower
+        )
+        if not has_wc_commentary:
+            missing.append((
+                "Worse Case Commentary",
+                "A-III Worse Case Commentary (italic: 'Under Worse Case, DSCR declines to minimum Xx in [year]…')",
+            ))
+
+    return missing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _check_section9(markdown: str, input_json: dict) -> list[tuple[str, str]]:
     """
@@ -828,6 +1036,9 @@ def check_section_completeness(
     if section_no == 9:
         return _check_section9(markdown, input_json or {})
 
+    if section_no == 10:
+        return _check_section10(markdown, input_json or {})
+
     if section_no == 4:
         md_lower = markdown.lower()
         return [
@@ -885,6 +1096,71 @@ def _build_fill_system_prompt(section_no: int) -> str:
             "NO source-referencing phrases.\n"
             "9. Banking Act always '33-3' (NOT '333'). RG rating: reproduce verbatim.\n"
             "10. Start immediately with the first missing sub-section — no introductory text."
+        )
+
+    if section_no == 10:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §10 'Appendix' section. "
+            "The caller specifies exactly which appendix sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble, no summary.\n"
+            "2. Appendix I — CUB Exposure Table:\n"
+            "   - EXACTLY 10 columns: Entity | Branch | Facility Type | Current Approved | "
+            "Proposed | Outstanding | Collateral | Guarantor | Maturity | MSR.\n"
+            "   - New facilities: mark **[NEW]** bold in the Facility Type cell.\n"
+            "   - Subtotal rows in bold: **EMA Subtotal** / **EMC Subtotal** / "
+            "**EVA Subtotal** / **Group Total** — embedded in the same table.\n"
+            "   - Group Limit sub-table below the main table: | Item | Amount (USD m) | "
+            "with 4 rows (Approved Group Limit / Proposed Total Exposure / "
+            "**Utilization** (bold) / Headroom).\n"
+            "   - Maturity format: 'Dec 2034E' — NEVER 'Dec 2034 (est.)' or '(E)'.\n"
+            "   - Column header MUST be 'Current Approved' (not 'Approved').\n"
+            "3. Appendix II — EMC Fleet Growth Table:\n"
+            "   - EXACTLY 5 columns: Year | Owned Fleet (TEU million) | "
+            "Total Fleet (TEU million) | Total Vessels | Owned%.\n"
+            "   - Owned% column MANDATORY (e.g. 63%, 67% … 88%).\n"
+            "   - CAGR line immediately below the table in bold (e.g. **CAGR: 6.2%**).\n"
+            "   - Chart Reference: italic sentence — exact format:\n"
+            "     *[EMC Fleet Capacity Growth Chart — Source: [Source] [Date] / "
+            "EMC Investor Presentation]*\n"
+            "   - Key Notes: minimum 5 numbered bullets. Note #5 MUST state:\n"
+            "     'EMC CAPEX plan: USD[X]m; EMA capital commitment: USD[Y]m (as of [date]).'\n"
+            "4. Appendix III — EMA Detailed Financial Projections:\n"
+            "   - Key Assumptions: table with all projection years individually — "
+            "NEVER write 'Same' in any cell.\n"
+            "   - Assumptions Narrative: italic paragraph beginning "
+            "'Revenue growth assumes… COGS reflects… CAPEX per…'\n"
+            "   - Base Case P&L: ≥12 rows; bold subtotals: Gross Profit / Operating Profit / "
+            "Profit Before Tax / Net Income; negatives in parentheses: (7,755,000).\n"
+            "   - Base Case BS: ≥16 rows; bold subtotals: Total Current Assets / "
+            "Total Non-Current Assets / Total Assets / "
+            "Total Current Liabilities / Total Non-Current Liabilities / "
+            "Total Liabilities / Total Equity.\n"
+            "   - Base Case CF: ≥6 rows; SEPARATE table from DSCR; mandatory rows: "
+            "Operating Cash Flow / Investing Cash Flow / Financing Cash Flow / "
+            "Net Change in Cash / Opening Cash / Closing Cash.\n"
+            "   - DSCR Table: SEPARATE from CF — NEVER combined; "
+            "columns: FY[Y]E | OCF | Total Debt Service (P+I) | DSCR; "
+            "'x' suffix on all DSCR values (e.g. 5.6x).\n"
+            "   - DSCR Commentary: italic paragraph — "
+            "'DSCR remains above [X]x throughout… Minimum DSCR of [X]x occurs in [years].'\n"
+            "   - Worse Case Stress: comparison table — "
+            "Assumption | Base Case | Worse Case | Stress Magnitude; minimum 4 rows "
+            "(Revenue, COGS%, SOFR, Dividend).\n"
+            "   - Worse Case Summary: table rows: Revenue / Operating Profit / Net Income / "
+            "OCF / Cash Balance / DSCR.\n"
+            "   - Worse Case Commentary: italic paragraph — 'Under Worse Case, DSCR declines "
+            "to minimum [X]x in [year] but remains above 1.0x…'\n"
+            "5. Numbers: USD'000 with commas. Negatives in parentheses. "
+            "'E' suffix on all projected year labels (e.g. FY2026E).\n"
+            "6. Context lines: italic using *…* — NO 'Context' or 'System note' labels.\n"
+            "7. ZERO credit judgments ('satisfactory', 'manageable', "
+            "'well-positioned' FORBIDDEN).\n"
+            "8. NEVER use source-referencing phrases. State facts directly.\n"
+            "9. NEVER compress projection tables — every row of data must appear in full.\n"
+            "10. No '10.' prefix and no 'Appendix' heading — sub-section titles only.\n"
+            "11. Start immediately with the first missing sub-section — no introductory text."
         )
 
     if section_no == 9:
@@ -1157,6 +1433,33 @@ def _build_fill_user_prompt(
     missing_labels = ", ".join(label for _, label in missing)
     existing_tail = existing_markdown[-1500:] if len(existing_markdown) > 1500 else existing_markdown
 
+    if section_no == 10:
+        # §10 can be 10 000+ tokens — use a longer tail and larger input cap
+        existing_tail_10 = existing_markdown[-2000:] if len(existing_markdown) > 2000 else existing_markdown
+        return (
+            f"The following sub-sections are MISSING from the already-generated §10 Appendix:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 2000 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail_10}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:10000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES:\n"
+            "- Appendix I: EXACTLY 10 columns; 'Current Approved' header; "
+            "**[NEW]** for new facilities; Group Limit sub-table with **Utilization** bold.\n"
+            "- Appendix II: EXACTLY 5 columns including Owned%; ≥5 Key Notes; "
+            "Note #5 MUST include EMC CAPEX plan + EMA capital commitment.\n"
+            "- Appendix III P&L: ≥12 rows; bold subtotals; negatives in parentheses.\n"
+            "- Appendix III BS: ≥16 rows; bold Total Current Assets → Total Equity.\n"
+            "- Appendix III CF: ≥6 rows; SEPARATE table from DSCR.\n"
+            "- DSCR table: SEPARATE from CF; 'x' suffix on all DSCR values.\n"
+            "- DSCR commentary: italic, begins 'DSCR remains above…'\n"
+            "- Worse Case: comparison table (≥4 rows) + summary table + italic commentary.\n"
+            "- NO 'Same' in assumption cells — list each year explicitly.\n"
+            "- ZERO credit judgments. NEVER use source-referencing phrases.\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
+
     if section_no == 9:
         return (
             f"The following sub-sections are MISSING from the already-generated §9 output:\n"
@@ -1367,14 +1670,16 @@ async def fill_missing_tables(
         section_no, missing, existing_markdown, input_json, output_language
     )
 
-    # §1: Deal Comparison + Account Strategy are non-compressible → 10 240 tokens
-    # §3: MAS 612 (4 paragraphs) + MSR Table can be verbose → 6 144 tokens
-    # §4: C-9 Peer Comparison table + Banking Relationships can be verbose → 8 192 tokens
-    # §5: C-3 Amortisation Schedule (up to 24 rows) + C-6 Guarantor table → 10 240 tokens
-    # §6: C-4 Payment table (11 col, N rows) + C-6 Construction risks (3-5 bullets each) → 10 240 tokens
-    # §7: P&L (≥12 rows) + BS (≥20 rows) + CF (≥7 rows) + ratios + projections → 12 288 tokens
-    # §8: Charges table + 4-line summary + ≥4 bullets — compact → 6 144 tokens
-    # §9: 23-item checklist + CPs + covenants + recommendation + sign-off → 10 240 tokens
+    # §1:  Deal Comparison + Account Strategy are non-compressible → 10 240 tokens
+    # §3:  MAS 612 (4 paragraphs) + MSR Table can be verbose → 6 144 tokens
+    # §4:  C-9 Peer Comparison table + Banking Relationships → 8 192 tokens
+    # §5:  C-3 Amortisation Schedule (up to 24 rows) + C-6 Guarantor → 10 240 tokens
+    # §6:  C-4 Payment table (11 col) + Construction risks (3-5 bullets each) → 10 240 tokens
+    # §7:  P&L (≥12 rows) + BS (≥20 rows) + CF (≥7 rows) + ratios + projections → 12 288 tokens
+    # §8:  Charges table + 4-line summary + ≥4 bullets — compact → 6 144 tokens
+    # §9:  23-item checklist + CPs + covenants + recommendation + sign-off → 10 240 tokens
+    # §10: Appendix I (10-col exposure) + Appendix II (5-col fleet + 5 notes) +
+    #      Appendix III (P&L ≥12 + BS ≥16 + CF ≥6 + DSCR + stress + commentaries) → 16 384 tokens
     # others: 8 192 cap
     if section_no == 1:
         max_tokens = 10240
@@ -1384,6 +1689,8 @@ async def fill_missing_tables(
         max_tokens = 10240
     elif section_no == 7:
         max_tokens = 12288
+    elif section_no == 10:
+        max_tokens = 16384
     else:
         max_tokens = min(CR_SECTION_MAX_TOKENS, 8192)
 
