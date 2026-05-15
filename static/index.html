@@ -3139,6 +3139,8 @@ if(token){showDashboard();}else{showView('viewLogin');}
 let _improveBlockId=null;
 let _improveVersion=null;
 let _improveSuggestedContent=null;
+let _improveOriginalContent=null;
+let _improveUndoStack=[];  // [{blockId,secNo,content,expectedVersion}] — max 5
 
 function attachBlockClickHandlers(){
   document.querySelectorAll('[data-block-id]').forEach(el=>{
@@ -3200,6 +3202,7 @@ async function submitImprove(){
     if(!res.ok)throw new Error((await res.json()).detail||'Request failed');
     const data=await res.json();
     _improveSuggestedContent=data.suggested_content;
+    _improveOriginalContent=data.original_content;  // saved for undo
     _improveVersion=data.current_version;
     _improveBlockId=effectiveBlockId;
     document.getElementById('improveSuggestionText').textContent=data.suggested_content;
@@ -3214,8 +3217,9 @@ async function submitImprove(){
 async function applyImprovement(){
   if(!_improveSuggestedContent||!_improveBlockId)return;
   const instruction=document.getElementById('improveInstruction').value.trim();
-  // Save before closeImprovePanel() nulls _improveBlockId
+  // Snapshot undo state before panel closes (closeImprovePanel nulls _improveBlockId)
   const blockId=_improveBlockId;
+  const originalContent=_improveOriginalContent;
   const secEl=document.querySelector(`[data-block-id="${blockId}"]`);
   const secNo=secEl?.dataset.section?parseInt(secEl.dataset.section):null;
   try{
@@ -3224,9 +3228,14 @@ async function applyImprovement(){
       body:JSON.stringify({content:_improveSuggestedContent,reason:'AI improvement: '+instruction,expected_version:_improveVersion})
     });
     if(!res.ok)throw new Error((await res.json()).detail||'Patch failed');
-    toast(tl('Paragraph updated ✓','段落已更新 ✓'),'success');
+    const updatedBlock=await res.json();
+    // Push undo record (original content + new version needed to undo)
+    if(originalContent){
+      _improveUndoStack.push({blockId,secNo,content:originalContent,expectedVersion:updatedBlock.version});
+      if(_improveUndoStack.length>5)_improveUndoStack.shift();
+    }
     closeImprovePanel();
-    // Force fresh block reload for that section so renderReview shows updated content
+    // Reload blocks so renderReview shows updated content
     if(secNo){
       delete sectionBlocksMap[secNo];
       try{
@@ -3236,7 +3245,61 @@ async function applyImprovement(){
     }
     renderReview();
     attachBlockClickHandlers();
+    // Show undo toast (stays 8 seconds)
+    toastWithAction(
+      tl('Paragraph updated ✓','段落已更新 ✓'),
+      tl('⏪ Undo','⏪ 復原'),
+      undoLastImprovement,'success',8000
+    );
   }catch(e){toast(tl('Apply failed: ','套用失敗：')+e.message,'danger');}
+}
+
+// Show a toast with an inline action button
+function toastWithAction(msg,btnLabel,btnAction,type='success',duration=8000){
+  const container=document.getElementById('toast-cont');
+  if(!container)return;
+  const el=document.createElement('div');
+  el.className=`toast align-items-center text-bg-${type} border-0 show`;
+  el.style.cssText='min-width:260px;margin-bottom:8px;';
+  el.innerHTML=`<div class="d-flex align-items-center gap-2">
+    <div class="toast-body flex-grow-1">${msg}</div>
+    <button type="button" class="btn btn-sm btn-light me-1 flex-shrink-0" style="white-space:nowrap;font-size:12px;">${btnLabel}</button>
+    <button type="button" class="btn-close btn-close-white me-2 flex-shrink-0"></button>
+  </div>`;
+  el.querySelector('.btn-light').onclick=()=>{btnAction();el.remove();};
+  el.querySelector('.btn-close').onclick=()=>el.remove();
+  container.appendChild(el);
+  setTimeout(()=>el.remove(),duration);
+}
+
+async function undoLastImprovement(){
+  const record=_improveUndoStack.pop();
+  if(!record){toast(tl('Nothing to undo','無可復原的操作'),'warning');return;}
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/blocks/'+record.blockId,{
+      method:'PATCH',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        content:record.content,
+        reason:tl('Undo paragraph improvement','復原段落改寫'),
+        expected_version:record.expectedVersion
+      })
+    });
+    if(!res.ok)throw new Error((await res.json()).detail||tl('Undo failed','復原失敗'));
+    // Reload blocks for the section
+    if(record.secNo){
+      delete sectionBlocksMap[record.secNo];
+      try{
+        const r=await fetch(API+'/reports/'+currentRid+'/sections/'+record.secNo+'/blocks',{headers:H()});
+        if(r.ok){const bl=await r.json();if(bl.length)sectionBlocksMap[record.secNo]=bl;}
+      }catch(e){}
+    }
+    renderReview();
+    attachBlockClickHandlers();
+    toast(tl('Reverted to previous version ✓','已復原至前一版本 ✓'),'info');
+  }catch(e){
+    _improveUndoStack.push(record);  // put back on failure
+    toast(tl('Undo failed: ','復原失敗：')+e.message,'danger');
+  }
 }
 
 function discardImprovement(){
