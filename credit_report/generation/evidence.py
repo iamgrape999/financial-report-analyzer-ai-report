@@ -487,9 +487,9 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
     elif ext in ("tiff", "tif"):
         text = extract_text_from_image(file_bytes, "image/tiff")
         fmt = "tiff"
-    elif ext == "xlsx":
+    elif ext in ("xlsx", "xls"):
         text = _extract_text_from_xlsx(file_bytes)
-        fmt = "xlsx"
+        fmt = ext
     else:
         logger.info("[OCR] unknown extension %r — trying pdf then docx", ext)
         text = extract_text_from_pdf(file_bytes)
