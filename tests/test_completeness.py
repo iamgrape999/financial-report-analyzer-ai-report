@@ -126,10 +126,10 @@ class TestCheckSectionCompleteness:
         missing = check_section_completeness(2, "")
         assert len(missing) == 5
 
-    def test_non_section2_no_requirements(self):
+    def test_non_s2_sections_3_to_10_have_no_requirements(self):
         from credit_report.generation.completeness import check_section_completeness
-        # Sections without requirements should always return empty
-        for sec_no in [1, 3, 4, 5, 6, 7, 8, 9, 10]:
+        # §3-§10 have no completeness requirements (§1 has its own conditional logic)
+        for sec_no in [3, 4, 5, 6, 7, 8, 9, 10]:
             result = check_section_completeness(sec_no, "some markdown")
             assert result == [], f"§{sec_no} should have no completeness requirements"
 
@@ -160,11 +160,13 @@ class TestCheckSectionCompleteness:
 class TestFillMissingTables:
 
     async def test_fill_calls_gemini_and_returns_text(self):
-        from credit_report.generation.completeness import (
-            fill_missing_tables,
-            SECTION_REQUIRED_TABLES,
-        )
-        missing = SECTION_REQUIRED_TABLES[2][1:]  # T2-T5
+        from credit_report.generation.completeness import fill_missing_tables
+        missing = [
+            ("**Solvency**", "T2 Solvency"),
+            ("**The Guarantor and their Supportive", "T3 Guarantor and Supportive Performance"),
+            ("**Collateral Summary**", "T4 Collateral Summary"),
+            ("**Risk and Mitigants**", "T5 Risk and Mitigants"),
+        ]
 
         fill_response = "| **Solvency** | 1.5x DSCR |\n|---|---|\n"
         with patch(
@@ -182,11 +184,11 @@ class TestFillMissingTables:
         assert tokens > 0
 
     async def test_fill_returns_empty_string_on_llm_error(self):
-        from credit_report.generation.completeness import (
-            fill_missing_tables,
-            SECTION_REQUIRED_TABLES,
-        )
-        missing = SECTION_REQUIRED_TABLES[2][1:]
+        from credit_report.generation.completeness import fill_missing_tables
+        missing = [
+            ("**Solvency**", "T2 Solvency"),
+            ("**Collateral Summary**", "T4 Collateral Summary"),
+        ]
 
         with patch(
             "credit_report.generation.claude_client.call_gemini_raw",
@@ -345,8 +347,12 @@ class TestEdgeCases:
         assert missing[0][1] == "T5 Risk and Mitigants"
 
     def test_fill_prompt_contains_missing_labels(self):
-        from credit_report.generation.completeness import _build_fill_user_prompt, SECTION_REQUIRED_TABLES
-        missing = SECTION_REQUIRED_TABLES[2][2:]  # T3, T4, T5
+        from credit_report.generation.completeness import _build_fill_user_prompt
+        missing = [
+            ("**The Guarantor and their Supportive", "T3 Guarantor and Supportive Performance"),
+            ("**Collateral Summary**", "T4 Collateral Summary"),
+            ("**Risk and Mitigants**", "T5 Risk and Mitigants"),
+        ]
         prompt = _build_fill_user_prompt(2, missing, "existing text", {}, "en")
         assert "T3" in prompt
         assert "T4" in prompt

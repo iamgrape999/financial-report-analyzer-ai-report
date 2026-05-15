@@ -147,7 +147,7 @@ async def run_section_generation(
                 check_section_completeness,
                 fill_missing_tables,
             )
-            missing = check_section_completeness(section_no, markdown)
+            missing = check_section_completeness(section_no, markdown, input_json)
             if missing:
                 missing_labels = [label for _, label in missing]
                 logger.warning(
@@ -171,7 +171,7 @@ async def run_section_generation(
                         section_no, report_id, len(fill_text), tokens_used,
                     )
                     # Verify fill resolved all gaps; warn if still incomplete
-                    still_missing = check_section_completeness(section_no, markdown)
+                    still_missing = check_section_completeness(section_no, markdown, input_json)
                     if still_missing:
                         logger.warning(
                             "[Completeness] still missing after fill section=%d report=%s missing=%s",
