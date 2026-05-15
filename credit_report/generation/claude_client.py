@@ -134,10 +134,16 @@ async def generate_section_markdown(
         needs_continuation = _detect_continuation_token(text, section_no)
         parts.append(_strip_continuation_token(text, section_no))
 
-        finish_reason = (
-            response.candidates[0].finish_reason if response.candidates else None
+        finish_reason = str(
+            response.candidates[0].finish_reason if response.candidates else ""
         )
-        if not needs_continuation or str(finish_reason) != "STOP":
+        logger.debug(
+            "generate_section_markdown: section=%d round=%d finish=%s continuation=%s",
+            section_no, round_no, finish_reason, needs_continuation,
+        )
+        # Continue if the AI explicitly wrote the continuation token.
+        # Previously broke when finish_reason == MAX_TOKENS even if the token was present.
+        if not needs_continuation:
             break
 
     return "\n\n".join(parts).strip(), total_tokens

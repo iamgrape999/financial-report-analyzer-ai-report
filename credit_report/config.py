@@ -31,10 +31,12 @@ DAILY_TOKEN_LIMIT: int = int(os.getenv("DAILY_TOKEN_LIMIT", "4000000"))
 LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "180"))
 
 SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
-    7: 16384,
-    10: 16384,
-    4: 12288,
-    9: 12288,
+    1: 16384,   # §1 facility table + T&Cs (21 fields) + deal comparison + account strategy
+    2: 16384,   # §2 five mandatory tables (T1-T5); 8192 default cuts off after T1 only
+    7: 16384,   # §7 full financial analysis with multi-year tables
+    10: 16384,  # §10 appendix
+    4: 12288,   # §4 corporate background
+    9: 12288,   # §9 credit analysis checklist
     "default": 8192,
 }
 
