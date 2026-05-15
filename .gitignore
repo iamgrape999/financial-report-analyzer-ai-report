@@ -8,6 +8,8 @@ venv/
 data/memory/*
 !data/memory/.gitkeep
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/credit_reports/
 data/logs/
 *.log
