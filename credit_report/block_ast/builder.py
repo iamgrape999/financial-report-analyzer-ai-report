@@ -141,13 +141,18 @@ def build_blocks(
 
         if seg["type"] == "table":
             headers, rows = _parse_markdown_table(seg["lines"])
-            columns = [{"column_id": h[:95], "label": h, "col_type": "string"} for h in headers]
+            # Use stable short keys (col_000…) — header text is unlimited, cannot be a DB key
+            col_id_map = {h: f"col_{i:03d}" for i, h in enumerate(headers)}
+            columns = [
+                {"column_id": f"col_{i:03d}", "label": h, "col_type": "string"}
+                for i, h in enumerate(headers)
+            ]
             block_fact_ids: list[str] = []
 
             for r_idx, row in enumerate(rows):
                 row_id = f"row_{r_idx:03d}"
-                for col_id, val in row.items():
-                    col_id_key = col_id[:95]
+                for header_text, val in row.items():
+                    col_id = col_id_map.get(header_text, f"col_{list(row.keys()).index(header_text):03d}")
                     fid = _find_fact_for_value(val, facts)
                     if fid:
                         block_fact_ids.append(fid)
@@ -160,7 +165,7 @@ def build_blocks(
                         "id": str(uuid.uuid4()),
                         "block_id": bid,
                         "row_id": row_id,
-                        "column_id": col_id_key,
+                        "column_id": col_id,
                         "display_value": val,
                         "numeric_value": num_val,
                         "fact_id": fid,

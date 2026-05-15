@@ -52,8 +52,8 @@ class TableCell(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     block_id: Mapped[str] = mapped_column(String(100), ForeignKey("report_blocks.id"), nullable=False, index=True)
-    row_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    column_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    row_id: Mapped[str] = mapped_column(String(20), nullable=False)   # always "row_NNN"
+    column_id: Mapped[str] = mapped_column(String(20), nullable=False)  # always "col_NNN"
     display_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     numeric_value: Mapped[Optional[float]] = mapped_column(nullable=True)
     fact_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # FK to canonical_facts (soft ref)
