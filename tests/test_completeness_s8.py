@@ -371,11 +371,10 @@ class TestSection8Isolation:
         missing = check_section_completeness(4, s4_md, _INPUT_ACRA_AVAILABLE)
         assert missing == [], f"§4 check should ignore §8 input: {missing}"
 
-    def test_sections_9_10_still_unaffected(self):
+    def test_section_10_still_unaffected(self):
         from credit_report.generation.completeness import check_section_completeness
-        for sec_no in [9, 10]:
-            result = check_section_completeness(sec_no, "some markdown", _INPUT_ACRA_AVAILABLE)
-            assert result == [], f"§{sec_no} should have no requirements (got: {result})"
+        result = check_section_completeness(10, "some markdown", _INPUT_ACRA_AVAILABLE)
+        assert result == [], f"§10 should have no requirements (got: {result})"
 
     def test_s8_full_content_does_not_trigger_s7_checks(self):
         """§8 ACRA content should not accidentally match §7 sub-section markers."""

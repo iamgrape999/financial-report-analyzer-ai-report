@@ -567,6 +567,130 @@ def _check_section7(markdown: str, input_json: dict) -> list[tuple[str, str]]:
 # Fill budget: 6 144 tokens.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _check_section9(markdown: str, input_json: dict) -> list[tuple[str, str]]:
+    """
+    Return (marker, label) pairs for §9 sub-sections absent from *markdown*.
+
+    §9 is always required — every credit report must have a checklist and
+    recommendation. Four components are mandatory:
+
+    C-1: 23-item, 5-column checklist table + 2 mandatory footnotes:
+         - Item 15 footnote: Banking Act s.33-3 + exemption basis
+         - Item 16 footnote: ACRA search date + UEN + CUB charge cross-ref
+    C-2: Conditions Precedent table + Ongoing Covenants table
+    C-3: RECOMMENDATION block (exact bold-label format with Decision, Facility
+         Amount, Tenor, Security Structure, Key Conditions, Balloon LTV,
+         Risk Level vs. Prior Review)
+    C-4: Sign-Off block (Prepared by / Reviewed by / Date)
+
+    Detection for Item 15/16 footnotes uses specific sub-phrases that appear
+    only in the footnotes (not in the checklist table body itself).
+    """
+    md_lower = markdown.lower()
+    missing: list[tuple[str, str]] = []
+
+    # ① C-1 Checklist Table — 23-item 5-column table header
+    has_checklist = (
+        "| # |" in md_lower
+        or ("| category |" in md_lower and "checklist item" in md_lower)
+        or ("checklist item" in md_lower and "|" in markdown)
+    )
+    if not has_checklist:
+        missing.append((
+            "| # |",
+            "C-1 23-Item Checklist Table (5 cols: # | Category | Checklist Item | Response | Remarks)",
+        ))
+    else:
+        # Verify completeness: item 23 (MAS 612 classification) must be present
+        has_item_23 = (
+            "| 23 |" in markdown
+            or "| 23" in markdown
+            or ("23." in markdown and "mas 612" in md_lower)
+        )
+        if not has_item_23:
+            missing.append((
+                "| 23 |",
+                "C-1 Checklist incomplete — Item 23 (MAS 612 classification) absent "
+                "(checklist likely truncated after item 14-22)",
+            ))
+
+    # ② Item 15 footnote — Banking Act s.33-3 + exemption basis
+    #    Footnote-specific phrase: "exemption basis" or "pre-delivery unsecured drawdown"
+    has_item15_footnote = (
+        "exemption basis" in md_lower
+        or "pre-delivery unsecured drawdown" in md_lower
+        or ("item 15" in md_lower and "s.33-3" in markdown)
+    )
+    if not has_item15_footnote:
+        missing.append((
+            "Item 15",
+            "C-1 Footnote for Item 15 (Banking Act s.33-3: unsecured drawdown amount + "
+            "exemption basis + internal approval reference)",
+        ))
+
+    # ③ Item 16 footnote — ACRA charge search + UEN + CUB charge reference
+    #    Footnote-specific phrase: "acra charge search conducted"
+    has_item16_footnote = (
+        "acra charge search conducted" in md_lower
+        or ("item 16" in md_lower and "uen" in md_lower and "cub charge" in md_lower)
+    )
+    if not has_item16_footnote:
+        missing.append((
+            "Item 16",
+            "C-1 Footnote for Item 16 (ACRA charge search date + entity + UEN + "
+            "CUB charge cross-reference to §1)",
+        ))
+
+    # ④ C-2a Conditions Precedent table
+    if "conditions precedent" not in md_lower and "condition precedent" not in md_lower:
+        missing.append((
+            "Conditions Precedent",
+            "C-2a Conditions Precedent Table (No. | Description | Testing)",
+        ))
+
+    # ⑤ C-2b Ongoing Covenants table
+    if "ongoing covenants" not in md_lower and not (
+        "covenant" in md_lower and "threshold" in md_lower
+    ):
+        missing.append((
+            "Ongoing Covenants",
+            "C-2b Ongoing Covenants Table (Description | Threshold/Requirement | Testing)",
+        ))
+
+    # ⑥ C-3 Recommendation block — exact bold-label format
+    has_recommendation = (
+        "**recommendation:**" in md_lower
+        or "**decision:**" in md_lower
+        or "**facility amount:**" in md_lower
+    )
+    if not has_recommendation:
+        missing.append((
+            "**RECOMMENDATION:**",
+            "C-3 Recommendation Block (**Decision** / **Facility Amount** / **Tenor** / "
+            "**Security Structure** / **Key Conditions** / **Balloon LTV** / "
+            "**Risk Level vs. Prior Review**)",
+        ))
+    else:
+        # Verify tail fields (most likely to truncate)
+        has_balloon_ltv = "balloon ltv" in md_lower
+        has_risk_level = "risk level" in md_lower and "prior review" in md_lower
+        if not has_balloon_ltv or not has_risk_level:
+            missing.append((
+                "**Balloon LTV:**",
+                "C-3 Recommendation — **Balloon LTV** and/or **Risk Level vs. Prior Review** "
+                "field(s) truncated",
+            ))
+
+    # ⑦ C-4 Sign-Off block
+    if "prepared by:" not in md_lower and "prepared by :" not in md_lower:
+        missing.append((
+            "Prepared by:",
+            "C-4 Sign-Off Block (Prepared by: / Reviewed by: / Date:)",
+        ))
+
+    return missing
+
+
 def _check_section8(markdown: str, input_json: dict) -> list[tuple[str, str]]:
     """
     Return (marker, label) pairs for §8 sub-sections absent from *markdown*.
@@ -701,6 +825,9 @@ def check_section_completeness(
     if section_no == 8:
         return _check_section8(markdown, input_json or {})
 
+    if section_no == 9:
+        return _check_section9(markdown, input_json or {})
+
     if section_no == 4:
         md_lower = markdown.lower()
         return [
@@ -757,6 +884,52 @@ def _build_fill_system_prompt(section_no: int) -> str:
             "8. ZERO credit judgments — no 'satisfactory', 'low risk', 'manageable'. "
             "NO source-referencing phrases.\n"
             "9. Banking Act always '33-3' (NOT '333'). RG rating: reproduce verbatim.\n"
+            "10. Start immediately with the first missing sub-section — no introductory text."
+        )
+
+    if section_no == 9:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §9 "
+            "'Credit Analysis Checklist & Recommendation' section. "
+            "The caller specifies exactly which sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble, no summary.\n"
+            "2. C-1 Checklist Table: EXACTLY 23 items, EXACTLY 5 columns — "
+            "| # | Category | Checklist Item | Response | Remarks |. "
+            "Response MUST be bold: **Yes** / **No\\*** / **N/A** — NEVER ✓/✗ symbols. "
+            "DO NOT add, remove, or reorder any of the 23 items.\n"
+            "3. C-1 Mandatory footnotes (below table — BOTH required):\n"
+            "   * Item 15: Pre-delivery unsecured drawdown of USD[X]m is within the "
+            "Banking Act s.33-3 single-borrower unsecured limit. "
+            "Exemption basis: [item (d) / other]. CUB internal approval reference: [ref].\n"
+            "   * Item 16: ACRA charge search conducted on [DD MMM YYYY] for [entity name] "
+            "(UEN: [UEN]). CUB charge(s): [Item #, §1 cross-reference].\n"
+            "4. C-2a Conditions Precedent table: | No. | Description | Testing |. "
+            "Testing values: 'Before first drawdown' / 'Before vessel delivery' / 'Ongoing'. "
+            "No sub-numbering (no 1.1, 1.2).\n"
+            "5. C-2b Ongoing Covenants table: | Description | Threshold/Requirement | Testing |. "
+            "Column header MUST be 'Testing' (NOT 'Frequency' or 'Status'). "
+            "Below table: '**Financial Covenants: NIL**' if no covenants beyond ACR/DSCR.\n"
+            "6. C-3 Recommendation block — EXACT format (each on its own line, bold labels):\n"
+            "   **RECOMMENDATION:**\n"
+            "   **Decision:** APPROVE / APPROVE WITH CONDITIONS / DECLINE\n"
+            "   **Facility Amount:** USD [X]m\n"
+            "   **Tenor:** [X] years from first drawdown\n"
+            "   **Security Structure:** [1-2 sentence summary]\n"
+            "   **Key Conditions:** numbered list\n"
+            "   **Balloon LTV:** [X]% (cap: [Y]%) — Compliant / Breach\n"
+            "   **Risk Level vs. Prior Review:** No change / Improved / Deteriorated — [reason]\n"
+            "   PROHIBITIONS: NO 'Approval Authority' line. NO 'we recommend'. "
+            "NO 'satisfactory', 'low risk', 'manageable'.\n"
+            "7. C-4 Sign-Off block (plain text, NOT a table):\n"
+            "   Prepared by: [Name], [Title], Credit Management Department, CUB SG Branch\n"
+            "   Reviewed by: [Name], [Title], Credit Management Department, CUB SG Branch\n"
+            "   Date: [DD MMM YYYY]\n"
+            "8. 'Banking Days' (capital B and D — never 'business days'). "
+            "'s.33-3' (never '333' or '33-3' without the 's.').\n"
+            "9. ZERO credit judgments — 'satisfactory', 'low risk', 'manageable', "
+            "'well-mitigated', 'adequate' FORBIDDEN.\n"
             "10. Start immediately with the first missing sub-section — no introductory text."
         )
 
@@ -984,6 +1157,33 @@ def _build_fill_user_prompt(
     missing_labels = ", ".join(label for _, label in missing)
     existing_tail = existing_markdown[-1500:] if len(existing_markdown) > 1500 else existing_markdown
 
+    if section_no == 9:
+        return (
+            f"The following sub-sections are MISSING from the already-generated §9 output:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 1500 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:8000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES for missing sub-sections:\n"
+            "- Checklist Table: EXACTLY 23 items; EXACTLY 5 columns; "
+            "Response = bold **Yes**/**No\\***/**N/A** (NO ✓/✗ symbols).\n"
+            "- Footnote 15 (mandatory): '* Item 15: Pre-delivery unsecured drawdown of "
+            "USD[X]m is within the Banking Act s.33-3 single-borrower unsecured limit. "
+            "Exemption basis: [item (d)]. CUB internal approval reference: [ref].'\n"
+            "- Footnote 16 (mandatory): '* Item 16: ACRA charge search conducted on "
+            "[DD MMM YYYY] for [entity] (UEN: [UEN]). CUB charge(s): [Item #, §1 ref].'\n"
+            "- Conditions Precedent: | No. | Description | Testing | — no sub-numbering.\n"
+            "- Ongoing Covenants: | Description | Threshold/Requirement | Testing | — "
+            "column header MUST be 'Testing'. State '**Financial Covenants: NIL**' if none.\n"
+            "- RECOMMENDATION block: all 7 bold-label fields mandatory; NO 'Approval Authority'; "
+            "NO 'we recommend'; NO 'satisfactory'/'manageable'.\n"
+            "- Sign-Off: 'Prepared by:' / 'Reviewed by:' / 'Date:' — plain text, NOT a table.\n"
+            "- 'Banking Days' (capital B+D). 's.33-3' (never '333').\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
+
     if section_no == 8:
         return (
             f"The following sub-sections are MISSING from the already-generated §8 output:\n"
@@ -1174,12 +1374,13 @@ async def fill_missing_tables(
     # §6: C-4 Payment table (11 col, N rows) + C-6 Construction risks (3-5 bullets each) → 10 240 tokens
     # §7: P&L (≥12 rows) + BS (≥20 rows) + CF (≥7 rows) + ratios + projections → 12 288 tokens
     # §8: Charges table + 4-line summary + ≥4 bullets — compact → 6 144 tokens
+    # §9: 23-item checklist + CPs + covenants + recommendation + sign-off → 10 240 tokens
     # others: 8 192 cap
     if section_no == 1:
         max_tokens = 10240
     elif section_no in (3, 8):
         max_tokens = 6144
-    elif section_no in (4, 5, 6):
+    elif section_no in (4, 5, 6, 9):
         max_tokens = 10240
     elif section_no == 7:
         max_tokens = 12288
