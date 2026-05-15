@@ -47,6 +47,23 @@ async def _safe_add_columns(conn) -> None:
         except Exception:
             pass  # Column already exists — expected on subsequent startups
 
+    # Widen varchar-limited columns to TEXT on PostgreSQL.
+    # create_all never alters existing columns, so older production DBs retain
+    # the original VARCHAR(255) for display_value and VARCHAR(100) for column_id/row_id.
+    # AI-generated table cells can exceed those limits, causing StringDataRightTruncationError.
+    # ALTER to TEXT is instant on PostgreSQL (no rewrite) and a no-op if already TEXT.
+    # SQLite does not enforce VARCHAR lengths, so these statements will fail there — caught below.
+    _widen = [
+        "ALTER TABLE table_cells ALTER COLUMN display_value TYPE TEXT",
+        "ALTER TABLE table_cells ALTER COLUMN column_id    TYPE TEXT",
+        "ALTER TABLE table_cells ALTER COLUMN row_id       TYPE TEXT",
+    ]
+    for stmt in _widen:
+        try:
+            await conn.execute(text(stmt))
+        except Exception:
+            pass  # SQLite: unsupported; PostgreSQL already TEXT: no-op
+
     # Deduplicate section_inputs and section_outputs: keep the row with the lowest id
     # per (report_id, section_no). Duplicate rows arise from concurrent generation
     # requests both inserting when no row existed yet (race condition).
