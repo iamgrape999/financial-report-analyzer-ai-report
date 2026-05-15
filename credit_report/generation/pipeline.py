@@ -162,7 +162,15 @@ async def run_section_generation(
                     output_language=output_language,
                 )
                 if fill_text:
-                    markdown = markdown.rstrip() + "\n\n" + fill_text
+                    # §3 MSR empty-table: replace the broken partial block inline
+                    # so section order (External→Internal→MAS612→ESG) is preserved.
+                    # Falls back to normal append when no broken block is found.
+                    if section_no == 3:
+                        from credit_report.generation.completeness import replace_empty_msr_block
+                        replaced = replace_empty_msr_block(markdown, fill_text)
+                        markdown = replaced if replaced is not None else markdown.rstrip() + "\n\n" + fill_text
+                    else:
+                        markdown = markdown.rstrip() + "\n\n" + fill_text
                     tokens_used += fill_tokens
                     output.markdown = markdown
                     output.tokens_used = tokens_used

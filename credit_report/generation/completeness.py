@@ -134,6 +134,48 @@ def _check_section3(markdown: str) -> list[tuple[str, str]]:
     return missing
 
 
+def replace_empty_msr_block(markdown: str, fill_text: str) -> str | None:
+    """
+    Inline-replace a broken **Internal ratings:** block with *fill_text* at the
+    same position in the §3 markdown.
+
+    Returns the corrected markdown when a broken block (< 2 non-separator pipe
+    rows) is found and replaced, or None when no replacement is needed (block
+    absent or already populated — caller falls back to normal append).
+
+    Why inline replacement instead of strip+append:
+    The §3 output order is External → Internal → MAS 612 → ESG. Stripping the
+    block and appending the fill at the end would place Internal Ratings after
+    MAS 612/ESG, breaking the expected section order.
+    """
+    md_lower = markdown.lower()
+    start = md_lower.find("**internal ratings:**")
+    if start == -1:
+        return None
+
+    # Locate end of the broken block (start of the next bold section)
+    next_section = len(markdown)
+    for next_marker in ("**mas 612", "**esg ratings"):
+        pos = md_lower.find(next_marker, start + 1)
+        if pos != -1 and pos < next_section:
+            next_section = pos
+
+    block = markdown[start:next_section]
+    non_sep_rows = [
+        line for line in block.splitlines()
+        if line.strip().startswith("|") and "---" not in line
+    ]
+
+    if len(non_sep_rows) >= 2:
+        return None  # Table already has data rows — no replacement needed
+
+    # Replace broken block with the filled content, preserving surrounding text
+    before = markdown[:start].rstrip()
+    after = markdown[next_section:].lstrip("\n")
+    separator = "\n\n"
+    return before + separator + fill_text.strip() + (separator + after if after else "")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # §2 — Five unconditional two-column tables
 # ─────────────────────────────────────────────────────────────────────────────
