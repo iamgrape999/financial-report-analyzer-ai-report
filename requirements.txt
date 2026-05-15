@@ -38,6 +38,7 @@ requests
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 pytest-asyncio
+pytest-rerunfailures>=16.0
 
 # ── Excluded packages (DO NOT ADD BACK without Render validation) ─────────────
 # weasyprint>=62.0  → needs libpango/libcairo/libgdk-pixbuf; unavailable on Render
