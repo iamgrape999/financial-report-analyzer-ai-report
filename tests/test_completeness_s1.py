@@ -485,6 +485,7 @@ class TestBackwardCompatibility:
 
     def test_other_sections_return_empty(self):
         from credit_report.generation.completeness import check_section_completeness
-        for sec in [3, 4, 5, 6, 7, 8, 9, 10]:
+        # §3 now has its own completeness check; verify §4-§10 have none
+        for sec in [4, 5, 6, 7, 8, 9, 10]:
             result = check_section_completeness(sec, "any markdown")
             assert result == [], f"§{sec} should have no requirements"

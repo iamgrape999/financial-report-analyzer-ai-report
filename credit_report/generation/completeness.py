@@ -7,9 +7,11 @@ Why this module exists:
 - §1 requires up to 7 sub-sections (Facility Table, Regulatory, Purpose, T&Cs,
   Deal Comparison, Account Strategy, etc.) whose presence depends on report_type
   and which input keys are populated.
-- With 16 384-token budgets, both sections usually fit — but edge cases exist
-  (very large input JSON, long guarantor histories) where the AI stops early
-  without writing the continuation token.
+- §3 requires exactly 4 sub-sections (External Ratings, Internal Ratings / MSR
+  Table, MAS 612 Loan Grading, ESG Rating) — all unconditional. With an 8 192-
+  token default budget, sections with multiple override entities and long Remarks
+  can truncate before MAS 612 or ESG are emitted.
+- With 16 384-token budgets, §1/§2 usually fit — but edge cases still occur.
 - This module detects gaps and issues a targeted fill call for only the missing
   sub-sections, without re-running the expensive full generation.
 """
@@ -19,6 +21,20 @@ import logging
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §3 — Four unconditional sub-sections (prompt Section I)
+# "§3 is NOT complete until: External Ratings + MSR Table (with Remarks) +
+#  MAS 612 (all paragraphs) + ESG are ALL present."
+# ─────────────────────────────────────────────────────────────────────────────
+
+_S3_REQUIRED: list[tuple[str, str]] = [
+    ("**External ratings:**",       "External Ratings"),
+    ("**Internal ratings:**",       "Internal Ratings (MSR Table)"),
+    ("**MAS 612 Loan Grading:**",   "MAS 612 Loan Grading (4 paragraphs)"),
+    ("**ESG ratings:**",            "ESG Rating"),
+]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +170,14 @@ def check_section_completeness(
             if marker.lower() not in md_lower
         ]
 
+    if section_no == 3:
+        md_lower = markdown.lower()
+        return [
+            (marker, label)
+            for marker, label in _S3_REQUIRED
+            if marker.lower() not in md_lower
+        ]
+
     return []
 
 
@@ -162,6 +186,34 @@ def check_section_completeness(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_fill_system_prompt(section_no: int) -> str:
+    if section_no == 3:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §3 'Credit Ratings' section. "
+            "The caller specifies exactly which sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble.\n"
+            "2. For External Ratings: if all entities are NIL → ONE sentence only "
+            "('**External ratings:** NIL. [Entity] is not externally rated.'). "
+            "If rated → bold title then table: Entity | S&P | Moody's | Fitch | Rating Date | Comment.\n"
+            "3. For Internal Ratings (MSR Table): bold title '**Internal ratings:**' then STRICT "
+            "6-column table with sub-header row "
+            "(Entity | Period-1 | Period-2 | Interim | Current | Remarks). "
+            "Sub-header row: blank | blank | blank | Generated | Generated | Proposed. "
+            "Null/missing MSR → '—' (em dash, NEVER blank). EXACTLY 6 columns.\n"
+            "4. For MAS 612 Loan Grading: bold title '**MAS 612 Loan Grading:**' as standalone line, "
+            "then EXACTLY 4 SEPARATE paragraphs (NOT bullets, NOT merged): "
+            "Para 1 = MSR-to-PASS mapping + recommendation; "
+            "Para 2 = account conduct from input; "
+            "Para 3 = financial profile + Net Cash + '(See Section 7: Financial Analysis)'; "
+            "Para 4 = financial projections capability statement.\n"
+            "5. For ESG Rating: bold title '**ESG ratings:**' then entity abbreviation line, "
+            "ESG Rating Date line, and image reference line — no scores, no narrative.\n"
+            "6. Preserve ALL MSR values exactly (6- ≠ 6, 3+ ≠ 3). "
+            "Preserve '(Override)' tags. Preserve regulatory phrases verbatim.\n"
+            "7. Start immediately with the first missing sub-section — no introductory text."
+        )
+
     if section_no == 1:
         return (
             "You are a credit report engine for CUB Singapore Branch. "
@@ -233,6 +285,23 @@ def _build_fill_user_prompt(
             "No heading, no explanation. Start directly with the first missing table."
         )
 
+    if section_no == 3:
+        return (
+            f"The following sub-sections are MISSING from the already-generated §3 output:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 1500 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:6000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES for missing sub-sections:\n"
+            "- MAS 612: standalone bold title + EXACTLY 4 SEPARATE paragraphs (not bullets).\n"
+            "- MSR Table: EXACTLY 6 columns; sub-header row; '—' for null values; NEVER blank cells.\n"
+            "- External Ratings NIL → ONE sentence only; if rated → table format.\n"
+            "- ESG: 4 lines only (bold title, entity abbrev, date, image ref) — no narrative.\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
+
     return (
         f"Missing sections: {missing_labels}\n\n"
         f"Input JSON: {_json.dumps(input_json, ensure_ascii=False)[:4000]}\n\n"
@@ -267,8 +336,15 @@ async def fill_missing_tables(
         section_no, missing, existing_markdown, input_json, output_language
     )
 
-    # §1 fill can be large (Deal Comparison + Account Strategy are non-compressible)
-    max_tokens = 10240 if section_no == 1 else min(CR_SECTION_MAX_TOKENS, 8192)
+    # §1: Deal Comparison + Account Strategy are non-compressible → 10 240 tokens
+    # §3: MAS 612 (4 paragraphs) + MSR Table can be verbose → 6 144 tokens
+    # others: 8 192 cap
+    if section_no == 1:
+        max_tokens = 10240
+    elif section_no == 3:
+        max_tokens = 6144
+    else:
+        max_tokens = min(CR_SECTION_MAX_TOKENS, 8192)
 
     logger.info(
         "[Completeness] fill call section=%d missing=%s max_tokens=%d",
