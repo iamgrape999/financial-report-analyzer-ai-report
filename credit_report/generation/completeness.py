@@ -544,6 +544,128 @@ def _check_section7(markdown: str, input_json: dict) -> list[tuple[str, str]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# §8 — Changes in Engaged Banks (ACRA Banking Charges)
+#
+# §8 is DATA-DRIVEN:
+#   acra_data_available == false → AI emits one "Not Available" sentence only.
+#     Nothing is missing by design — return [] immediately.
+#   acra_data_available == true  → Full C-1 content is required:
+#     a) Search Metadata: opening sentence with ACRA date + entity + UEN
+#     b) Charges Table:   8-column (# | Chargee | Date Reg | Date Charge |
+#                         Amount (USD m) | Currency | Property Charged | Status)
+#     c) Summary:         4-line exact format (Total charges / Total active
+#                         amount / CUB charges / Unique chargees)
+#     d) CA Commentary:   ≥4 bullet points (Volume+Trend, CUB Position,
+#                         Satisfied Charges, Red Flags + "no unusual patterns")
+#     e) Forward-looking: MANDATORY for new_deal/renewal when the input
+#                         explicitly signals a new secured facility (via
+#                         8A_acra_banking_charges.has_proposed_facility or
+#                         proposed_facility_amount_usd_m > 0).
+#
+# Truncation risk: charges table with many entities + commentary bullets.
+# Primary token budget stays at default (8 192) — §8 is typically compact.
+# Fill budget: 6 144 tokens.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_section8(markdown: str, input_json: dict) -> list[tuple[str, str]]:
+    """
+    Return (marker, label) pairs for §8 sub-sections absent from *markdown*.
+
+    Returns an empty list immediately when:
+    - No 8A_acra_banking_charges input is supplied.
+    - acra_data_available is explicitly False (AI correctly outputs "Not Available").
+    """
+    acra_sec = input_json.get("8A_acra_banking_charges") or {}
+
+    # No input → cannot determine applicability; skip checks
+    if not acra_sec:
+        return []
+
+    acra_available = acra_sec.get("acra_data_available")
+
+    # Explicitly not available → "Not Available" statement is correct; nothing missing
+    if acra_available is False or (
+        isinstance(acra_available, str)
+        and acra_available.strip().lower() in ("false", "no", "0", "n")
+    ):
+        return []
+
+    md_lower = markdown.lower()
+    missing: list[tuple[str, str]] = []
+
+    # ① Search Metadata — ACRA search date + entity UEN opening sentence
+    has_metadata = (
+        "acra search" in md_lower
+        or "uen:" in md_lower
+        or "uen :" in md_lower
+        or ("acra" in md_lower and "registered charges" in md_lower)
+    )
+    if not has_metadata:
+        missing.append((
+            "ACRA search",
+            "C-1a Search Metadata (ACRA search date + entity + UEN opening sentence)",
+        ))
+
+    # ② Charges Table — 8-column table with Chargee column header
+    has_charges_table = (
+        "| chargee |" in md_lower
+        or ("chargee" in md_lower and "date of registration" in md_lower)
+        or ("chargee" in md_lower and "property charged" in md_lower)
+    )
+    if not has_charges_table:
+        missing.append((
+            "| Chargee |",
+            "C-1b Charges Table (8 cols: # | Chargee | Date Reg | Date Charge "
+            "| Amount (USD m) | Currency | Property Charged | Status)",
+        ))
+
+    # ③ Summary paragraph — mandatory 4-line exact format
+    has_summary = "total charges:" in md_lower or "total active amount:" in md_lower
+    if not has_summary:
+        missing.append((
+            "Total charges:",
+            "C-1c Summary (Total charges / Total active amount / CUB charges / Unique chargees)",
+        ))
+
+    # ④ CA Commentary — ≥4 bullet points mandatory
+    bullet_lines = [
+        ln for ln in markdown.splitlines()
+        if ln.strip().startswith(("-", "•", "*")) and len(ln.strip()) > 3
+    ]
+    if len(bullet_lines) < 4:
+        missing.append((
+            "- ",
+            "C-1d CA Commentary (≥4 bullets: Volume+Trend, CUB Position, "
+            "Satisfied Charges, Red Flags / 'No unusual patterns')",
+        ))
+
+    # ⑤ Forward-looking bullet — mandatory for new_deal/renewal when a new
+    #    secured facility is indicated in the input (proposed charge to ACRA).
+    report_type = str(
+        (input_json.get("metadata") or {}).get("report_type", "")
+    ).lower()
+    is_new_deal_or_renewal = "new_deal" in report_type or "renewal" in report_type
+    has_proposed_facility = bool(
+        acra_sec.get("has_proposed_facility")
+        or acra_sec.get("proposed_facility_amount_usd_m")
+    )
+    if is_new_deal_or_renewal and has_proposed_facility:
+        has_forward_looking = (
+            "upon execution" in md_lower
+            or "additional charge will be registered" in md_lower
+            or "bringing cub total to" in md_lower
+        )
+        if not has_forward_looking:
+            missing.append((
+                "upon execution",
+                "C-1d Bullet #6 Forward-looking (upon execution of proposed facility → "
+                "additional ACRA charge for CUB, updated total)",
+            ))
+
+    return missing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -575,6 +697,9 @@ def check_section_completeness(
 
     if section_no == 7:
         return _check_section7(markdown, input_json or {})
+
+    if section_no == 8:
+        return _check_section8(markdown, input_json or {})
 
     if section_no == 4:
         md_lower = markdown.lower()
@@ -633,6 +758,50 @@ def _build_fill_system_prompt(section_no: int) -> str:
             "NO source-referencing phrases.\n"
             "9. Banking Act always '33-3' (NOT '333'). RG rating: reproduce verbatim.\n"
             "10. Start immediately with the first missing sub-section — no introductory text."
+        )
+
+    if section_no == 8:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §8 'Changes in Engaged Banks' section. "
+            "The caller specifies exactly which sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble, no summary.\n"
+            "2. C-1a Search Metadata: opening sentence — "
+            "'Based on ACRA search dated [DD MMM YYYY], [Entity] (UEN: [UEN]), "
+            "a Singapore-incorporated company, has the following registered charges:'\n"
+            "3. C-1b Charges Table: EXACTLY 8 columns — "
+            "| # | Chargee | Date of Registration | Date of Charge | Amount (USD m) | "
+            "Currency | Property Charged | Status |. "
+            "Chronological order (earliest first). "
+            "Status: 'Registered' OR 'Satisfied ([DD MMM YYYY])' — no other values. "
+            "CUB charges: annotate WITHIN the Property Charged cell "
+            "(e.g., 'Vessel — Hull No. 4508 — **CUB facility (Item 2, §1)**'). "
+            "No separate Notes section outside the table.\n"
+            "4. C-1c Summary — EXACT 4-line format (no variations):\n"
+            "   Total charges: [X] ([Y] active, [Z] satisfied)\n"
+            "   Total active amount: USD [exact amount]m\n"
+            "   CUB charges: [N] totaling USD [exact amount]m\n"
+            "   Unique chargees: [ACRA names] ([M] distinct banking groups)\n"
+            "   Direct sum only — never use 'approximately'. "
+            "If one bank appears as multiple branches: note as "
+            "'[N] chargees ([M] groups — CUB SG + CUB HO = 1 group)'.\n"
+            "5. C-1d CA Commentary: EXACTLY 3-5 BULLET POINTS (NOT prose). Mandatory topics:\n"
+            "   Bullet 1 — Volume & trend: charge count over time, pace, pattern.\n"
+            "   Bullet 2 — CUB position: §1 Item refs + amounts; confirm consistency.\n"
+            "   Bullet 3 — Satisfied charges: context (vessel disposal / repayment / refinancing).\n"
+            "   Bullet 4 — Charge type + banking quality: vessel mortgages vs floating charges; "
+            "bank profile (international/Japanese/local); flag unknowns.\n"
+            "   Bullet 5 — Red flags: explicitly 'No unusual patterns identified' if clean; "
+            "OR flag: rapid increase, non-bank chargees, related-party, satisfy-re-register.\n"
+            "   Bullet 6 (MANDATORY for new_deal/renewal with new secured facility) — "
+            "Forward-looking: 'Upon execution of proposed facility (Item [X], §1, "
+            "USD [Y]m for [collateral]), an additional charge will be registered for "
+            "CUB [Branch], bringing CUB total to [N+1] charges / USD [Z]m.'\n"
+            "6. Amounts: USD [X]m. Dates: DD MMM YYYY. Chargee = ACRA registered name exactly.\n"
+            "7. ZERO credit judgments — no 'satisfactory', 'low risk', 'manageable'. "
+            "NEVER use source-referencing phrases ('as per', 'according to', 'based on').\n"
+            "8. Start immediately with the first missing sub-section — no introductory text."
         )
 
     if section_no == 7:
@@ -815,6 +984,32 @@ def _build_fill_user_prompt(
     missing_labels = ", ".join(label for _, label in missing)
     existing_tail = existing_markdown[-1500:] if len(existing_markdown) > 1500 else existing_markdown
 
+    if section_no == 8:
+        return (
+            f"The following sub-sections are MISSING from the already-generated §8 output:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 1500 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:6000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES for missing sub-sections:\n"
+            "- Search Metadata: 'Based on ACRA search dated [DD MMM YYYY], [Entity] (UEN: [UEN])...' — exact format.\n"
+            "- Charges Table: EXACTLY 8 columns; chronological; "
+            "Status = 'Registered' or 'Satisfied ([DD MMM YYYY])'; "
+            "CUB charges annotated in Property Charged cell (NOT a separate column).\n"
+            "- Summary: EXACT 4-line format — Total charges / Total active amount / "
+            "CUB charges / Unique chargees. Direct sum only (no 'approximately').\n"
+            "- Commentary: ≥4 bullets; mandatory: Volume+Trend, CUB Position (§1 refs), "
+            "Satisfied Charges, Red Flags ('No unusual patterns' if clean).\n"
+            "- Forward-looking bullet (new_deal/renewal): 'Upon execution of proposed "
+            "facility (Item [X], §1, USD [Y]m for [collateral]), an additional charge "
+            "will be registered for CUB [Branch], bringing CUB total to [N+1] charges / USD [Z]m.'\n"
+            "- Amounts: USD [X]m. Dates: DD MMM YYYY. Chargee = ACRA registered name.\n"
+            "- ZERO credit judgments. NEVER use source-referencing phrases.\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
+
     if section_no == 6:
         return (
             f"The following sub-sections are MISSING from the already-generated §6 output:\n"
@@ -978,10 +1173,11 @@ async def fill_missing_tables(
     # §5: C-3 Amortisation Schedule (up to 24 rows) + C-6 Guarantor table → 10 240 tokens
     # §6: C-4 Payment table (11 col, N rows) + C-6 Construction risks (3-5 bullets each) → 10 240 tokens
     # §7: P&L (≥12 rows) + BS (≥20 rows) + CF (≥7 rows) + ratios + projections → 12 288 tokens
+    # §8: Charges table + 4-line summary + ≥4 bullets — compact → 6 144 tokens
     # others: 8 192 cap
     if section_no == 1:
         max_tokens = 10240
-    elif section_no == 3:
+    elif section_no in (3, 8):
         max_tokens = 6144
     elif section_no in (4, 5, 6):
         max_tokens = 10240
