@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -13,6 +14,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 from credit_report.audit.events import write_event
+
+
+def _strip_qa_output(markdown: str) -> str:
+    """
+    Remove AI-generated QA gate output from section markdown before saving.
+
+    Sections §1/§3/§7/§8/§9/§10 instruct the AI to PRINT QA results at the end
+    of the output. These are internal self-checks (not part of the final credit
+    report) and must be stripped before the analyst sees the text.
+
+    Formats stripped:
+    - Verbose block:  **QA Gate Results:** ...  (§3 style bullet list)
+    - Compact inline: [QA] G1:✅ G2:✅ ...      (§7/§8/§9/§10 style)
+    - Bracket items:  [QA-J1: PASS/FAIL] ...    (§1/§3 alternate style)
+    """
+    # Verbose block starting with optional bold "QA Gate Results:" heading
+    markdown = re.sub(
+        r"\*?\*?QA[\s_]Gate[\s_]Results?:?\*?\*?\s*\n.*",
+        "",
+        markdown,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # Compact single-line: [QA] or [QA-Jx: ...] — remove the whole line
+    markdown = re.sub(
+        r"^\[QA[^\]]*\][^\n]*\n?",
+        "",
+        markdown,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    return markdown.rstrip()
 from credit_report.config import (
     CR_MAX_CONCURRENT_GENERATIONS,
     GEMINI_MODEL,
@@ -134,6 +165,7 @@ async def run_section_generation(
                 output_language=output_language,
             )
 
+        markdown = _strip_qa_output(markdown)
         output.markdown = markdown
         output.status = "done"
         output.model_id = GEMINI_MODEL
@@ -171,6 +203,7 @@ async def run_section_generation(
                         markdown = replaced if replaced is not None else markdown.rstrip() + "\n\n" + fill_text
                     else:
                         markdown = markdown.rstrip() + "\n\n" + fill_text
+                    markdown = _strip_qa_output(markdown)
                     tokens_used += fill_tokens
                     output.markdown = markdown
                     output.tokens_used = tokens_used
