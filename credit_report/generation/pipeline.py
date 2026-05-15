@@ -29,6 +29,7 @@ def _strip_qa_output(markdown: str) -> str:
     - Compact inline: [QA] G1:✅ G2:✅ ...      (§7/§8/§9/§10 style)
     - Bracket items:  [QA-J1: PASS/FAIL] ...    (§1/§3 alternate style)
     """
+    original = markdown
     # Verbose block starting with optional bold "QA Gate Results:" heading
     markdown = re.sub(
         r"\*?\*?QA[\s_]Gate[\s_]Results?:?\*?\*?\s*\n.*",
@@ -43,7 +44,9 @@ def _strip_qa_output(markdown: str) -> str:
         markdown,
         flags=re.IGNORECASE | re.MULTILINE,
     )
-    return markdown.rstrip()
+    # Only rstrip trailing whitespace when QA content was actually removed;
+    # leave the original trailing whitespace intact when there is nothing to strip.
+    return markdown.rstrip() if markdown != original else markdown
 from credit_report.config import (
     CR_MAX_CONCURRENT_GENERATIONS,
     GEMINI_MODEL,
