@@ -15,6 +15,11 @@ Why this module exists:
   a refund guarantee exists (pre-delivery only), and whether a corporate guarantor
   is present. C-7 and C-8 (Responsible Person Guarantee + Adequacy Conclusion)
   are unconditional and most likely to be truncated.
+- §6 applies only to shipbuilding/pre-delivery facilities. When not applicable the
+  AI emits a single sentence; when applicable the 8 bold-header sub-sections
+  (Project Overview → Project Economics) are all required except C-5 RG Mechanism
+  (only when 6E_rg_mechanism.applicable) and C-7 Force Majeure (only when
+  6G_force_majeure data is provided). Truncation risk is highest at C-6 and C-7.
 - With 16 384-token budgets, §1/§2 usually fit — but edge cases still occur.
 - This module detects gaps and issues a targeted fill call for only the missing
   sub-sections, without re-running the expensive full generation.
@@ -164,6 +169,88 @@ def _check_section1(markdown: str, input_json: dict) -> list[tuple[str, str]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# §6 — Conditional sub-sections (only for shipbuilding / pre-delivery facilities)
+#
+# Detection uses bold topic headers that the prompt mandates (NO C-N. prefix
+# in §6 output — prompt says "Bold topic headers only", no sub-numbering).
+# Early-exit when "not applicable" appears in markdown OR when 6A_project has
+# no vessel data (hull_number / teu / contract_price all null).
+# QA gates F-1..F-9 confirm all 8 sub-sections are required when applicable.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_section6(markdown: str, input_json: dict) -> list[tuple[str, str]]:
+    """
+    Return (marker, label) pairs for §6 sub-sections absent from *markdown*.
+
+    Returns empty list immediately when:
+    - The markdown contains "not applicable" (AI correctly reported N/A).
+    - The input_json carries no meaningful project data (no hull/TEU/price).
+    """
+    md_lower = markdown.lower()
+
+    # If AI declared the section not applicable, nothing is missing by design
+    if "not applicable" in md_lower:
+        return []
+
+    sec6a = input_json.get("6A_project") or {}
+    sec6e = input_json.get("6E_rg_mechanism") or {}
+    sec6g = input_json.get("6G_force_majeure") or {}
+
+    # If no project data supplied, the section is not applicable — skip check
+    has_project_data = bool(
+        sec6a.get("hull_number")
+        or sec6a.get("teu")
+        or sec6a.get("contract_price_usd_m")
+    )
+    if not has_project_data:
+        return []
+
+    missing: list[tuple[str, str]] = []
+
+    # C-1 Project Overview — always required when applicable
+    if "**project overview" not in md_lower:
+        missing.append(("**Project Overview**", "C-1 Project Overview"))
+
+    # C-2 Builder Assessment — always required when applicable
+    if "**builder assessment" not in md_lower:
+        missing.append(("**Builder Assessment**", "C-2 Builder Assessment"))
+
+    # C-3 Contract Structure — always required when applicable
+    if "**contract structure" not in md_lower:
+        missing.append(("**Contract Structure**", "C-3 Contract Structure"))
+
+    # C-4 Payment & Delivery Schedule — always required when applicable
+    if "**payment" not in md_lower:
+        missing.append(("**Payment & Delivery Schedule**", "C-4 Payment & Delivery Schedule"))
+
+    # C-5 RG Mechanism — only when refund guarantee data is provided
+    rg_applicable = bool(sec6e.get("applicable") or sec6e.get("issuer_full_name"))
+    if rg_applicable:
+        if "**rg mechanism" not in md_lower:
+            missing.append(("**RG Mechanism**", "C-5 RG Mechanism"))
+
+    # C-6 Construction Progress & Risk — always required when applicable
+    if "**construction progress" not in md_lower:
+        missing.append(("**Construction Progress", "C-6 Construction Progress & Risk"))
+
+    # C-7 Force Majeure — only when force majeure data is provided
+    fm_applicable = bool(
+        sec6g.get("applicable")
+        or sec6g.get("covered_events")
+        or sec6g.get("historical_context_verbatim")
+    )
+    if fm_applicable:
+        if "**force majeure" not in md_lower:
+            missing.append(("**Force Majeure**", "C-7 Force Majeure"))
+
+    # C-8 Project Economics — always present (one-sentence cross-reference)
+    if "**project economics" not in md_lower:
+        missing.append(("**Project Economics**", "C-8 Project Economics"))
+
+    return missing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # §5 — Conditional sub-sections (depend on security type + input keys)
 #
 # QA gate F-2: if unsecured, C-2 through C-5 are absent by design.
@@ -276,6 +363,9 @@ def check_section_completeness(
     if section_no == 5:
         return _check_section5(markdown, input_json or {})
 
+    if section_no == 6:
+        return _check_section6(markdown, input_json or {})
+
     if section_no == 4:
         md_lower = markdown.lower()
         return [
@@ -308,6 +398,38 @@ def check_section_completeness(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_fill_system_prompt(section_no: int) -> str:
+    if section_no == 6:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §6 'Project Analysis' section. "
+            "The caller specifies exactly which sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble, no summary.\n"
+            "2. Use bold topic headers exactly: **Project Overview**, **Builder Assessment**, "
+            "**Contract Structure**, **Payment & Delivery Schedule**, **RG Mechanism**, "
+            "**Construction Progress & Risk**, **Force Majeure**, **Project Economics**. "
+            "NO C-N. prefix numbering — bold topic headers only.\n"
+            "3. **Payment & Delivery Schedule**: 11-column table "
+            "(# | Milestone | Expected Date | Actual Date | Status | % of Contract | "
+            "Amount (USD m) | Cumulative Paid (USD m) | CUB Drawdown | RG In Force | RG Amount (USD m)); "
+            "Status must be full text ('✅ Completed' / '⏳ Pending' / '⚠️ Delayed'); "
+            "BOTH footnotes (* and **) mandatory.\n"
+            "4. **Construction Progress & Risk**: status line (milestones X/Y | completion % | "
+            "next milestone); for EACH risk: bold title, likelihood label, description, "
+            "then ALL mitigant bullets (3-5) — NEVER compress to single sentences.\n"
+            "5. **Force Majeure**: standalone paragraph — covered events + historical context + "
+            "current supply chain status.\n"
+            "6. **RG Mechanism**: exact issuer rating (AA ≠ AA-); trigger events numbered; "
+            "coverage % with both min and max figures.\n"
+            "7. **Project Economics**: one cross-reference sentence only — "
+            "'Vessel earnings projections, breakeven freight rate analysis, and detailed "
+            "cash flow projections are covered in Section 7: Financial Analysis.'\n"
+            "8. ZERO credit judgments — no 'satisfactory', 'low risk', 'manageable'. "
+            "NO source-referencing phrases.\n"
+            "9. Banking Act always '33-3' (NOT '333'). RG rating: reproduce verbatim.\n"
+            "10. Start immediately with the first missing sub-section — no introductory text."
+        )
+
     if section_no == 5:
         return (
             "You are a credit report engine for CUB Singapore Branch. "
@@ -444,6 +566,26 @@ def _build_fill_user_prompt(
     missing_labels = ", ".join(label for _, label in missing)
     existing_tail = existing_markdown[-1500:] if len(existing_markdown) > 1500 else existing_markdown
 
+    if section_no == 6:
+        return (
+            f"The following sub-sections are MISSING from the already-generated §6 output:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 1500 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:8000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES for missing sub-sections:\n"
+            "- Payment table: EXACTLY 11 columns; full Status text; BOTH footnotes (* and **).\n"
+            "- Construction risks: ALL mitigant bullets (3-5 per risk); never compress.\n"
+            "- Force Majeure: standalone paragraph; include historical context verbatim.\n"
+            "- RG Mechanism: issuer rating verbatim (AA- ≠ AA); numbered trigger events.\n"
+            "- Project Economics: ONE cross-reference sentence only.\n"
+            "- ZERO credit judgments ('satisfactory', 'low risk', 'manageable' FORBIDDEN).\n"
+            "- NO source-referencing phrases. State facts directly.\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
+
     if section_no == 5:
         return (
             f"The following sub-sections are MISSING from the already-generated §5 output:\n"
@@ -559,12 +701,13 @@ async def fill_missing_tables(
     # §3: MAS 612 (4 paragraphs) + MSR Table can be verbose → 6 144 tokens
     # §4: C-9 Peer Comparison table + Banking Relationships can be verbose → 8 192 tokens
     # §5: C-3 Amortisation Schedule (up to 24 rows) + C-6 Guarantor table → 10 240 tokens
+    # §6: C-4 Payment table (11 col, N rows) + C-6 Construction risks (3-5 bullets each) → 10 240 tokens
     # others: 8 192 cap
     if section_no == 1:
         max_tokens = 10240
     elif section_no == 3:
         max_tokens = 6144
-    elif section_no in (4, 5):
+    elif section_no in (4, 5, 6):
         max_tokens = 10240
     else:
         max_tokens = min(CR_SECTION_MAX_TOKENS, 8192)

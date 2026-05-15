@@ -35,6 +35,7 @@ SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
     2: 16384,   # §2 five mandatory tables (T1-T5); 8192 default cuts off after T1 only
     3: 12288,   # §3 MSR table (multi-entity override remarks) + MAS 612 (4 paragraphs) + ESG
     5: 12288,   # §5 RG milestone table (8 col) + amortisation (up to 24 rows) + guarantor dual-currency
+    6: 12288,   # §6 payment table (11 col) + construction risks (3-5 bullets each) + force majeure
     7: 16384,   # §7 full financial analysis with multi-year tables
     10: 16384,  # §10 appendix
     4: 12288,   # §4 corporate background

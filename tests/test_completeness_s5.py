@@ -394,7 +394,7 @@ class TestSection5Isolation:
 
     def test_sections_6_to_10_unaffected(self):
         from credit_report.generation.completeness import check_section_completeness
-        for sec in [6, 7, 8, 9, 10]:
+        for sec in [7, 8, 9, 10]:
             result = check_section_completeness(sec, FULL_S5_SECURED)
             assert result == [], f"§{sec} should have no completeness requirements"
 
@@ -523,7 +523,7 @@ class TestSection5PipelineIntegration:
         assert output.tokens_used == primary_tokens + fill_tokens
 
     async def test_non_s5_section_not_affected(self, db):
-        """Completeness check must be a no-op for §6 (no requirements)."""
+        """Completeness check must be a no-op for §8 (no requirements)."""
         from credit_report.generation.pipeline import run_section_generation
         from credit_report.models import Report
 
@@ -532,10 +532,10 @@ class TestSection5PipelineIntegration:
         await db.flush()
 
         fill_spy = AsyncMock(return_value=("", 0))
-        short_md = "§6 Project Analysis\n\nConstruction on schedule."
+        short_md = "§8 Banking Relationships\n\nFoo bar."
         with _mock_generate(short_md), _mock_evidence(), _mock_quota(), _mock_record(), \
              patch("credit_report.generation.completeness.fill_missing_tables", new=fill_spy):
-            output = await run_section_generation(db, rid, section_no=6, actor_user_id=_uid())
+            output = await run_section_generation(db, rid, section_no=8, actor_user_id=_uid())
 
         assert output.status == "done"
         fill_spy.assert_not_called()

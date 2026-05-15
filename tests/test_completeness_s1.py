@@ -413,13 +413,13 @@ class TestSection1PipelineIntegration:
         rid = _uid()
         db.add(Report(id=rid, industry="marine", created_by=_uid()))
         await db.flush()
-        # §6 has no completeness requirements — no SectionInput needed
+        # §8 has no completeness requirements — no SectionInput needed
 
         fill_spy = AsyncMock(return_value=("", 0))
-        with _mock_generate("§6 Project Analysis text.", tokens=3000), \
+        with _mock_generate("§8 Banking Relationships text.", tokens=3000), \
              _mock_evidence(), _mock_quota(), _mock_record(), \
              patch("credit_report.generation.completeness.fill_missing_tables", new=fill_spy):
-            output = await run_section_generation(db, rid, section_no=6, actor_user_id=_uid())
+            output = await run_section_generation(db, rid, section_no=8, actor_user_id=_uid())
 
         assert output.status == "done"
         fill_spy.assert_not_called()
@@ -485,7 +485,7 @@ class TestBackwardCompatibility:
 
     def test_other_sections_return_empty(self):
         from credit_report.generation.completeness import check_section_completeness
-        # §3, §4, §5 now have their own completeness checks; verify §6-§10 have none
-        for sec in [6, 7, 8, 9, 10]:
+        # §3–§6 now have their own completeness checks; verify §7-§10 have none
+        for sec in [7, 8, 9, 10]:
             result = check_section_completeness(sec, "any markdown")
             assert result == [], f"§{sec} should have no requirements"
