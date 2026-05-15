@@ -11,6 +11,10 @@ Why this module exists:
   Table, MAS 612 Loan Grading, ESG Rating) — all unconditional. With an 8 192-
   token default budget, sections with multiple override entities and long Remarks
   can truncate before MAS 612 or ESG are emitted.
+- §5 sub-sections are conditional on facility type (secured/unsecured), whether
+  a refund guarantee exists (pre-delivery only), and whether a corporate guarantor
+  is present. C-7 and C-8 (Responsible Person Guarantee + Adequacy Conclusion)
+  are unconditional and most likely to be truncated.
 - With 16 384-token budgets, §1/§2 usually fit — but edge cases still occur.
 - This module detects gaps and issues a targeted fill call for only the missing
   sub-sections, without re-running the expensive full generation.
@@ -160,6 +164,92 @@ def _check_section1(markdown: str, input_json: dict) -> list[tuple[str, str]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# §5 — Conditional sub-sections (depend on security type + input keys)
+#
+# QA gate F-2: if unsecured, C-2 through C-5 are absent by design.
+# QA gate F-7: C-8 Collateral Adequacy Conclusion is always required.
+# C-7 Responsible Person Guarantee is always required (even if "none").
+# Truncation risk is highest at C-6, C-7, C-8 (end of a verbose section).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_section5(markdown: str, input_json: dict) -> list[tuple[str, str]]:
+    """
+    Return (marker, label) pairs for §5 sub-sections absent from *markdown*
+    but expected given the supplied input_json.
+
+    Detection strategy: bold sub-header prefix **C-N. (lowercase match) is the
+    most reliable marker because the prompt mandates these exact labels.
+    """
+    md_lower = markdown.lower()
+    missing: list[tuple[str, str]] = []
+
+    sec5a = input_json.get("5A_security_overview") or {}
+    sec5b = input_json.get("5B_refund_guarantee") or {}
+    sec5c = input_json.get("5C_vessel_mortgage") or {}
+    sec5d = input_json.get("5D_insurance") or []
+    sec5e = input_json.get("5E_value_maintenance_clause") or {}
+    sec5f = input_json.get("5F_corporate_guarantee") or {}
+
+    is_secured: bool | None = sec5a.get("is_secured")
+    # Treat as secured when uncertain but mortgage data is present
+    has_mortgage_data = bool(sec5c.get("applicable") or sec5c.get("vessel_valuations"))
+    secured = is_secured or (is_secured is None and has_mortgage_data)
+
+    # ① C-0 Security Package Overview — always required
+    if "**c-0." not in md_lower and "security package" not in md_lower:
+        missing.append(("**C-0.", "C-0 Security Package Overview"))
+
+    # ② C-1 Pre-Delivery Security (Refund Guarantee) — only when RG data provided
+    rg_applicable = bool(
+        sec5b.get("applicable")
+        or sec5b.get("issuer_full_name")
+        or sec5b.get("milestones")
+    )
+    if rg_applicable:
+        if "**c-1." not in md_lower and "refund guarantee" not in md_lower:
+            missing.append(("**C-1.", "C-1 Pre-Delivery Security — Refund Guarantee"))
+
+    # ③–⑥ C-2 through C-5 — only when secured
+    if secured:
+        # C-2 Post-Delivery Security — First Priority Mortgage
+        if "**c-2." not in md_lower and "first priority mortgage" not in md_lower:
+            missing.append(("**C-2.", "C-2 Post-Delivery Security — First Priority Mortgage"))
+
+        # C-3 Amortisation Profile — when amortisation schedule data exists
+        has_amort = bool(sec5c.get("amortisation_schedule") or sec5c.get("loan_amount_usd_m"))
+        if has_amort:
+            if "**c-3." not in md_lower and "amortisation" not in md_lower and "repayment schedule" not in md_lower:
+                missing.append(("**C-3.", "C-3 Amortisation Profile (Loan Repayment Schedule)"))
+
+        # C-4 Insurance — when insurance data provided
+        if sec5d:
+            if "**c-4." not in md_lower:
+                missing.append(("**C-4.", "C-4 Insurance"))
+
+        # C-5 Value Maintenance Clause — when VMC data provided
+        has_vmc = bool(sec5e.get("acr_covenant_pct") or sec5e.get("cure_mechanism_verbatim") or sec5e.get("ltv_covenant_pct"))
+        if has_vmc:
+            if "**c-5." not in md_lower and "value maintenance" not in md_lower:
+                missing.append(("**C-5.", "C-5 Value Maintenance Clause"))
+
+    # ⑦ C-6 Corporate Guarantee — only when guarantor data provided
+    guarantor_applicable = bool(sec5f.get("applicable") or sec5f.get("guarantor_full_name"))
+    if guarantor_applicable:
+        if "**c-6." not in md_lower and "corporate guarantee" not in md_lower:
+            missing.append(("**C-6.", "C-6 Corporate Guarantee & Guarantor Financial Capacity"))
+
+    # ⑧ C-7 Responsible Person Guarantee — always required (even if "none")
+    if "**c-7." not in md_lower and "responsible person guarantee" not in md_lower:
+        missing.append(("**C-7.", "C-7 Responsible Person Guarantee"))
+
+    # ⑨ C-8 Collateral Adequacy Conclusion — always required (QA F-7)
+    if "**c-8." not in md_lower and "collateral adequacy" not in md_lower:
+        missing.append(("**C-8.", "C-8 Collateral Adequacy Conclusion"))
+
+    return missing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -182,6 +272,9 @@ def check_section_completeness(
     """
     if section_no == 1:
         return _check_section1(markdown, input_json or {})
+
+    if section_no == 5:
+        return _check_section5(markdown, input_json or {})
 
     if section_no == 4:
         md_lower = markdown.lower()
@@ -215,6 +308,40 @@ def check_section_completeness(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_fill_system_prompt(section_no: int) -> str:
+    if section_no == 5:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §5 "
+            "'Collateral / Responsible Person / Guarantor / Support' section. "
+            "The caller specifies exactly which sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble, no summary.\n"
+            "2. Use bold sub-headers exactly matching the labels: "
+            "**C-0. Security Package Overview**, **C-1. Pre-Delivery Security — Refund Guarantee**, "
+            "**C-2. Post-Delivery Security — First Priority Mortgage**, "
+            "**C-3. Amortisation Profile (Loan Repayment Schedule)**, **C-4. Insurance**, "
+            "**C-5. Value Maintenance Clause**, "
+            "**C-6. Corporate Guarantee & Guarantor Financial Capacity**, "
+            "**C-7. Responsible Person Guarantee**, **C-8. Collateral Adequacy Conclusion**.\n"
+            "3. C-1 (RG table): 8 columns (Milestone | Sched. Date | RG Amount (USD m) | "
+            "Max Loan O/S (USD m) | Coverage % | Drawdown (USD m) | Cum. Drawdown (USD m) | Status). "
+            "Include ALL milestones. Footnote: '[RG = Refund Guarantee; O/S = Outstanding]'.\n"
+            "4. C-2 ratios: show formula and actual figures for LTC, ACR at delivery, LTV at maturity.\n"
+            "5. C-3: 7-column table (Period | Date | Principal (USD m) | Interest (USD m) | "
+            "Total Debt Service (USD m) | Outstanding Balance (USD m) | LTV %); include ALL periods.\n"
+            "6. C-5 (VMC): structured legal summary with ACR Covenant, LTV Covenant, Testing, "
+            "Cure Period (ALWAYS 'Banking Days' — never 'business days'), Remedy Options, "
+            "Cure Mechanism verbatim.\n"
+            "7. C-6: dual-currency table (TWD bn | USD bn); state FX rate used.\n"
+            "8. C-7: always output — either the guarantee details or "
+            "'No responsible person guarantee is required for this facility.'\n"
+            "9. C-8: 3-5 sentences covering overall adequacy, key ratios (LTC / ACR / LTV), "
+            "coverage progression, bank position vs. peers, conclusion.\n"
+            "10. Preserve ALL numbers, percentages, dates exactly as given.\n"
+            "11. NEVER use source-referencing phrases. State facts directly.\n"
+            "12. Start immediately with the first missing sub-section — no introductory text."
+        )
+
     if section_no == 4:
         return (
             "You are a credit report engine for CUB Singapore Branch. "
@@ -317,6 +444,26 @@ def _build_fill_user_prompt(
     missing_labels = ", ".join(label for _, label in missing)
     existing_tail = existing_markdown[-1500:] if len(existing_markdown) > 1500 else existing_markdown
 
+    if section_no == 5:
+        return (
+            f"The following sub-sections are MISSING from the already-generated §5 output:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 1500 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:8000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES for missing sub-sections:\n"
+            "- C-1 RG table: EXACTLY 8 columns; include ALL milestones; footnote required.\n"
+            "- C-3 Amortisation: include ALL periods; 7 columns; final row = balloon.\n"
+            "- C-5 VMC: 'Banking Days' (NEVER 'business days'); cure mechanism verbatim.\n"
+            "- C-6 Guarantor: dual-currency (TWD bn + USD bn); FX rate stated.\n"
+            "- C-7: always output, even if 'No responsible person guarantee is required.'\n"
+            "- C-8: 3-5 sentences; include LTC / ACR / LTV ratios.\n"
+            "- NEVER use source-referencing phrases. State facts directly.\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
+
     if section_no == 4:
         return (
             f"The following sub-sections are MISSING from the already-generated §4 output:\n"
@@ -411,13 +558,14 @@ async def fill_missing_tables(
     # §1: Deal Comparison + Account Strategy are non-compressible → 10 240 tokens
     # §3: MAS 612 (4 paragraphs) + MSR Table can be verbose → 6 144 tokens
     # §4: C-9 Peer Comparison table + Banking Relationships can be verbose → 8 192 tokens
+    # §5: C-3 Amortisation Schedule (up to 24 rows) + C-6 Guarantor table → 10 240 tokens
     # others: 8 192 cap
     if section_no == 1:
         max_tokens = 10240
     elif section_no == 3:
         max_tokens = 6144
-    elif section_no == 4:
-        max_tokens = 8192
+    elif section_no in (4, 5):
+        max_tokens = 10240
     else:
         max_tokens = min(CR_SECTION_MAX_TOKENS, 8192)
 

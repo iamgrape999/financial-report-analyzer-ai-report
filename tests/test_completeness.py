@@ -128,8 +128,8 @@ class TestCheckSectionCompleteness:
 
     def test_sections_5_to_10_have_no_requirements(self):
         from credit_report.generation.completeness import check_section_completeness
-        # §1, §2, §3, §4 have completeness checks; §5-§10 have none
-        for sec_no in [5, 6, 7, 8, 9, 10]:
+        # §1, §2, §3, §4, §5 have completeness checks; §6-§10 have none
+        for sec_no in [6, 7, 8, 9, 10]:
             result = check_section_completeness(sec_no, "some markdown")
             assert result == [], f"§{sec_no} should have no completeness requirements"
 

@@ -287,9 +287,10 @@ class TestSection4Isolation:
         labels = [l for _, l in result]
         assert "External Ratings" in labels
 
-    def test_sections_5_to_10_unaffected(self):
+    def test_sections_6_to_10_unaffected(self):
         from credit_report.generation.completeness import check_section_completeness
-        for sec in [5, 6, 7, 8, 9, 10]:
+        # §5 now has its own completeness check; verify §6-§10 have none
+        for sec in [6, 7, 8, 9, 10]:
             result = check_section_completeness(sec, FULL_S4)
             assert result == [], f"§{sec} should have no completeness requirements"
 
@@ -412,10 +413,10 @@ class TestSection4PipelineIntegration:
         await db.flush()
 
         fill_spy = AsyncMock(return_value=("", 0))
-        short_md = "§5 Collateral Analysis\n\nFoo bar."
+        short_md = "§6 Project Analysis\n\nFoo bar."
         with _mock_generate(short_md), _mock_evidence(), _mock_quota(), _mock_record(), \
              patch("credit_report.generation.completeness.fill_missing_tables", new=fill_spy):
-            output = await run_section_generation(db, rid, section_no=5, actor_user_id=_uid())
+            output = await run_section_generation(db, rid, section_no=6, actor_user_id=_uid())
 
         assert output.status == "done"
         fill_spy.assert_not_called()
@@ -493,5 +494,5 @@ class TestSection4Config:
             )
             _, kwargs = mock_call.call_args
             max_tok = kwargs.get("max_tokens", mock_call.call_args[0][2] if mock_call.call_args[0] else None)
-            # §4 fill must use 8192, not the §3 value of 6144
-            assert max_tok == 8192, f"§4 fill budget should be 8192, got {max_tok}"
+            # §4 fill must use 10240 (grouped with §5), not §3's 6144 or the default 8192
+            assert max_tok == 10240, f"§4 fill budget should be 10240, got {max_tok}"
