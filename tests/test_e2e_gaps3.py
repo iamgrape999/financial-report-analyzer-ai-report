@@ -11,7 +11,7 @@ Covers 10 scenarios identified in the third-pass audit:
   H6  TestAuditPermissive          — GET /audit: non-owner analyst can read (no ownership guard)
   H7  TestRecalculatePermissive    — POST /recalculate: non-owner analyst can trigger
   H8  TestLtvAcrEdgeCases          — POST /calculations/ltv-acr with empty schedule → 200 []
-  H9  TestBlockPatchPermissive     — PATCH /blocks: no ownership guard (any auth user can edit)
+  H9  TestBlockPatchPermissive     — PATCH /blocks: ownership guard enforced (non-owner gets 403)
   H10 TestFxRateZeroRate           — PUT /fx-rates with rate=0.0 accepted (valid float)
 """
 from __future__ import annotations
@@ -355,12 +355,11 @@ class TestLtvAcrEdgeCases:
 
 class TestBlockPatchPermissive:
 
-    async def test_non_owner_analyst_can_patch_block(
+    async def test_non_owner_analyst_cannot_patch_block(
         self, ac, admin_hdrs, report, other_analyst
     ):
-        """PATCH /blocks/{block_id} has no _assert_owner_or_admin guard.
-        A non-owner analyst who knows the report_id and block_id can edit the block.
-        This documents the current collaborative-editing design choice.
+        """PATCH /blocks/{block_id} enforces ownership — non-owner analysts are denied.
+        RBAC guard added: only report owner or admin may edit blocks.
         """
         block_id = await _seed_block(report["id"])
 
@@ -369,8 +368,7 @@ class TestBlockPatchPermissive:
             json={"content": "Edited by non-owner.", "expected_version": 1},
             headers=other_analyst["headers"],
         )
-        assert r.status_code == 200
-        assert r.json()["content"] == "Edited by non-owner."
+        assert r.status_code == 403
 
 
 # ══════════════════════════════════════════════════════════════════════════════

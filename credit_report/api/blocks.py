@@ -5,7 +5,8 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.database import get_db
@@ -14,11 +15,23 @@ from credit_report.block_ast.models import ReportBlock, TableCell
 from credit_report.block_ast.repository import BlockOptimisticLockError
 from credit_report.fact_store import repository as fact_repo
 from credit_report.generation.claude_client import call_gemini_raw
+from credit_report.models import Report
 from credit_report.security.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports/{report_id}", tags=["blocks"])
+
+
+async def _get_report_or_403(db: AsyncSession, report_id: str, current_user) -> Report:
+    """Fetch report and enforce ownership (admin sees all, analyst sees own only)."""
+    result = await db.execute(select(Report).where(Report.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if current_user.role != "admin" and report.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return report
 
 
 class CellOut(BaseModel):
@@ -56,8 +69,15 @@ class BlockPatchIn(BaseModel):
 
 
 class BlockImproveIn(BaseModel):
-    instruction: str
+    instruction: str = Field(min_length=1, description="Non-empty improvement instruction")
     expected_version: Optional[int] = None
+
+    @field_validator("instruction")
+    @classmethod
+    def instruction_not_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("instruction must not be blank or whitespace-only")
+        return v
 
 
 class BlockImproveOut(BaseModel):
@@ -151,6 +171,7 @@ async def patch_block(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    await _get_report_or_403(db, report_id, current_user)
     block = await block_repo.get_block(db, block_id)
     if not block or block.report_id != report_id:
         raise HTTPException(status_code=404, detail="Block not found")
@@ -229,10 +250,11 @@ async def improve_block(
     current_user=Depends(get_current_user),
 ):
     """AI-assisted paragraph improvement. Returns a suggestion; does NOT apply it."""
+    await _get_report_or_403(db, report_id, current_user)
     block = await block_repo.get_block(db, block_id)
     if not block or block.report_id != report_id:
         raise HTTPException(status_code=404, detail="Block not found")
-    if not block.content:
+    if not block.content or not block.content.strip():
         raise HTTPException(status_code=400, detail="Block has no content to improve")
 
     facts_context = ""
@@ -276,6 +298,9 @@ async def improve_block(
     except Exception as e:
         logger.error("improve_block: LLM call failed block=%s: %s", block_id, e)
         raise HTTPException(status_code=503, detail=f"AI generation failed: {e}")
+
+    if not suggested:
+        raise HTTPException(status_code=503, detail="AI returned an empty suggestion — please retry")
 
     logger.info(
         "improve_block: block=%s section=%d user=%s instruction_len=%d",
