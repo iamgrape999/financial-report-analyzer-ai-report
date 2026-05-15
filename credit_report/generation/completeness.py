@@ -20,6 +20,14 @@ Why this module exists:
   (Project Overview → Project Economics) are all required except C-5 RG Mechanism
   (only when 6E_rg_mechanism.applicable) and C-7 Force Majeure (only when
   6G_force_majeure data is provided). Truncation risk is highest at C-6 and C-7.
+- §7 is the quantitative backbone of the report. C-1 (Borrower Historical
+  Financials — P&L + BS + CF) and C-2 (Borrower Summary Statistics — ≥18 ratios)
+  are always mandatory. C-3/C-4 (Guarantor Financials/Stats) are conditional on
+  guarantor_exists or 7C data. C-5/C-6 (Base Case + Worse Case Projections) are
+  conditional on 7E_base_case.applicable. C-7 (Lessee Financials) is conditional
+  on 7G_lessee_financials data. C-8 (Sensitivity Analysis) is conditional on
+  projections or 7H_sensitivity data. With a 16 384-token primary budget,
+  truncation risk is highest at C-6, C-7, and C-8 (end of a dense section).
 - With 16 384-token budgets, §1/§2 usually fit — but edge cases still occur.
 - This module detects gaps and issues a targeted fill call for only the missing
   sub-sections, without re-running the expensive full generation.
@@ -337,6 +345,104 @@ def _check_section5(markdown: str, input_json: dict) -> list[tuple[str, str]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# §7 — Financial Analysis: 2 unconditional + 6 conditional sub-sections
+#
+# Detection uses **C-N. prefix (same convention as §4/§5) with unique phrase
+# fallbacks. Conditionality mirrors the prompt trigger logic:
+#   C-3/C-4: entities_to_analyze[].guarantor_exists or 7C_guarantor_financials.applicable
+#   C-5/C-6: 7E_base_case.applicable or meaningful projection data
+#   C-7:     7G_lessee_financials.applicable or non-empty lessees list
+#   C-8:     same as C-5 or 7H_sensitivity.applicable
+# Truncation risk is highest at C-6/C-7/C-8 (end of a dense, multi-table section).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_section7(markdown: str, input_json: dict) -> list[tuple[str, str]]:
+    """
+    Return (marker, label) pairs for §7 sub-sections absent from *markdown*
+    but expected given the supplied input_json.
+
+    C-1 and C-2 are unconditionally mandatory.
+    C-3 through C-8 are conditional on the corresponding input keys.
+    """
+    md_lower = markdown.lower()
+    missing: list[tuple[str, str]] = []
+
+    # ① C-1 Borrower Historical Financials — MANDATORY (P&L + BS + CF)
+    if "**c-1." not in md_lower and "borrower historical financials" not in md_lower:
+        missing.append(("**C-1.", "C-1 Borrower Historical Financials (P&L + BS + CF tables)"))
+
+    # ② C-2 Borrower Summary Statistics — MANDATORY (≥18 ratio rows)
+    if "**c-2." not in md_lower and "summary statistics" not in md_lower:
+        missing.append(("**C-2.", "C-2 Borrower Summary Statistics (≥18 ratio rows)"))
+
+    # Determine conditionality for C-3/C-4 from entities list or 7C data
+    entities = input_json.get("entities_to_analyze") or []
+    if isinstance(entities, dict):
+        entities = [entities]
+    guarantor_7c = input_json.get("7C_guarantor_financials") or {}
+    guarantor_exists = (
+        any(bool(e.get("guarantor_exists")) for e in entities)
+        or bool(guarantor_7c.get("applicable"))
+        or bool(guarantor_7c.get("guarantor_name"))
+    )
+
+    # ③ C-3 Guarantor Financials — conditional on guarantor_exists
+    if guarantor_exists:
+        if "**c-3." not in md_lower and "guarantor financials" not in md_lower:
+            missing.append(("**C-3.", "C-3 Guarantor Financials (P&L + BS + CF)"))
+
+    # ④ C-4 Guarantor Summary Statistics — conditional on guarantor_exists
+    if guarantor_exists:
+        if "**c-4." not in md_lower and "guarantor summary" not in md_lower:
+            missing.append(("**C-4.", "C-4 Guarantor Summary Statistics"))
+
+    # Determine conditionality for C-5/C-6/C-8 from 7E_base_case data
+    base_case = input_json.get("7E_base_case") or {}
+    has_projections = bool(
+        base_case.get("applicable")
+        or any(bool(row.get("assumption")) for row in (base_case.get("key_assumptions") or []))
+        or any(bool(row.get("dscr")) for row in (base_case.get("dscr_table") or []))
+    )
+
+    # ⑤ C-5 Base Case Projections — conditional on projection data
+    if has_projections:
+        if "**c-5." not in md_lower and "base case projections" not in md_lower:
+            missing.append(("**C-5.", "C-5 Base Case Projections (Key Assumptions + Financials + DSCR)"))
+
+    # ⑥ C-6 Worse Case — mandatory when C-5 present ("C-5 exists → C-6 is MANDATORY")
+    worse_case = input_json.get("7F_worse_case") or {}
+    has_worse_case = has_projections or bool(
+        worse_case.get("applicable")
+        or any(bool(row.get("assumption")) for row in (worse_case.get("stress_assumptions") or []))
+    )
+    if has_worse_case:
+        if "**c-6." not in md_lower and "worse case" not in md_lower:
+            missing.append(("**C-6.", "C-6 Worse Case (Stress Assumptions + Stressed Summary tables)"))
+
+    # ⑦ C-7 Lessee Financials — conditional on 7G_lessee_financials data
+    lessee_data = input_json.get("7G_lessee_financials") or {}
+    has_lessee = bool(
+        lessee_data.get("applicable")
+        or any(bool(l) for l in (lessee_data.get("lessees") or []))
+    )
+    if has_lessee:
+        if "**c-7." not in md_lower and "lessee financials" not in md_lower:
+            missing.append(("**C-7.", "C-7 Lessee Financials"))
+
+    # ⑧ C-8 Sensitivity Analysis — conditional on projections or 7H_sensitivity data
+    sensitivity_data = input_json.get("7H_sensitivity") or {}
+    has_sensitivity = has_projections or bool(
+        sensitivity_data.get("applicable")
+        or any(bool(row.get("variable")) for row in (sensitivity_data.get("rows") or []))
+    )
+    if has_sensitivity:
+        if "**c-8." not in md_lower and "sensitivity analysis" not in md_lower:
+            missing.append(("**C-8.", "C-8 Sensitivity Analysis (6-column table)"))
+
+    return missing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -365,6 +471,9 @@ def check_section_completeness(
 
     if section_no == 6:
         return _check_section6(markdown, input_json or {})
+
+    if section_no == 7:
+        return _check_section7(markdown, input_json or {})
 
     if section_no == 4:
         md_lower = markdown.lower()
@@ -428,6 +537,50 @@ def _build_fill_system_prompt(section_no: int) -> str:
             "NO source-referencing phrases.\n"
             "9. Banking Act always '33-3' (NOT '333'). RG rating: reproduce verbatim.\n"
             "10. Start immediately with the first missing sub-section — no introductory text."
+        )
+
+    if section_no == 7:
+        return (
+            "You are a credit report engine for CUB Singapore Branch. "
+            "You are completing a PARTIALLY generated §7 'Financial Analysis' section. "
+            "The caller specifies exactly which sub-sections are missing. "
+            "Rules:\n"
+            "1. Output ONLY the missing sub-sections — no heading, no preamble, no summary.\n"
+            "2. Use bold sub-headers exactly: **C-1. Borrower Historical Financials**, "
+            "**C-2. Borrower Summary Statistics**, **C-3. Guarantor Financials**, "
+            "**C-4. Guarantor Summary Statistics**, **C-5. Base Case Projections**, "
+            "**C-6. Worse Case**, **C-7. Lessee Financials**, **C-8. Sensitivity Analysis**.\n"
+            "3. C-1 (Borrower Historical): Output P&L (≥12 rows) → BS (≥20 rows) → CF (≥7 rows). "
+            "Each table preceded by 'Currency: [X] | Unit: [X]' line. "
+            "Bold subtotals/totals. Negatives as (1,234). "
+            "3-5 CA Commentary bullets after EACH table: YoY absolute+%, margin trends, "
+            "one-offs/anomalies, interim vs prior year, forward credit implication.\n"
+            "4. C-2 (Summary Statistics): ALL 4 categories — Profitability (GM%, OM%, NM%, "
+            "EBITDA%, ROA%, ROE%), Leverage (Total Debt, Net Debt, D/E, ND/E, D/EBITDA), "
+            "Coverage (EBITDA/Int, OCF/Debt, OCF/Int), Efficiency (AR Days, AP Days, "
+            "Inventory Days) — minimum 18 ratio rows. 3-5 CA Commentary bullets below.\n"
+            "5. C-3 (Guarantor Financials): state 'Guarantor Depth: FULL' or "
+            "'Guarantor Depth: ABBREVIATED' on first line. "
+            "FULL = P&L+BS+CF+Commentary same depth as C-1. "
+            "ABBREVIATED = BS + Key Ratios only.\n"
+            "6. C-5 (Base Case): ≥3 tables — Key Assumptions TABLE (not prose) + "
+            "Projected Financials TABLE (P&L condensed + BS: Cash/Debt/Equity + "
+            "CF: OCF/CAPEX/Debt Svc/FCF) + DSCR TABLE (Period | OCF | Debt Service | DSCR). "
+            "All years as columns. Conclusion: 2-3 sentences on serviceability, min DSCR, "
+            "cash adequacy.\n"
+            "7. C-6 (Worse Case): ≥2 tables — Stress Assumptions TABLE "
+            "(Assumption | Base | Worse | Stress Magnitude) + Stressed Summary TABLE "
+            "(Revenue/OP/NI/OCF/Cash/DSCR per year). "
+            "Conclusion: DSCR>1.0x? Cash trough? Guarantor trigger? vs historical worst.\n"
+            "8. C-8 (Sensitivity): 6-column table (ALL 6 columns mandatory): "
+            "Variable | Base Case | Stress | DSCR Min Impact | Cash Trough Impact | Conclusion. "
+            "Include ALL standard variables: Freight -10/-20/-30% | Interest +100/+200bps | "
+            "CAPEX +20% | FX ±10% | Delay +6/12M.\n"
+            "9. N/M when denominator ≤0. N/A for interim annualization. "
+            "'Net Cash' for negative net debt. Pct: 28.4%. Ratios: 0.64x. Commas: 12,164,913.\n"
+            "10. ZERO credit judgments — 'satisfactory', 'well-positioned', 'manageable' FORBIDDEN. "
+            "NEVER use source-referencing phrases ('as per', 'according to', 'based on input').\n"
+            "11. Start immediately with the first missing sub-section — no introductory text."
         )
 
     if section_no == 5:
@@ -586,6 +739,32 @@ def _build_fill_user_prompt(
             "No introduction, no explanation. Start directly with the first missing sub-section."
         )
 
+    if section_no == 7:
+        return (
+            f"The following sub-sections are MISSING from the already-generated §7 output:\n"
+            f"  {missing_labels}\n\n"
+            f"TAIL OF EXISTING OUTPUT (last 1500 chars — context only, do NOT repeat):\n"
+            f"```\n{existing_tail}\n```\n\n"
+            f"INPUT DATA:\n```json\n{_json.dumps(input_json, ensure_ascii=False, indent=2)[:8000]}\n```\n\n"
+            f"REQUIRED OUTPUT LANGUAGE: {output_language}\n\n"
+            "CRITICAL RULES for missing sub-sections:\n"
+            "- C-1: P&L ≥12 rows; BS ≥20 rows (full detail, do NOT collapse liabilities to one row); "
+            "CF ≥7 rows. Currency+Unit line above every table. Bold all subtotals/totals.\n"
+            "- C-1/C-3 Commentary: 3-5 bullets each table; YoY absolute+%; interim vs prior year; "
+            "flag one-offs; forward credit implication MANDATORY.\n"
+            "- C-2/C-4: ≥18 ratio rows; all 4 categories; 3-5 commentary bullets below table.\n"
+            "- C-5 Base Case: ≥3 tables (Key Assumptions + Projected Financials + DSCR per year). "
+            "Conclusion: min DSCR + cash adequacy + serviceability.\n"
+            "- C-6 Worse Case: ≥2 tables (Stress Assumptions + Stressed Summary). "
+            "Conclusion: DSCR>1.0x? Cash trough? Compare to historical worst.\n"
+            "- C-8 Sensitivity: EXACTLY 6 columns; ALL standard variables (Freight/Interest/CAPEX/FX/Delay).\n"
+            "- N/M for denominator ≤0; N/A for interim annualization; 'Net Cash' for negative net debt.\n"
+            "- ZERO credit judgments ('satisfactory', 'manageable', 'well-positioned' FORBIDDEN).\n"
+            "- NEVER use source-referencing phrases. State financial facts directly.\n\n"
+            "Now output ONLY the missing sub-sections. "
+            "No introduction, no explanation. Start directly with the first missing sub-section."
+        )
+
     if section_no == 5:
         return (
             f"The following sub-sections are MISSING from the already-generated §5 output:\n"
@@ -702,6 +881,7 @@ async def fill_missing_tables(
     # §4: C-9 Peer Comparison table + Banking Relationships can be verbose → 8 192 tokens
     # §5: C-3 Amortisation Schedule (up to 24 rows) + C-6 Guarantor table → 10 240 tokens
     # §6: C-4 Payment table (11 col, N rows) + C-6 Construction risks (3-5 bullets each) → 10 240 tokens
+    # §7: P&L (≥12 rows) + BS (≥20 rows) + CF (≥7 rows) + ratios + projections → 12 288 tokens
     # others: 8 192 cap
     if section_no == 1:
         max_tokens = 10240
@@ -709,6 +889,8 @@ async def fill_missing_tables(
         max_tokens = 6144
     elif section_no in (4, 5, 6):
         max_tokens = 10240
+    elif section_no == 7:
+        max_tokens = 12288
     else:
         max_tokens = min(CR_SECTION_MAX_TOKENS, 8192)
 

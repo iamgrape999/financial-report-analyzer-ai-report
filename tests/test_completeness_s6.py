@@ -381,9 +381,10 @@ class TestSection6Isolation:
         labels = [l for _, l in result]
         assert "External Ratings" in labels
 
-    def test_sections_7_to_10_unaffected(self):
+    def test_sections_8_to_10_unaffected(self):
         from credit_report.generation.completeness import check_section_completeness
-        for sec in [7, 8, 9, 10]:
+        # §7 now has its own completeness check; verify §8-§10 have none
+        for sec in [8, 9, 10]:
             result = check_section_completeness(sec, FULL_S6_WITH_RG_FM)
             assert result == [], f"§{sec} should have no completeness requirements"
 
