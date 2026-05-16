@@ -653,7 +653,8 @@ class TestSection7Isolation:
     def test_sections_8_to_10_unaffected_by_s7_content(self):
         """§8/§9/§10 check on §7 markdown → no completeness requirements."""
         from credit_report.generation.completeness import check_section_completeness
-        for sec in [8, 9, 10]:
+        # §9 now has its own completeness check; only §8 and §10 have none
+        for sec in [8, 10]:
             result = check_section_completeness(sec, FULL_S7_ALL_CONDITIONALS)
             assert result == [], f"§{sec} should have no completeness requirements"
 

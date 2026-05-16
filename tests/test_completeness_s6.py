@@ -384,7 +384,8 @@ class TestSection6Isolation:
     def test_sections_8_to_10_unaffected(self):
         from credit_report.generation.completeness import check_section_completeness
         # §7 now has its own completeness check; verify §8-§10 have none
-        for sec in [8, 9, 10]:
+        # §9 now has its own completeness check; only §8 and §10 have none
+        for sec in [8, 10]:
             result = check_section_completeness(sec, FULL_S6_WITH_RG_FM)
             assert result == [], f"§{sec} should have no completeness requirements"
 
