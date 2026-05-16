@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +12,11 @@ from credit_report.fact_store.models import FactConflict
 from credit_report.schemas import ConflictResponse, ResolveConflictRequest
 from credit_report.security.auth import get_current_user, require_analyst
 from credit_report.security.models import User
+
+
+class MarkUnresolvedResponse(BaseModel):
+    status: str
+    conflict_id: str
 
 router = APIRouter(prefix="/reports/{report_id}/facts/conflicts", tags=["conflicts"])
 
@@ -86,7 +92,7 @@ async def resolve_conflict(
     return resolved
 
 
-@router.post("/{conflict_id}/mark-unresolved")
+@router.post("/{conflict_id}/mark-unresolved", response_model=MarkUnresolvedResponse)
 async def mark_unresolved(
     report_id: str,
     conflict_id: str,

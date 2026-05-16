@@ -27,6 +27,8 @@ GEMINI_OCR_MODEL: str = os.getenv("GEMINI_OCR_MODEL", GEMINI_MODEL)
 GEMINI_ETL_MODEL: str = os.getenv("GEMINI_ETL_MODEL", GEMINI_MODEL)
 CR_SECTION_MAX_TOKENS: int = int(os.getenv("CR_SECTION_MAX_TOKENS", "8192"))
 CR_MAX_CONCURRENT_GENERATIONS: int = int(os.getenv("CR_MAX_CONCURRENT_GENERATIONS", "2"))
+# Per-user per-day token budget for the analyst baseline role (default 4M ≈ 8 full reports).
+# Reviewer/approver roles get 2×; admin gets 5×. See generation/quota.py _ROLE_LIMITS.
 DAILY_TOKEN_LIMIT: int = int(os.getenv("DAILY_TOKEN_LIMIT", "4000000"))
 LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "180"))
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -306,26 +307,44 @@ async def test_recall_report_returns_to_draft(db):
 
 # ── 5. PDF export guard ───────────────────────────────────────────────────────
 
-def test_export_pdf_503_when_weasyprint_missing():
-    """export_pdf raises 503 when weasyprint is not installed."""
-    import importlib
+@pytest.mark.asyncio
+async def test_export_pdf_503_when_weasyprint_missing():
+    """export_pdf endpoint returns 503 when weasyprint cannot be imported."""
     import sys
     from unittest.mock import patch
+    from httpx import AsyncClient, ASGITransport
 
-    # Simulate weasyprint not installed
+    os.environ.setdefault("GEMINI_API_KEY", "mock-key-for-testing")
+    os.environ.setdefault("ADMIN_EMAIL", "admin@example.com")
+    os.environ.setdefault("ADMIN_PASSWORD", "admin123")
+    os.environ.setdefault("ENVIRONMENT", "development")
+    os.environ.setdefault("AUTO_CREATE_TABLES", "true")
+
+    from main import app
+
+    # Remove cached weasyprint from sys.modules so the lazy import inside export_pdf
+    # will re-execute, then patch the module slot to None to simulate absence.
+    sys.modules.pop("weasyprint", None)
     with patch.dict(sys.modules, {"weasyprint": None}):
-        import importlib
-        # We just verify the ImportError path in the endpoint leads to 503
-        # by importing and testing the guard directly
-        try:
-            import weasyprint  # type: ignore
-            can_import = weasyprint is not None
-        except (ImportError, TypeError):
-            can_import = False
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            # Login as admin
+            login_r = await ac.post("/api/credit-report/auth/login",
+                                    data={"username": "admin@example.com", "password": "admin123"})
+            assert login_r.status_code == 200
+            hdrs = {"Authorization": f"Bearer {login_r.json()['access_token']}"}
 
-        # If not available, the endpoint returns 503 — assert the guard logic
-        if not can_import:
-            assert True  # guard works
-        else:
-            # weasyprint IS available — skip assertion, test is informational
-            assert True
+            # Create a report
+            report_r = await ac.post("/api/credit-report/reports",
+                                     json={"industry": "shipping", "report_type": "credit_analysis",
+                                           "borrower_name": "TestCo"},
+                                     headers=hdrs)
+            assert report_r.status_code in (200, 201)
+            rid = report_r.json()["id"]
+
+            # Hit the PDF export endpoint — must return 503, not 500
+            r = await ac.get(f"/api/credit-report/reports/{rid}/export/pdf",
+                             params={"report_id": rid}, headers=hdrs)
+            assert r.status_code == 503, (
+                f"Expected 503 when weasyprint is absent, got {r.status_code}: {r.text}"
+            )
+            assert "weasyprint" in r.json().get("detail", "").lower()
