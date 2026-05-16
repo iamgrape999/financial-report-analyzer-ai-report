@@ -121,6 +121,8 @@ async def upsert_fact(db: AsyncSession, fact_data: dict) -> CanonicalFact:
         existing.source_type = fact_data.get("source_type", existing.source_type)
         existing.source_priority = incoming_priority
         existing.state = fact_data.get("state", existing.state)
+        if fact_data.get("source_evidence_id") is not None:
+            existing.source_evidence_id = fact_data["source_evidence_id"]
         existing.version += 1
         return existing
     else:

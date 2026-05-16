@@ -1719,6 +1719,37 @@ def build_section_prompt(
             + "\n".join(lines)
         )
 
+    # Derive a report-type context hint from the metadata embedded in input_json.
+    # This adapts analytical emphasis (YoY, risk flags, clean-slate) per review type.
+    _REPORT_TYPE_HINTS: dict[str, str] = {
+        "annual_review": (
+            "Report type: **Annual Review** — include YoY comparison for all financial metrics; "
+            "highlight deterioration or improvement trends explicitly."
+        ),
+        "new_deal": (
+            "Report type: **New Deal** — no prior-period comparison required; "
+            "focus on credit merit and structure of the proposed facility."
+        ),
+        "new_deal_and_annual_review": (
+            "Report type: **New Deal & Annual Review** — include YoY comparison AND "
+            "evaluate the proposed new facility against current exposure."
+        ),
+        "watchlist": (
+            "Report type: **Watchlist / Special Mention** — emphasise risk deterioration "
+            "indicators; flag covenant breaches, liquidity stress, and downside scenarios."
+        ),
+        "new_application": (
+            "Report type: **New Application** — no prior-period comparison required; "
+            "assess borrower creditworthiness from scratch."
+        ),
+    }
+    _metadata = input_json.get("metadata") if isinstance(input_json, dict) else None
+    _report_type = (
+        (_metadata.get("report_type") if isinstance(_metadata, dict) else None) or ""
+    ).lower().strip()
+    _rt_hint = _REPORT_TYPE_HINTS.get(_report_type, "")
+    report_type_block = f"\n\n> {_rt_hint}" if _rt_hint else ""
+
     if is_continuation and continuation_resume_token:
         user_prompt = (
             f"{continuation_resume_token}\n\n"
@@ -1728,6 +1759,7 @@ def build_section_prompt(
     else:
         input_text = json.dumps(input_json, ensure_ascii=False, indent=2)
         user_prompt = (
+            f"{report_type_block}\n\n"
             f"{instructions}\n\n"
             f"## Analyst Input Data\n\n```json\n{input_text}\n```"
             f"{calc_block}"
