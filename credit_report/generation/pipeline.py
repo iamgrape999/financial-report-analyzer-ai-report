@@ -54,9 +54,13 @@ from credit_report.config import (
     LLM_TIMEOUT_SECONDS,
     SECTION_HARD_DEPENDENCIES,
 )
-from credit_report.generation.claude_client import generate_section_markdown
+from credit_report.generation.claude_client import (
+    generate_section_markdown,
+    GenerationConfigError,
+    GenerationRateLimitError,
+)
 from credit_report.generation.evidence import retrieve_evidence
-from credit_report.generation.quota import check_quota, record_tokens
+from credit_report.generation.quota import check_quota, reserve_and_record_tokens
 from credit_report.models import SectionInput, SectionOutput
 
 _generation_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_GENERATIONS)
@@ -252,8 +256,8 @@ async def run_section_generation(
                            section_no, report_id, _ast_err)
         # ─────────────────────────────────────────────────────────────────────
 
-        # Record consumption against the user's daily quota
-        await record_tokens(db, actor_user_id, tokens_used)
+        # Record consumption atomically — raises 429 if limit exceeded post-generation
+        await reserve_and_record_tokens(db, actor_user_id, tokens_used, role=actor_role)
 
         await write_event(
             db,
@@ -280,6 +284,45 @@ async def run_section_generation(
             after=timeout_msg,
         )
         raise TimeoutError(timeout_msg) from exc
+    except GenerationRateLimitError as exc:
+        output.status = "error"
+        logger.warning(
+            "run_section_generation: Gemini rate limited section=%d report=%s",
+            section_no, report_id,
+        )
+        await write_event(
+            db,
+            action="section.generation_error",
+            actor_user_id=actor_user_id,
+            actor_role="system",
+            report_id=report_id,
+            target_type="section_output",
+            target_id=f"{report_id}/{section_no}",
+            after="rate_limited",
+        )
+        from fastapi import HTTPException as _HTTPEx
+        raise _HTTPEx(status_code=429, detail=str(exc)) from exc
+    except GenerationConfigError as exc:
+        output.status = "error"
+        logger.error(
+            "run_section_generation: Gemini config/auth error section=%d report=%s",
+            section_no, report_id,
+        )
+        await write_event(
+            db,
+            action="section.generation_error",
+            actor_user_id=actor_user_id,
+            actor_role="system",
+            report_id=report_id,
+            target_type="section_output",
+            target_id=f"{report_id}/{section_no}",
+            after="config_error",
+        )
+        from fastapi import HTTPException as _HTTPEx
+        raise _HTTPEx(
+            status_code=503,
+            detail="AI service not configured correctly — contact your administrator",
+        ) from exc
     except Exception as exc:
         output.status = "error"
         logger.exception("run_section_generation: error section=%d report=%s: %s", section_no, report_id, exc)

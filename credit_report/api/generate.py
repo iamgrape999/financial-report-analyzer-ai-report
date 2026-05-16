@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
+from collections import OrderedDict
 from functools import partial
 from typing import Optional
 
@@ -106,9 +108,50 @@ class GenerateTaskResult(BaseModel):
     detail: Optional[str] = None
 
 
-# In-memory task registry — acceptable for single-instance deployments.
-# Entries are never evicted; memory usage is bounded by restart cadence.
-_generation_tasks: dict[str, dict] = {}
+_TASK_TTL = 3600        # 1 hour
+_TASK_MAXSIZE = 10_000  # cap to prevent unbounded growth on high-traffic instances
+
+
+class _TaskStore:
+    """Bounded in-memory task registry with TTL eviction."""
+
+    def __init__(self, ttl: int = _TASK_TTL, maxsize: int = _TASK_MAXSIZE) -> None:
+        self._data: OrderedDict[str, tuple[dict, float]] = OrderedDict()
+        self._ttl = ttl
+        self._maxsize = maxsize
+
+    def set(self, task_id: str, value: dict) -> None:
+        self._evict()
+        self._data[task_id] = (dict(value), time.monotonic())
+        if len(self._data) > self._maxsize:
+            self._data.popitem(last=False)
+
+    def get(self, task_id: str) -> dict | None:
+        entry = self._data.get(task_id)
+        if entry is None:
+            return None
+        value, ts = entry
+        if time.monotonic() - ts > self._ttl:
+            del self._data[task_id]
+            return None
+        return dict(value)
+
+    def update(self, task_id: str, updates: dict) -> None:
+        entry = self._data.get(task_id)
+        if entry is None:
+            return
+        value, ts = entry
+        value.update(updates)
+        self._data[task_id] = (value, ts)
+
+    def _evict(self) -> None:
+        now = time.monotonic()
+        expired = [k for k, (_, ts) in self._data.items() if now - ts > self._ttl]
+        for k in expired:
+            del self._data[k]
+
+
+_generation_tasks = _TaskStore()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -466,7 +509,7 @@ async def generate_section(
         )
 
     task_id = str(uuid.uuid4())
-    _generation_tasks[task_id] = {"status": "running", "section_no": section_no}
+    _generation_tasks.set(task_id, {"status": "running", "section_no": section_no})
     user_id, user_role = current_user.id, current_user.role
     output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
@@ -497,7 +540,7 @@ async def generate_section(
                     output_language=output_lang,
                 )
                 await bg_db.commit()
-                _generation_tasks[task_id].update({
+                _generation_tasks.update(task_id, {
                     "status": output.status,
                     "tokens_used": output.tokens_used,
                 })
@@ -510,7 +553,7 @@ async def generate_section(
                     await bg_db.rollback()
                 except Exception:
                     pass
-                _generation_tasks[task_id].update({
+                _generation_tasks.update(task_id, {
                     "status": "error",
                     "detail": str(exc)[:500],
                 })
@@ -561,7 +604,7 @@ async def generate_full_report(
         )
 
     task_id = str(uuid.uuid4())
-    _generation_tasks[task_id] = {"status": "running"}
+    _generation_tasks.set(task_id, {"status": "running"})
     user_id, user_role = current_user.id, current_user.role
     full_output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
@@ -582,7 +625,7 @@ async def generate_full_report(
                 )
                 await bg_db.commit()
                 done = sum(1 for v in results.values() if v == "done")
-                _generation_tasks[task_id].update({
+                _generation_tasks.update(task_id, {
                     "status": "done",
                     "sections": {str(k): v for k, v in results.items()},
                 })
@@ -595,7 +638,7 @@ async def generate_full_report(
                     await bg_db.rollback()
                 except Exception:
                     pass
-                _generation_tasks[task_id].update({
+                _generation_tasks.update(task_id, {
                     "status": "error",
                     "detail": str(exc)[:500],
                 })

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from google import genai
@@ -21,6 +22,30 @@ from credit_report.generation.prompt_builder import build_section_prompt
 MAX_CONTINUATION_ROUNDS = 3
 
 logger = logging.getLogger(__name__)
+
+_API_KEY_RE = re.compile(r'AIza[A-Za-z0-9_\-]{35}')
+_BEARER_RE = re.compile(r'Bearer\s+[A-Za-z0-9._\-]{20,}')
+
+
+def _sanitize_error(msg: str) -> str:
+    """Strip API keys and bearer tokens from error strings before logging or raising."""
+    msg = _API_KEY_RE.sub('AIza***REDACTED***', msg)
+    msg = _BEARER_RE.sub('Bearer ***REDACTED***', msg)
+    return msg
+
+
+class GenerationError(Exception):
+    pass
+
+
+class GenerationRateLimitError(GenerationError):
+    """Gemini API rate limit (429) — caller should surface HTTP 429."""
+    retry_after_seconds: int = 60
+
+
+class GenerationConfigError(GenerationError):
+    """API key missing or authentication rejected — caller should surface HTTP 503."""
+    pass
 
 
 async def call_gemini_raw(
@@ -123,6 +148,31 @@ async def generate_section_markdown(
             logger.error(
                 "generate_section_markdown: timeout section=%d round=%d after %ds",
                 section_no, round_no, LLM_TIMEOUT_SECONDS,
+            )
+            raise
+        except Exception as exc:
+            safe = _sanitize_error(str(exc))
+            exc_type = type(exc).__name__
+            if "ResourceExhausted" in exc_type or "429" in safe or "quota" in safe.lower():
+                logger.warning(
+                    "generate_section_markdown: rate limited section=%d round=%d: %s",
+                    section_no, round_no, safe,
+                )
+                raise GenerationRateLimitError(
+                    f"Gemini API rate limit hit for section {section_no}: {safe}"
+                ) from exc
+            if any(k in exc_type for k in ("Unauthenticated", "PermissionDenied")) or \
+               any(k in safe for k in ("401", "403", "API key", "api_key")):
+                logger.error(
+                    "generate_section_markdown: auth error section=%d: %s",
+                    section_no, safe,
+                )
+                raise GenerationConfigError(
+                    f"Gemini API authentication error for section {section_no}: {safe}"
+                ) from exc
+            logger.error(
+                "generate_section_markdown: unexpected error section=%d round=%d: %s",
+                section_no, round_no, safe,
             )
             raise
 

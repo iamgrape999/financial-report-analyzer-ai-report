@@ -359,7 +359,7 @@ async def test_pipeline_generates_all_sections_with_etl_keys(db, section_no):
                new_callable=AsyncMock) as mock_gen, \
          patch("credit_report.generation.pipeline.retrieve_evidence") as mock_ev, \
          patch("credit_report.generation.pipeline.check_quota", new_callable=AsyncMock), \
-         patch("credit_report.generation.pipeline.record_tokens", new_callable=AsyncMock), \
+         patch("credit_report.generation.pipeline.reserve_and_record_tokens", new_callable=AsyncMock), \
          patch("credit_report.audit.events.write_event", new_callable=AsyncMock):
         mock_gen.return_value = (mock_md, 256)
         mock_ev.return_value = []
@@ -528,7 +528,7 @@ async def test_full_etl_import_generate_chain_all_sections(db):
                new_callable=AsyncMock) as mock_gen, \
          patch("credit_report.generation.pipeline.retrieve_evidence") as mock_ev, \
          patch("credit_report.generation.pipeline.check_quota", new_callable=AsyncMock), \
-         patch("credit_report.generation.pipeline.record_tokens", new_callable=AsyncMock), \
+         patch("credit_report.generation.pipeline.reserve_and_record_tokens", new_callable=AsyncMock), \
          patch("credit_report.audit.events.write_event", new_callable=AsyncMock):
         mock_gen.return_value = (mock_md, 128)
         mock_ev.return_value = []

@@ -261,6 +261,69 @@ async def auth_status(db: AsyncSession = Depends(get_db)):
     }
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@router.post("/change-password", status_code=200)
+async def change_password(
+    payload: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Allow any authenticated user to change their own password."""
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect.",
+        )
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters.")
+    current_user.hashed_password = hash_password(payload.new_password)
+    await write_event(
+        db,
+        action="auth.password_change",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        target_type="user",
+        target_id=current_user.id,
+    )
+    logger.info("change_password: success user=%s", current_user.id)
+    return {"message": "Password changed successfully."}
+
+
+@router.post("/users/{user_id}/reset-password", status_code=200)
+async def reset_user_password(
+    user_id: str,
+    payload: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Admin-only: reset any user's password without knowing the current one."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters.")
+    target.hashed_password = hash_password(payload.new_password)
+    await write_event(
+        db,
+        action="auth.password_reset",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        target_type="user",
+        target_id=user_id,
+    )
+    logger.info("reset_user_password: user=%s reset by admin=%s", user_id, current_user.id)
+    return {"message": f"Password reset for user {user_id}."}
+
+
 class SetupRequest(BaseModel):
     email: str
     password: str

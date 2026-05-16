@@ -80,7 +80,7 @@ def _mock_quota():
 
 
 def _mock_record():
-    return patch("credit_report.generation.pipeline.record_tokens", new=AsyncMock(return_value=None))
+    return patch("credit_report.generation.pipeline.reserve_and_record_tokens", new=AsyncMock(return_value=None))
 
 
 def _mock_fill(text, tokens=800):

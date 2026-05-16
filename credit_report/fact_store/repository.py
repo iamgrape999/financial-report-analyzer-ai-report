@@ -307,8 +307,18 @@ async def update_fact_value(
 
     await _mark_dependents_stale(db, fact_id)
     await _mark_calc_results_stale(db, fact.report_id, fact_id)
+    await _mark_bound_blocks_stale(db, fact_id)
 
     return fact
+
+
+async def _mark_bound_blocks_stale(db: AsyncSession, fact_id: str) -> None:
+    """Mark ReportBlock rows stale when a bound fact is overridden."""
+    try:
+        from credit_report.block_ast.repository import mark_blocks_stale_by_fact
+        await mark_blocks_stale_by_fact(db, fact_id)
+    except Exception as _e:
+        logger.warning("_mark_bound_blocks_stale: failed for fact=%s: %s", fact_id, _e)
 
 
 async def _mark_dependents_stale(db: AsyncSession, fact_id: str) -> None:

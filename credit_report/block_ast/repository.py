@@ -125,3 +125,15 @@ async def mark_section_blocks_stale(db: AsyncSession, report_id: str, section_no
     blocks = await get_blocks_for_section(db, report_id, section_no)
     for b in blocks:
         b.is_stale = True
+
+
+async def mark_blocks_stale_by_fact(db: AsyncSession, fact_id: str) -> None:
+    """Mark all ReportBlock rows stale whose TableCells are bound to the given fact."""
+    result = await db.execute(
+        select(TableCell.block_id).where(TableCell.bound_fact_id == fact_id).distinct()
+    )
+    block_ids = [row[0] for row in result.all()]
+    for block_id in block_ids:
+        block = await db.get(ReportBlock, block_id)
+        if block:
+            block.is_stale = True

@@ -125,7 +125,7 @@ def _mock_quota():
 
 def _mock_record():
     """No-op token recording."""
-    return patch("credit_report.generation.pipeline.record_tokens", new=AsyncMock(return_value=None))
+    return patch("credit_report.generation.pipeline.reserve_and_record_tokens", new=AsyncMock(return_value=None))
 
 
 # ── A. AST save failure must not abort section generation ───────────────────
@@ -268,9 +268,9 @@ class TestSessionIsolation:
 
     async def test_record_tokens_succeeds_after_ast_failure(self, db):
         """
-        record_tokens is called on the same session after the AST block.
-        If the session is aborted by the AST error, record_tokens raises.
-        This test verifies the session is clean.
+        reserve_and_record_tokens is called on the same session after the AST block.
+        If the session is aborted by the AST error, it would raise.
+        This test verifies the session is clean after isolated AST failure.
         """
         from credit_report.generation.pipeline import run_section_generation
         from credit_report.models import Report
@@ -281,20 +281,20 @@ class TestSessionIsolation:
 
         tokens_recorded = []
 
-        async def _capture_record_tokens(db_session, user_id, tokens):
+        async def _capture_record_tokens(db_session, user_id, tokens, role="analyst"):
             tokens_recorded.append(tokens)
 
         error = SQLAlchemyError("varchar overflow")
         with _mock_generate(tokens=999), _mock_evidence(), _mock_quota(), \
-             patch("credit_report.generation.pipeline.record_tokens",
+             patch("credit_report.generation.pipeline.reserve_and_record_tokens",
                    new=AsyncMock(side_effect=_capture_record_tokens)), \
              patch("credit_report.block_ast.repository.save_blocks", side_effect=error):
             output = await run_section_generation(db, rid, section_no=2, actor_user_id=_uid())
 
         assert output.status == "done"
         assert tokens_recorded == [999], (
-            "record_tokens was not called after AST failure — "
-            "session was in aborted state or the function raised before reaching record_tokens"
+            "reserve_and_record_tokens was not called after AST failure — "
+            "session was in aborted state or the function raised before reaching reserve_and_record_tokens"
         )
 
 

@@ -412,7 +412,7 @@ async def test_etl_save_generate_chain_section(db, sec_no):
     with (
         patch("google.genai.Client", return_value=mock_client),
         patch("credit_report.config.GEMINI_API_KEY", "mock-key"),
-        patch("credit_report.generation.pipeline.record_tokens", new=AsyncMock()),
+        patch("credit_report.generation.pipeline.reserve_and_record_tokens", new=AsyncMock()),
         patch("credit_report.generation.pipeline.write_event", new=AsyncMock()),
     ):
         await run_section_generation(
@@ -519,7 +519,7 @@ async def test_full_ios_etl_chain_all_sections(db):
     with (
         patch("google.genai.Client", return_value=mock_client),
         patch("credit_report.config.GEMINI_API_KEY", "mock-key"),
-        patch("credit_report.generation.pipeline.record_tokens", new=AsyncMock()),
+        patch("credit_report.generation.pipeline.reserve_and_record_tokens", new=AsyncMock()),
         patch("credit_report.generation.pipeline.write_event", new=AsyncMock()),
     ):
         for sec in range(1, 11):

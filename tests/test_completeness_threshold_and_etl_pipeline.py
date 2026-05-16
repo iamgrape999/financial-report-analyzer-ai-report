@@ -510,7 +510,7 @@ async def test_pipeline_generates_with_zero_completeness(db, sec_no):
         patch("google.genai.Client", return_value=mock_client),
         patch("credit_report.config.GEMINI_API_KEY", "mock-key"),
         patch("credit_report.api.reports.write_event", new=AsyncMock()),
-        patch("credit_report.generation.pipeline.record_tokens", new=AsyncMock()),
+        patch("credit_report.generation.pipeline.reserve_and_record_tokens", new=AsyncMock()),
         patch("credit_report.generation.pipeline.write_event", new=AsyncMock()),
     ):
         await run_section_generation(
@@ -573,7 +573,7 @@ async def test_pipeline_generates_with_50_percent_completeness(db, sec_no):
         patch("google.genai.Client", return_value=mock_client),
         patch("credit_report.config.GEMINI_API_KEY", "mock-key"),
         patch("credit_report.api.reports.write_event", new=AsyncMock()),
-        patch("credit_report.generation.pipeline.record_tokens", new=AsyncMock()),
+        patch("credit_report.generation.pipeline.reserve_and_record_tokens", new=AsyncMock()),
         patch("credit_report.generation.pipeline.write_event", new=AsyncMock()),
     ):
         await run_section_generation(
@@ -704,7 +704,7 @@ async def test_full_etl_save_generate_chain_partial_completeness(db):
         patch("google.genai.Client", return_value=mock_client),
         patch("credit_report.config.GEMINI_API_KEY", "mock-key"),
         patch("credit_report.api.reports.write_event", new=AsyncMock()),
-        patch("credit_report.generation.pipeline.record_tokens", new=AsyncMock()),
+        patch("credit_report.generation.pipeline.reserve_and_record_tokens", new=AsyncMock()),
         patch("credit_report.generation.pipeline.write_event", new=AsyncMock()),
     ):
         for sec in range(1, 11):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -9,6 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.config import DAILY_TOKEN_LIMIT
 from credit_report.generation.models import UserTokenQuota
+
+# Per-user locks prevent concurrent requests from both passing check_quota()
+# before either records tokens (TOCTOU race condition).
+_quota_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_quota_lock(user_id: str) -> asyncio.Lock:
+    if user_id not in _quota_locks:
+        _quota_locks[user_id] = asyncio.Lock()
+    return _quota_locks[user_id]
 
 # Per-role daily token limits — higher-trust roles get more headroom.
 # DAILY_TOKEN_LIMIT (env var) sets the analyst baseline; others scale from it.
@@ -68,3 +79,45 @@ async def record_tokens(db: AsyncSession, user_id: str, tokens: int) -> None:
             tokens_used=tokens,
         ))
     await db.flush()
+
+
+async def reserve_and_record_tokens(
+    db: AsyncSession, user_id: str, tokens: int, role: str = "analyst"
+) -> None:
+    """Atomically check quota and record tokens consumed after generation.
+
+    Holds a per-user asyncio.Lock so concurrent requests within the same process
+    cannot both pass the quota check before either records (TOCTOU fix).
+    Raises HTTP 429 if recording these tokens would exceed the daily limit.
+    """
+    if tokens <= 0:
+        return
+    async with _get_quota_lock(user_id):
+        limit = _limit_for_role(role)
+        today = datetime.now(timezone.utc).date()
+        result = await db.execute(
+            select(UserTokenQuota).where(
+                UserTokenQuota.user_id == user_id,
+                UserTokenQuota.quota_date == today,
+            )
+        )
+        quota = result.scalar_one_or_none()
+        used = quota.tokens_used if quota else 0
+        if used + tokens > limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Daily token limit of {limit:,} tokens exceeded "
+                    f"(used {used:,} + {tokens:,} this call). Resets at midnight UTC."
+                ),
+            )
+        if quota:
+            quota.tokens_used += tokens
+        else:
+            db.add(UserTokenQuota(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                quota_date=today,
+                tokens_used=tokens,
+            ))
+        await db.flush()
