@@ -1179,3 +1179,300 @@ class TestOptimisticLocking:
         assert r2.status_code in (200, 409), (
             f"Block PATCH returned unexpected status: {r2.status_code} {r2.text}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Password Change Endpoints (P2-⑤)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPasswordChange:
+    """POST /auth/change-password and POST /auth/users/{id}/reset-password."""
+
+    async def test_change_password_success(self, ac, admin_hdrs):
+        email = f"pwtest_{uuid.uuid4().hex[:8]}@example.com"
+        await ac.post(f"{AUTH}/register",
+                      json={"email": email, "password": "OldPass1!", "role": "analyst"},
+                      headers=admin_hdrs)
+        tokens = await _login(ac, email, "OldPass1!")
+        h = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        r = await ac.post(f"{AUTH}/change-password",
+                          json={"current_password": "OldPass1!", "new_password": "NewPass2!"},
+                          headers=h)
+        assert r.status_code == 200, r.text
+        assert "changed" in r.json().get("message", "").lower()
+
+    async def test_change_password_wrong_current_returns_401(self, ac, admin_hdrs):
+        email = f"pwwrong_{uuid.uuid4().hex[:8]}@example.com"
+        await ac.post(f"{AUTH}/register",
+                      json={"email": email, "password": "Correct1!", "role": "analyst"},
+                      headers=admin_hdrs)
+        tokens = await _login(ac, email, "Correct1!")
+        h = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        r = await ac.post(f"{AUTH}/change-password",
+                          json={"current_password": "WrongPass!", "new_password": "NewPass2!"},
+                          headers=h)
+        assert r.status_code == 401, f"Expected 401 for wrong current password, got {r.status_code}"
+
+    async def test_change_password_too_short_returns_400(self, ac, admin_hdrs):
+        email = f"pwshort_{uuid.uuid4().hex[:8]}@example.com"
+        await ac.post(f"{AUTH}/register",
+                      json={"email": email, "password": "Correct1!", "role": "analyst"},
+                      headers=admin_hdrs)
+        tokens = await _login(ac, email, "Correct1!")
+        h = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        r = await ac.post(f"{AUTH}/change-password",
+                          json={"current_password": "Correct1!", "new_password": "short"},
+                          headers=h)
+        assert r.status_code == 400, f"Expected 400 for short password, got {r.status_code}"
+
+    async def test_new_password_works_after_change(self, ac, admin_hdrs):
+        email = f"pwlogin_{uuid.uuid4().hex[:8]}@example.com"
+        await ac.post(f"{AUTH}/register",
+                      json={"email": email, "password": "Initial1!", "role": "analyst"},
+                      headers=admin_hdrs)
+        tokens = await _login(ac, email, "Initial1!")
+        h = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        await ac.post(f"{AUTH}/change-password",
+                      json={"current_password": "Initial1!", "new_password": "Updated1!"},
+                      headers=h)
+
+        # Old password should fail
+        r_old = await ac.post(f"{AUTH}/login",
+                               data={"username": email, "password": "Initial1!"})
+        assert r_old.status_code == 401, "Old password should be rejected after change"
+
+        # New password should work
+        r_new = await ac.post(f"{AUTH}/login",
+                               data={"username": email, "password": "Updated1!"})
+        assert r_new.status_code == 200, "New password should authenticate successfully"
+
+    async def test_admin_reset_password_succeeds(self, ac, admin_hdrs):
+        email = f"pwreset_{uuid.uuid4().hex[:8]}@example.com"
+        reg = await ac.post(f"{AUTH}/register",
+                             json={"email": email, "password": "OldPass1!", "role": "analyst"},
+                             headers=admin_hdrs)
+        user_id = reg.json()["id"]
+
+        r = await ac.post(f"{AUTH}/users/{user_id}/reset-password",
+                          json={"new_password": "AdminSet1!"},
+                          headers=admin_hdrs)
+        assert r.status_code == 200, r.text
+
+        # Should now login with reset password
+        r2 = await ac.post(f"{AUTH}/login",
+                            data={"username": email, "password": "AdminSet1!"})
+        assert r2.status_code == 200, "Reset password should allow login"
+
+    async def test_analyst_cannot_reset_other_users_password(self, ac, admin_hdrs):
+        email_a = f"analyst_a_{uuid.uuid4().hex[:8]}@example.com"
+        email_b = f"analyst_b_{uuid.uuid4().hex[:8]}@example.com"
+        await ac.post(f"{AUTH}/register",
+                      json={"email": email_a, "password": "Pass1234!", "role": "analyst"},
+                      headers=admin_hdrs)
+        reg_b = await ac.post(f"{AUTH}/register",
+                               json={"email": email_b, "password": "Pass1234!", "role": "analyst"},
+                               headers=admin_hdrs)
+        user_b_id = reg_b.json()["id"]
+
+        tokens_a = await _login(ac, email_a)
+        h_a = {"Authorization": f"Bearer {tokens_a['access_token']}"}
+
+        r = await ac.post(f"{AUTH}/users/{user_b_id}/reset-password",
+                          json={"new_password": "Hacked123!"},
+                          headers=h_a)
+        assert r.status_code == 403, f"Non-admin should get 403, got {r.status_code}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Token Quota Atomic Reserve (P0-①)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestQuotaAtomicity:
+    """reserve_and_record_tokens raises 429 when limit is already exhausted."""
+
+    async def test_reserve_raises_429_when_limit_reached(self):
+        from credit_report.generation.quota import reserve_and_record_tokens, _ROLE_LIMITS
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.generation.models import UserTokenQuota
+        from datetime import datetime, timezone
+        import uuid as _uuid
+
+        user_id = str(_uuid.uuid4())
+        limit = _ROLE_LIMITS["analyst"]
+
+        async with AsyncSessionLocal() as db:
+            # Pre-seed quota at exactly the limit
+            db.add(UserTokenQuota(
+                id=str(_uuid.uuid4()),
+                user_id=user_id,
+                quota_date=datetime.now(timezone.utc).date(),
+                tokens_used=limit,
+            ))
+            await db.flush()
+
+            from fastapi import HTTPException
+            try:
+                await reserve_and_record_tokens(db, user_id, 1, role="analyst")
+                assert False, "Should have raised HTTPException 429"
+            except HTTPException as exc:
+                assert exc.status_code == 429, f"Expected 429, got {exc.status_code}"
+            finally:
+                await db.rollback()
+
+    async def test_reserve_records_tokens_when_under_limit(self):
+        from credit_report.generation.quota import reserve_and_record_tokens
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.generation.models import UserTokenQuota
+        from sqlalchemy import select
+        from datetime import datetime, timezone
+        import uuid as _uuid
+
+        user_id = str(_uuid.uuid4())
+
+        async with AsyncSessionLocal() as db:
+            await reserve_and_record_tokens(db, user_id, 1000, role="analyst")
+            result = await db.execute(
+                select(UserTokenQuota).where(
+                    UserTokenQuota.user_id == user_id,
+                    UserTokenQuota.quota_date == datetime.now(timezone.utc).date(),
+                )
+            )
+            quota = result.scalar_one_or_none()
+            assert quota is not None, "UserTokenQuota row should have been created"
+            assert quota.tokens_used == 1000, f"Expected 1000 tokens, got {quota.tokens_used}"
+            await db.rollback()
+
+    async def test_reserve_is_cumulative(self):
+        from credit_report.generation.quota import reserve_and_record_tokens
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.generation.models import UserTokenQuota
+        from sqlalchemy import select
+        from datetime import datetime, timezone
+        import uuid as _uuid
+
+        user_id = str(_uuid.uuid4())
+
+        async with AsyncSessionLocal() as db:
+            await reserve_and_record_tokens(db, user_id, 500, role="analyst")
+            await reserve_and_record_tokens(db, user_id, 300, role="analyst")
+            result = await db.execute(
+                select(UserTokenQuota).where(
+                    UserTokenQuota.user_id == user_id,
+                    UserTokenQuota.quota_date == datetime.now(timezone.utc).date(),
+                )
+            )
+            quota = result.scalar_one_or_none()
+            assert quota is not None
+            assert quota.tokens_used == 800, f"Expected 800 cumulative tokens, got {quota.tokens_used}"
+            await db.rollback()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Report Type Prompt Injection (P2-⑥)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestReportTypePrompt:
+    """build_section_prompt() injects report_type context hint."""
+
+    def test_annual_review_hint_injected(self):
+        from credit_report.generation.prompt_builder import build_section_prompt
+        _, user = build_section_prompt(
+            section_no=7,
+            input_json={"metadata": {"report_type": "annual_review"}},
+            evidence_chunks=[],
+        )
+        assert "Annual Review" in user
+        assert "YoY" in user
+
+    def test_watchlist_hint_injected(self):
+        from credit_report.generation.prompt_builder import build_section_prompt
+        _, user = build_section_prompt(
+            section_no=2,
+            input_json={"metadata": {"report_type": "watchlist"}},
+            evidence_chunks=[],
+        )
+        assert "Watchlist" in user
+        assert "deterioration" in user.lower()
+
+    def test_new_deal_hint_injected(self):
+        from credit_report.generation.prompt_builder import build_section_prompt
+        _, user = build_section_prompt(
+            section_no=1,
+            input_json={"metadata": {"report_type": "new_deal"}},
+            evidence_chunks=[],
+        )
+        assert "New Deal" in user
+
+    def test_no_hint_when_type_absent(self):
+        from credit_report.generation.prompt_builder import build_section_prompt
+        _, user = build_section_prompt(
+            section_no=1,
+            input_json={},
+            evidence_chunks=[],
+        )
+        assert "Report type:" not in user
+
+    def test_unknown_type_no_hint(self):
+        from credit_report.generation.prompt_builder import build_section_prompt
+        _, user = build_section_prompt(
+            section_no=1,
+            input_json={"metadata": {"report_type": "unknown_type_xyz"}},
+            evidence_chunks=[],
+        )
+        assert "Report type:" not in user
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Source Evidence Re-attribution (P2-⑦)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestSourceEvidenceAttribution:
+    """upsert_fact() UPDATE branch updates source_evidence_id when re-uploading."""
+
+    async def test_source_evidence_id_updated_on_reupsert(self):
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.fact_store.repository import upsert_fact
+        import uuid as _uuid
+
+        report_id = str(_uuid.uuid4())
+        doc_id_1 = str(_uuid.uuid4())
+        doc_id_2 = str(_uuid.uuid4())
+
+        async with AsyncSessionLocal() as db:
+            # Initial insert with first document
+            fact1 = await upsert_fact(db, {
+                "report_id": report_id,
+                "metric_name": "revenue",
+                "entity": "TestCo",
+                "period": "FY2024",
+                "value": 1000.0,
+                "value_text": "1,000m",
+                "source_type": "etl",
+                "source_evidence_id": doc_id_1,
+            })
+            await db.flush()
+            assert fact1.source_evidence_id == doc_id_1
+
+            # Re-upsert from a newer document version
+            fact2 = await upsert_fact(db, {
+                "report_id": report_id,
+                "metric_name": "revenue",
+                "entity": "TestCo",
+                "period": "FY2024",
+                "value": 1050.0,
+                "value_text": "1,050m",
+                "source_type": "etl",
+                "source_evidence_id": doc_id_2,
+            })
+            await db.flush()
+
+            assert fact2.id == fact1.id, "Should be same fact row (upsert)"
+            assert fact2.source_evidence_id == doc_id_2, (
+                f"source_evidence_id should be updated to doc_id_2, "
+                f"got {fact2.source_evidence_id}"
+            )
+            await db.rollback()
