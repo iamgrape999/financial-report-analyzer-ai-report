@@ -131,7 +131,7 @@ async def export_docx(
     doc.save(buf)
     buf.seek(0)
 
-    safe_name = re.sub(r"[^\w\-]", "_", report.borrower_name or report_id)[:40]
+    safe_name = re.sub(r"[^a-zA-Z0-9\-_]", "_",report.borrower_name or report_id)[:40]
     filename = f"credit_report_{safe_name}.docx"
     logger.info("export_docx: streaming filename=%r sections=%d report=%s user=%s", filename, len(outputs), report_id, current_user.id)
 
@@ -174,14 +174,24 @@ p { margin: 6px 0; }
 """
 
 
+def _sanitize_html_in_markdown(md_text: str) -> str:
+    """Escape raw HTML tags embedded in markdown to prevent XSS in the PDF output."""
+    return re.sub(r"<([^>]+)>", lambda m: f"&lt;{m.group(1)}&gt;", md_text)
+
+
 def _md_to_html(md_text: str) -> str:
-    """Convert Markdown to HTML, using the `markdown` library if available."""
+    """Convert Markdown to HTML.
+
+    Raw HTML tags in the input are escaped first so that AI-generated markdown
+    cannot introduce XSS payloads into the weasyprint PDF document.
+    """
+    safe_text = _sanitize_html_in_markdown(md_text)
     try:
         import markdown as md_lib
-        return md_lib.markdown(md_text, extensions=["tables", "fenced_code"])
+        return md_lib.markdown(safe_text, extensions=["tables", "fenced_code"])
     except ImportError:
-        # Basic regex fallback
-        t = re.sub(r"^#{1,6} (.+)$", lambda m: f"<h{len(m.group(0).split()[0])}>{m.group(1)}</h{len(m.group(0).split()[0])}>", md_text, flags=re.MULTILINE)
+        # Fallback regex — input is already HTML-sanitised above.
+        t = re.sub(r"^(#{1,6}) (.+)$", lambda m: f"<h{len(m.group(1))}>{m.group(2)}</h{len(m.group(1))}>", safe_text, flags=re.MULTILINE)
         t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
         t = re.sub(r"\*(.+?)\*", r"<em>\1</em>", t)
         return "<p>" + t.replace("\n\n", "</p><p>") + "</p>"
@@ -243,7 +253,7 @@ async def export_pdf(
         lambda: HTML(string=full_html).write_pdf(stylesheets=[CSS(string=_PDF_CSS)])
     )
 
-    safe_name = re.sub(r"[^\w\-]", "_", borrower)[:40]
+    safe_name = re.sub(r"[^a-zA-Z0-9\-_]", "_",borrower)[:40]
     filename = f"credit_report_{safe_name}.pdf"
     logger.info(
         "export_pdf: generated filename=%r sections=%d bytes=%d report=%s user=%s",
@@ -328,7 +338,9 @@ def _render_table(doc, lines: list[str]):
 
     for r_idx, row_vals in enumerate(rows):
         row_cells = table.rows[r_idx + 1].cells
-        for c_idx, val in enumerate(row_vals):
+        # Pad short rows so every cell is written; truncate overlong rows silently.
+        padded = list(row_vals) + [""] * max(0, len(headers) - len(row_vals))
+        for c_idx, val in enumerate(padded[:len(headers)]):
             if c_idx < len(row_cells):
                 row_cells[c_idx].text = _strip_inline(val)
 

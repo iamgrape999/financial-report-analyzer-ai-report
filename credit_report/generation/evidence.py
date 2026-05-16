@@ -417,11 +417,14 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
                 continue
             parts.append(f"\n## Sheet: {sheet_name}\n")
             headers = [str(c) if c is not None else "" for c in rows[0]]
+            n_cols = len(headers)
             parts.append("| " + " | ".join(headers) + " |")
-            parts.append("| " + " | ".join(["---"] * len(headers)) + " |")
-            for row in rows[1:50]:   # cap at 50 rows per sheet
-                cells = [str(c) if c is not None else "" for c in row]
-                parts.append("| " + " | ".join(cells) + " |")
+            parts.append("| " + " | ".join(["---"] * n_cols) + " |")
+            for row in rows[1:51]:   # cap at 50 data rows per sheet
+                raw = [str(c) if c is not None else "" for c in row]
+                # Pad/truncate to match header width so the markdown table stays valid.
+                padded = (raw + [""] * n_cols)[:n_cols]
+                parts.append("| " + " | ".join(padded) + " |")
         wb.close()
         return "\n".join(parts)
     except Exception as e:
@@ -487,9 +490,15 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
     elif ext in ("tiff", "tif"):
         text = extract_text_from_image(file_bytes, "image/tiff")
         fmt = "tiff"
-    elif ext in ("xlsx", "xls"):
+    elif ext == "xlsx":
         text = _extract_text_from_xlsx(file_bytes)
-        fmt = ext
+        fmt = "xlsx"
+    elif ext == "xls":
+        # openpyxl only supports .xlsx (Office Open XML); legacy .xls is unsupported.
+        # Return a diagnostic string so ETL knows the file was received but unreadable.
+        logger.warning("[OCR] .xls file uploaded (%r) — openpyxl only reads .xlsx; extraction skipped", filename)
+        text = "[XLS_UNSUPPORTED: re-save as .xlsx to enable extraction]"
+        fmt = "xls"
     else:
         logger.info("[OCR] unknown extension %r — trying pdf then docx", ext)
         text = extract_text_from_pdf(file_bytes)
