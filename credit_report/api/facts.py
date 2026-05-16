@@ -17,10 +17,21 @@ from credit_report.schemas import (
     FactUpdateRequest,
     ResolveConflictRequest,
 )
+from credit_report.models import Report
 from credit_report.security.auth import get_current_user, require_analyst, require_reviewer
 from credit_report.security.models import User
 
 router = APIRouter(prefix="/reports/{report_id}/facts", tags=["facts"])
+
+
+async def _assert_report_access(db: AsyncSession, report_id: str, current_user: User) -> None:
+    """Raise 404/403 if the user cannot read this report's facts."""
+    result = await db.execute(select(Report).where(Report.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if current_user.role != "admin" and report.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
 
 @router.get("", response_model=list[FactResponse])
@@ -30,6 +41,7 @@ async def list_facts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _assert_report_access(db, report_id, current_user)
     return await repo.get_facts_for_report(db, report_id, state_filter=state)
 
 

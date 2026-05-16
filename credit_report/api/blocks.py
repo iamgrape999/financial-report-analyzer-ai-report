@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from credit_report.audit.events import write_event
 from credit_report.database import get_db
 from credit_report.block_ast import repository as block_repo
 from credit_report.block_ast.models import ReportBlock, TableCell
@@ -237,6 +238,16 @@ async def validate_block(
     block.validation_status = "passed"
     await db.commit()
     await db.refresh(block)
+    await write_event(
+        db,
+        action="block.validated",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="block",
+        target_id=block_id,
+        after="validation_status=passed",
+    )
     logger.info("validate_block: block=%s user=%s", block_id, current_user.id)
     return {"block_id": block_id, "validation_status": "passed", "version": block.version}
 

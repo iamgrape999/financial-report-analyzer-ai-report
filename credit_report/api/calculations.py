@@ -130,7 +130,9 @@ async def list_fx_rates(
     current_user=Depends(get_current_user),
 ):
     result = await db.execute(
-        select(FXRate).where(FXRate.report_id == report_id).order_by(FXRate.created_at.desc())
+        select(FXRate)
+        .where(FXRate.report_id == report_id, FXRate.is_stale == False)
+        .order_by(FXRate.created_at.desc())
     )
     return list(result.scalars().all())
 

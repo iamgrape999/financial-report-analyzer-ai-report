@@ -112,6 +112,8 @@ async def mark_unresolved(
     conflict.status = "open"
     conflict.chosen_fact_id = None
     conflict.resolution_reason = None
+    conflict.resolved_by = None
+    conflict.resolved_at = None
     await write_event(
         db,
         action="conflict.mark_unresolved",
