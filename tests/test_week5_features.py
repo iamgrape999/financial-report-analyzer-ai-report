@@ -155,31 +155,35 @@ async def test_calc_block_appears_in_prompt():
 
 @pytest.mark.asyncio
 async def test_generation_task_status_lifecycle():
-    """_generation_tasks dict transitions: running → done after background task completes."""
+    """_TaskStore transitions: running → done after background task completes."""
     from credit_report.api.generate import _generation_tasks
 
     task_id = str(uuid.uuid4())
-    _generation_tasks[task_id] = {"status": "running", "section_no": 3}
+    _generation_tasks.set(task_id, {"status": "running", "section_no": 3})
 
     # Simulate background completion
-    _generation_tasks[task_id].update({"status": "done", "tokens_used": 1200})
+    _generation_tasks.update(task_id, {"status": "done", "tokens_used": 1200})
 
-    assert _generation_tasks[task_id]["status"] == "done"
-    assert _generation_tasks[task_id]["tokens_used"] == 1200
+    task = _generation_tasks.get(task_id)
+    assert task is not None
+    assert task["status"] == "done"
+    assert task["tokens_used"] == 1200
 
 
 @pytest.mark.asyncio
 async def test_generation_task_error_lifecycle():
-    """_generation_tasks transitions to error state with detail message."""
+    """_TaskStore transitions to error state with detail message."""
     from credit_report.api.generate import _generation_tasks
 
     task_id = str(uuid.uuid4())
-    _generation_tasks[task_id] = {"status": "running", "section_no": 5}
+    _generation_tasks.set(task_id, {"status": "running", "section_no": 5})
 
-    _generation_tasks[task_id].update({"status": "error", "detail": "LLM timeout"})
+    _generation_tasks.update(task_id, {"status": "error", "detail": "LLM timeout"})
 
-    assert _generation_tasks[task_id]["status"] == "error"
-    assert "timeout" in _generation_tasks[task_id]["detail"]
+    task = _generation_tasks.get(task_id)
+    assert task is not None
+    assert task["status"] == "error"
+    assert "timeout" in task["detail"]
 
 
 # ── 4. Report status transitions ─────────────────────────────────────────────
