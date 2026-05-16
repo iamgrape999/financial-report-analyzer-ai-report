@@ -320,9 +320,16 @@ async def get_section_input(
     if not si:
         raise HTTPException(status_code=404, detail="Section input not found")
 
+    try:
+        parsed = json.loads(si.input_json) if si.input_json else {}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Stored section input contains invalid JSON — data may be corrupted: {exc}",
+        )
     return SectionInputResponse(
         section_no=si.section_no,
-        input_json=json.loads(si.input_json),
+        input_json=parsed,
         saved_at=si.saved_at,
     )
 

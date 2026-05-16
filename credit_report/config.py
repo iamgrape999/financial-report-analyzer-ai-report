@@ -179,8 +179,15 @@ CONTINUATION_RESUME_TOKENS: dict[int, str | None] = {
 
 def validate_runtime_security() -> None:
     """Fail fast when production security-sensitive settings are unsafe."""
+    import logging as _logging
+    _cfg_logger = _logging.getLogger(__name__)
     if IS_PRODUCTION and SECRET_KEY == DEFAULT_SECRET_KEY:
         raise RuntimeError("SECRET_KEY must be set to a strong non-default value in production")
+    if not IS_PRODUCTION and SECRET_KEY == DEFAULT_SECRET_KEY:
+        _cfg_logger.warning(
+            "SECRET_KEY is still set to the default development value. "
+            "Set a strong SECRET_KEY before deploying to production."
+        )
 
 
 def parse_cors_origins(raw_origins: str | None = None) -> list[str]:

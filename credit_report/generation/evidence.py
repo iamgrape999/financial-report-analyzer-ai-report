@@ -55,8 +55,8 @@ def load_document_texts(report_id: str) -> list[str]:
     for txt_file in sorted(doc_dir.glob("*.txt")):
         try:
             texts.append(txt_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("load_document_texts: failed to read %s report=%s: %s", txt_file.name, report_id, _e)
     return texts
 
 

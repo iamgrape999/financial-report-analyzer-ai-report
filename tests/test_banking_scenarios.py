@@ -1476,3 +1476,135 @@ class TestSourceEvidenceAttribution:
                 f"got {fact2.source_evidence_id}"
             )
             await db.rollback()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Gap fixes: untested endpoints — auth status, role update, fx-rates, mapping rule approve
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestAuthStatus:
+    """GET /auth/status — diagnostic endpoint, no auth required."""
+
+    async def test_status_returns_200_and_login_possible(self, ac):
+        r = await ac.get(f"{AUTH}/status")
+        assert r.status_code == 200
+        body = r.json()
+        # Response contains total_active_users and login_possible fields
+        assert "total_active_users" in body or "login_possible" in body, (
+            f"Unexpected response shape: {body}"
+        )
+        assert body.get("login_possible") is True, "Admin user must exist, login_possible must be True"
+
+    async def test_status_accessible_without_token(self, ac):
+        r = await ac.get(f"{AUTH}/status")
+        # Must not be 401 or 403 — it's a public diagnostic endpoint
+        assert r.status_code not in (401, 403)
+
+
+class TestRoleUpdate:
+    """PATCH /auth/users/{user_id}/role — admin-only role change."""
+
+    async def test_admin_can_update_user_role(self, ac, admin_hdrs):
+        # Create a new analyst
+        email = f"roletest_{uuid.uuid4().hex[:8]}@example.com"
+        r = await ac.post(f"{AUTH}/register",
+                          json={"email": email, "password": "Pass1234!", "role": "analyst"},
+                          headers=admin_hdrs)
+        assert r.status_code in (200, 201)
+        user_id = r.json()["id"]
+
+        # Promote to reviewer
+        r = await ac.patch(f"{AUTH}/users/{user_id}/role",
+                           params={"role": "reviewer"},
+                           headers=admin_hdrs)
+        assert r.status_code == 200
+        assert r.json()["role"] == "reviewer"
+
+    async def test_analyst_cannot_update_roles(self, ac, admin_hdrs):
+        # Create analyst, login as that analyst
+        email = f"analyst_{uuid.uuid4().hex[:8]}@example.com"
+        r = await ac.post(f"{AUTH}/register",
+                          json={"email": email, "password": "Pass1234!", "role": "analyst"},
+                          headers=admin_hdrs)
+        uid = r.json()["id"]
+        tokens = await _login(ac, email, "Pass1234!")
+        analyst_hdrs = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        r = await ac.patch(f"{AUTH}/users/{uid}/role",
+                           params={"role": "admin"},
+                           headers=analyst_hdrs)
+        assert r.status_code == 403
+
+    async def test_invalid_role_returns_400(self, ac, admin_hdrs):
+        # Create a user to attempt patching
+        email = f"inv_{uuid.uuid4().hex[:8]}@example.com"
+        r = await ac.post(f"{AUTH}/register",
+                          json={"email": email, "password": "Pass1234!", "role": "analyst"},
+                          headers=admin_hdrs)
+        uid = r.json()["id"]
+
+        r = await ac.patch(f"{AUTH}/users/{uid}/role",
+                           params={"role": "supervillain"},
+                           headers=admin_hdrs)
+        assert r.status_code == 400
+
+    async def test_nonexistent_user_returns_404(self, ac, admin_hdrs):
+        r = await ac.patch(f"{AUTH}/users/nonexistent-user-id/role",
+                           params={"role": "analyst"},
+                           headers=admin_hdrs)
+        assert r.status_code == 404
+
+
+class TestFXRatesEndpointsCoverage:
+    """PUT /reports/{rid}/fx-rates and GET /reports/{rid}/fx-rates — additional coverage."""
+
+    async def test_upsert_sets_all_fields(self, ac, admin_hdrs, report):
+        rid = report["id"]
+        r = await ac.put(f"{RPTS}/{rid}/fx-rates",
+                         json={"from_currency": "JPY", "to_currency": "USD",
+                               "rate": 150.25, "rate_date": "2024-12-31",
+                               "source": "boj"},
+                         headers=admin_hdrs)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["from_currency"] == "JPY"
+        assert body["to_currency"] == "USD"
+        assert pytest.approx(body["rate"], abs=0.001) == 150.25
+        assert body["source"] == "boj"
+
+    async def test_fx_rates_require_authentication(self, ac, report):
+        rid = report["id"]
+        r = await ac.get(f"{RPTS}/{rid}/fx-rates")
+        assert r.status_code == 401
+
+
+class TestMappingRuleApprove:
+    """POST /reports/{rid}/mapping/rules/{rule_id}/approve."""
+
+    async def test_create_and_approve_mapping_rule(self, ac, admin_hdrs, report):
+        rid = report["id"]
+
+        # Create a mapping rule
+        r = await ac.post(f"{RPTS}/{rid}/mapping/rules",
+                          json={
+                              "source_label": "Net Income (Reported)",
+                              "canonical_metric": "net_income",
+                              "category": "income_statement",
+                          },
+                          headers=admin_hdrs)
+        assert r.status_code in (200, 201), r.text
+        rule_id = r.json()["id"]
+
+        # Approve the rule
+        r = await ac.post(f"{RPTS}/{rid}/mapping/rules/{rule_id}/approve",
+                          headers=admin_hdrs)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["id"] == rule_id
+        assert body.get("approved_by") is not None
+
+    async def test_approve_nonexistent_rule_returns_404(self, ac, admin_hdrs, report):
+        rid = report["id"]
+        r = await ac.post(f"{RPTS}/{rid}/mapping/rules/nonexistent-rule-id/approve",
+                          headers=admin_hdrs)
+        assert r.status_code == 404
