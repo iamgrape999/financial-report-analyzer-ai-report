@@ -147,6 +147,19 @@ async def upsert_fact(db: AsyncSession, fact_data: dict) -> CanonicalFact:
         return fact
 
 
+async def get_facts_by_document(
+    db: AsyncSession, report_id: str, document_id: str
+) -> list[CanonicalFact]:
+    """Return all canonical facts that were extracted from a specific document."""
+    result = await db.execute(
+        select(CanonicalFact).where(
+            CanonicalFact.report_id == report_id,
+            CanonicalFact.source_evidence_id == document_id,
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def upsert_facts(db: AsyncSession, facts_data: list[dict]) -> list[CanonicalFact]:
     results = []
     for fd in facts_data:

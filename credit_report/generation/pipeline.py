@@ -61,7 +61,7 @@ from credit_report.generation.claude_client import (
 )
 from credit_report.generation.evidence import retrieve_evidence
 from credit_report.generation.quota import check_quota, reserve_and_record_tokens
-from credit_report.models import SectionInput, SectionOutput
+from credit_report.models import Report, SectionInput, SectionOutput
 
 _generation_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_GENERATIONS)
 
@@ -129,6 +129,16 @@ async def run_section_generation(
             "run_section_generation: no structured input section=%d report=%s — generating from evidence only",
             section_no, report_id,
         )
+
+    # Inject Report.report_type into input_json["metadata"] so build_section_prompt()
+    # can surface the correct analytical context hint (YoY, risk flags, etc.) without
+    # requiring the analyst to manually embed the type in each section's input JSON.
+    report_result = await db.execute(select(Report).where(Report.id == report_id))
+    _report = report_result.scalar_one_or_none()
+    if _report and _report.report_type:
+        meta = input_json.setdefault("metadata", {})
+        if "report_type" not in meta:
+            meta["report_type"] = _report.report_type
 
     # §7 Financial Analysis: enrich with pre-computed ratios from the calculation engine.
     # This prevents the AI from re-deriving DSCR/LTV/ACR and introduces hallucination risk.
