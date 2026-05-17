@@ -1539,12 +1539,105 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
 ]
 
 
+# ── Numeric unit normalizer ───────────────────────────────────────────────────
+
+_UNIT_MULTIPLIERS: dict[str, float] = {
+    # English scale words (output unit: mn = millions)
+    "trillion":     1_000_000.0,
+    "trillions":    1_000_000.0,
+    "billion":      1_000.0,
+    "billions":     1_000.0,
+    "bn":           1_000.0,
+    "b":            1_000.0,
+    "million":      1.0,
+    "millions":     1.0,
+    "mn":           1.0,
+    "m":            1.0,
+    "thousand":     0.001,
+    "thousands":    0.001,
+    "k":            0.001,
+    # CJK scale words
+    "兆":           1_000_000.0,
+    "億":           100.0,
+    "萬":           0.01,
+    "万":           0.01,
+}
+
+_CURRENCY_PATTERNS: list[tuple[str, str]] = [
+    ("NT$", "TWD"), ("NTD", "TWD"), ("TWD", "TWD"),
+    ("HK$", "HKD"), ("HKD", "HKD"),
+    ("US$", "USD"), ("USD", "USD"), ("$", "USD"),
+    ("EUR", "EUR"), ("€", "EUR"),
+    ("GBP", "GBP"), ("£", "GBP"),
+    ("JPY", "JPY"), ("¥", "JPY"),
+    ("CNY", "CNY"), ("RMB", "CNY"),
+    ("SGD", "SGD"),
+    ("KRW", "KRW"),
+]
+
+
+def parse_financial_value(raw: str) -> tuple[Optional[float], str, str]:
+    """Parse a raw financial string into (value_in_mn, currency_code, unit).
+
+    Examples:
+        "NT$2,345 billion"  → (2_345_000.0,  "TWD", "mn")
+        "USD 500 million"   → (500.0,         "USD", "mn")
+        "5.2兆"             → (5_200_000.0,   "",    "mn")
+        "1,234"             → (1234.0,         "",    "")
+        "n/a"               → (None,           "",    "")
+    """
+    import re
+
+    if raw is None:
+        return None, "", ""
+    s = str(raw).strip()
+    if not s or s.lower() in ("n/a", "na", "-", "none", "null", "–", "—"):
+        return None, "", ""
+
+    # Detect currency
+    currency = ""
+    for pattern, code in _CURRENCY_PATTERNS:
+        if pattern in s:
+            currency = code
+            s = s.replace(pattern, "").strip()
+            break
+
+    # Detect unit multiplier
+    multiplier = None
+    unit_out = ""
+    s_lower = s.lower()
+    for word, mult in sorted(_UNIT_MULTIPLIERS.items(), key=lambda x: -len(x[0])):
+        if word in s_lower:
+            multiplier = mult
+            unit_out = "mn"
+            # Remove the unit word from string
+            s = re.sub(re.escape(word), "", s, flags=re.IGNORECASE).strip()
+            break
+
+    # Extract the numeric part
+    clean = re.sub(r"[^\d.\-]", "", s.replace(",", ""))
+    if not clean:
+        return None, currency, unit_out or ""
+    try:
+        num = float(clean)
+    except ValueError:
+        return None, currency, unit_out or ""
+
+    if multiplier is not None:
+        num = round(num * multiplier, 6)
+        return num, currency, "mn"
+    return num, currency, ""
+
+
 def _try_float(val) -> Optional[float]:
     """Safely convert a value to float; return None if not possible."""
     if val is None:
         return None
     if isinstance(val, (int, float)):
         return float(val)
+    if isinstance(val, str):
+        parsed, _, _ = parse_financial_value(val)
+        return parsed
     try:
         return float(str(val).replace(",", "").strip())
     except (ValueError, TypeError):
@@ -1576,7 +1669,19 @@ def build_canonical_facts_from_etl(
         if not isinstance(sub, dict):
             continue
         raw_val = sub.get(field)
-        num_val = _try_float(raw_val)
+        if raw_val is None:
+            continue
+
+        # For string values, try to extract embedded currency/unit
+        if isinstance(raw_val, str):
+            num_val, parsed_currency, parsed_unit = parse_financial_value(raw_val)
+            resolved_currency = parsed_currency or currency
+            resolved_unit = parsed_unit or unit
+        else:
+            num_val = _try_float(raw_val)
+            resolved_currency = currency
+            resolved_unit = unit
+
         if num_val is None:
             continue
 
@@ -1592,8 +1697,8 @@ def build_canonical_facts_from_etl(
             "period": period,
             "value": num_val,
             "value_text": str(raw_val),
-            "currency": currency,
-            "unit": unit,
+            "currency": resolved_currency,
+            "unit": resolved_unit,
             "source_type": "pdf_extraction",
             "source_priority": 3,
             "source_evidence_id": doc_id,

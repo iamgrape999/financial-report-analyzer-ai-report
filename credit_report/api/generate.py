@@ -7,9 +7,10 @@ import time
 import uuid
 from collections import OrderedDict
 from functools import partial
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,6 +154,61 @@ class _TaskStore:
 _generation_tasks = _TaskStore()
 
 
+# ── SSE Progress Bus ──────────────────────────────────────────────────────────
+
+def _sse(event_type: str, data: dict) -> str:
+    """Format a single SSE event."""
+    import json as _json
+    return f"event: {event_type}\ndata: {_json.dumps(data)}\n\n"
+
+
+class _ProgressBus:
+    """In-process pub-sub for SSE progress events keyed by task_id."""
+
+    def __init__(self) -> None:
+        self._queues: dict[str, asyncio.Queue] = {}
+
+    def create(self, task_id: str) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self._queues[task_id] = q
+        return q
+
+    def push(self, task_id: str, event: dict) -> None:
+        q = self._queues.get(task_id)
+        if q:
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    def close(self, task_id: str) -> None:
+        q = self._queues.pop(task_id, None)
+        if q:
+            try:
+                q.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+
+    async def stream(self, task_id: str) -> AsyncGenerator[str, None]:
+        """Yield SSE strings until None sentinel is received."""
+        q = self._queues.get(task_id)
+        if not q:
+            yield _sse("error", {"detail": "task not found"})
+            return
+        while True:
+            try:
+                event = await asyncio.wait_for(q.get(), timeout=60.0)
+            except asyncio.TimeoutError:
+                yield _sse("heartbeat", {"ts": time.monotonic()})
+                continue
+            if event is None:
+                break
+            yield _sse(event.get("type", "progress"), event)
+
+
+_progress_bus = _ProgressBus()
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
@@ -210,6 +266,70 @@ async def _load_section_input(db: AsyncSession, report_id: str, section_no: int)
         return json.loads(si.input_json)
     except Exception:
         return {}
+
+
+def _deep_merge_section_input(base: dict, overlay: dict) -> dict:
+    """Merge ETL overlay into existing section input — analyst data (base) wins on non-null values."""
+    result = dict(base)
+    for k, v in overlay.items():
+        if k not in result or result[k] is None or result[k] == "" or result[k] == []:
+            result[k] = v
+        elif isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge_section_input(result[k], v)
+    return result
+
+
+async def _auto_populate_section_inputs(
+    db: AsyncSession,
+    report_id: str,
+    doc_id: str,
+    extracted: dict[int, dict],
+    actor_user_id: str,
+) -> dict[int, str]:
+    """Save ETL extraction results as SectionInput rows, merging with existing analyst data.
+
+    Existing analyst-entered values always win (ETL only fills empty fields).
+    Returns {section_no: "new" | "merged"} for logging.
+    """
+    results: dict[int, str] = {}
+    for sec_no, sec_data in extracted.items():
+        if not isinstance(sec_data, dict) or not sec_data:
+            continue
+        try:
+            existing_res = await db.execute(
+                select(SectionInput).where(
+                    SectionInput.report_id == report_id,
+                    SectionInput.section_no == sec_no,
+                ).order_by(SectionInput.id.desc())
+            )
+            si = existing_res.scalars().first()
+            if si and si.input_json:
+                try:
+                    current_data = json.loads(si.input_json)
+                except Exception:
+                    current_data = {}
+                merged = _deep_merge_section_input(current_data, sec_data)
+                si.input_json = json.dumps(merged, ensure_ascii=False)
+                si.saved_by = actor_user_id
+                results[sec_no] = "merged"
+            else:
+                new_si = SectionInput(
+                    id=str(uuid.uuid4()),
+                    report_id=report_id,
+                    section_no=sec_no,
+                    input_json=json.dumps(sec_data, ensure_ascii=False),
+                    saved_by=actor_user_id,
+                )
+                db.add(new_si)
+                results[sec_no] = "new"
+        except Exception as _e:
+            logger.warning("_auto_populate_section_inputs: section=%d error: %s", sec_no, _e)
+    await db.flush()
+    logger.info(
+        "_auto_populate_section_inputs: report=%s doc=%s sections=%s",
+        report_id, doc_id, results,
+    )
+    return results
 
 
 # ── Document management ───────────────────────────────────────────────────────
@@ -386,12 +506,338 @@ async def etl_document_endpoint(
             doc_id, report_id, _freg_err,
         )
 
+    # Auto-populate SectionInput rows from ETL data so generation can proceed immediately
+    sections_populated: dict[int, str] = {}
+    try:
+        sections_populated = await _auto_populate_section_inputs(
+            db=db,
+            report_id=report_id,
+            doc_id=doc_id,
+            extracted=extracted,
+            actor_user_id=current_user.id,
+        )
+    except Exception as _pop_err:
+        logger.warning(
+            "etl_document_endpoint: section auto-populate failed doc=%s report=%s: %s",
+            doc_id, report_id, _pop_err,
+        )
+
+    await db.commit()
+    logger.info(
+        "etl_document_endpoint: done doc=%s report=%s facts=%d sections_populated=%s",
+        doc_id, report_id, facts_registered, sections_populated,
+    )
+
     return ETLResult(
         doc_id=doc_id,
         document_type=doc_type,
         sections_extracted=sorted(extracted.keys()),
         data={str(k): v for k, v in extracted.items()},
         facts_registered=facts_registered,
+    )
+
+
+@router.post("/documents/{doc_id}/etl/stream")
+async def etl_document_stream(
+    report_id: str,
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """
+    Streaming ETL: runs OCR + extraction as a background task and returns
+    a task_id.  Connect to GET .../etl/stream/{task_id} for SSE progress.
+    """
+    from credit_report.config import CREDIT_REPORTS_ROOT
+    from pathlib import Path
+
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, current_user)
+
+    result = await db.execute(
+        select(SectionDocument).where(
+            SectionDocument.id == doc_id,
+            SectionDocument.report_id == report_id,
+            SectionDocument.is_deleted == False,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    task_id = str(uuid.uuid4())
+    _progress_bus.create(task_id)
+
+    # Capture values needed in background task
+    user_id = current_user.id
+    doc_type = doc.document_type or "other"
+    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    txt_path = doc_dir / f"{doc_id}.txt"
+    bin_path = doc_dir / f"{doc_id}.bin"
+    fname_path = doc_dir / f"{doc_id}.fname"
+
+    async def _run_streaming_etl() -> None:
+        from credit_report.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as bg_db:
+            try:
+                _progress_bus.push(task_id, {"type": "start", "stage": "ocr", "message": "Starting document processing…"})
+
+                # Load text or re-extract
+                if txt_path.exists():
+                    text = txt_path.read_text(encoding="utf-8")
+                    _progress_bus.push(task_id, {
+                        "type": "ocr_done", "chars": len(text),
+                        "message": f"Document text loaded ({len(text):,} chars)",
+                    })
+                elif bin_path.exists():
+                    stored_fname = fname_path.read_text(encoding="utf-8") if fname_path.exists() else "upload.pdf"
+                    ext = stored_fname.rsplit(".", 1)[-1].lower() if "." in stored_fname else ""
+
+                    _progress_bus.push(task_id, {"type": "ocr_start", "message": "Extracting text from document…"})
+
+                    if ext == "pdf":
+                        from credit_report.generation.evidence import (
+                            extract_text_from_pdf,
+                            extract_text_from_scanned_pdf_vision_async,
+                            _quality_stats,
+                        )
+                        raw = bin_path.read_bytes()
+                        loop = asyncio.get_event_loop()
+                        text = await loop.run_in_executor(None, extract_text_from_pdf, raw)
+                        stats = _quality_stats(text)
+
+                        if not text.strip() or stats["ratio_pct"] < 5:
+                            # Scanned PDF — use async VLM OCR with progress
+                            _progress_bus.push(task_id, {
+                                "type": "ocr_vlm_start",
+                                "message": "Scanned PDF detected — using Gemini Vision OCR…",
+                            })
+                            try:
+                                from pypdf import PdfReader
+                                import io as _io
+                                n_pages = len(PdfReader(_io.BytesIO(raw)).pages)
+                            except Exception:
+                                n_pages = 0
+
+                            _progress_bus.push(task_id, {
+                                "type": "ocr_pages_total",
+                                "total_pages": n_pages,
+                                "message": f"Processing {n_pages} pages…",
+                            })
+
+                            def _on_page(page_idx, total, chars):
+                                _progress_bus.push(task_id, {
+                                    "type": "ocr_page",
+                                    "page": page_idx,
+                                    "total": total,
+                                    "chars": chars,
+                                    "pct": round(page_idx / max(total, 1) * 100),
+                                    "message": f"OCR page {page_idx}/{total}…",
+                                })
+
+                            text = await extract_text_from_scanned_pdf_vision_async(
+                                raw,
+                                on_progress=_on_page,
+                                max_pages=200,
+                            )
+                        save_document_text(report_id, doc_id, text)
+                    else:
+                        raw = bin_path.read_bytes()
+                        from credit_report.generation.evidence import extract_text_from_file
+                        loop = asyncio.get_event_loop()
+                        text, _ = await loop.run_in_executor(None, extract_text_from_file, raw, stored_fname)
+                        save_document_text(report_id, doc_id, text)
+                else:
+                    _progress_bus.push(task_id, {"type": "error", "message": "Document file not found — please re-upload"})
+                    _progress_bus.close(task_id)
+                    return
+
+                if not text.strip():
+                    _progress_bus.push(task_id, {"type": "error", "message": "No extractable text found in document"})
+                    _progress_bus.close(task_id)
+                    return
+
+                _progress_bus.push(task_id, {
+                    "type": "ocr_done",
+                    "chars": len(text),
+                    "message": f"Text extraction complete — {len(text):,} characters",
+                })
+
+                # ETL extraction phase
+                from credit_report.generation.etl import (
+                    DOCUMENT_SECTION_MAP, _ETL_CHUNK_SIZE, _ETL_CHUNK_OVERLAP,
+                    _call_gemini_etl_once, _deep_merge_etl, _has_any_value,
+                )
+                target_sections = DOCUMENT_SECTION_MAP.get(doc_type, [4, 7])
+                n_chunks = max(1, (len(text) - 1) // (_ETL_CHUNK_SIZE - _ETL_CHUNK_OVERLAP) + 1) if len(text) > _ETL_CHUNK_SIZE else 1
+
+                _progress_bus.push(task_id, {
+                    "type": "etl_start",
+                    "sections": target_sections,
+                    "chunks": n_chunks,
+                    "message": f"Extracting {len(target_sections)} sections in {n_chunks} chunk(s)…",
+                })
+
+                # Run ETL with per-chunk progress
+                merged: dict[int, dict] = {}
+                if len(text) > _ETL_CHUNK_SIZE:
+                    chunks = []
+                    i = 0
+                    while i < len(text):
+                        chunk = text[i: i + _ETL_CHUNK_SIZE]
+                        if chunk.strip():
+                            chunks.append(chunk)
+                        i += _ETL_CHUNK_SIZE - _ETL_CHUNK_OVERLAP
+
+                    for c_idx, chunk in enumerate(chunks):
+                        _progress_bus.push(task_id, {
+                            "type": "etl_chunk",
+                            "chunk": c_idx + 1,
+                            "total_chunks": len(chunks),
+                            "pct": round((c_idx + 1) / len(chunks) * 100),
+                            "message": f"Analysing text chunk {c_idx + 1}/{len(chunks)}…",
+                        })
+                        chunk_result = await _call_gemini_etl_once(
+                            document_type=doc_type,
+                            text_chunk=chunk,
+                            target_sections=target_sections,
+                            chunk_info=f"{c_idx + 1}/{len(chunks)}",
+                        )
+                        for sec_no, sec_data in chunk_result.items():
+                            if sec_no in merged:
+                                merged[sec_no] = _deep_merge_etl(merged[sec_no], sec_data)
+                            else:
+                                merged[sec_no] = sec_data
+                else:
+                    _progress_bus.push(task_id, {
+                        "type": "etl_chunk", "chunk": 1, "total_chunks": 1, "pct": 50,
+                        "message": "Analysing document…",
+                    })
+                    merged = await _call_gemini_etl_once(
+                        document_type=doc_type,
+                        text_chunk=text,
+                        target_sections=target_sections,
+                    )
+
+                _progress_bus.push(task_id, {
+                    "type": "etl_done",
+                    "sections_extracted": sorted(merged.keys()),
+                    "message": f"Extraction complete — {len(merged)} section(s) found",
+                })
+
+                # Auto-register CanonicalFacts
+                facts_registered = 0
+                if merged:
+                    _progress_bus.push(task_id, {
+                        "type": "facts_start",
+                        "message": "Registering extracted facts…",
+                    })
+                    try:
+                        from credit_report.generation.etl import build_canonical_facts_from_etl
+                        from credit_report.fact_store import repository as fact_repo
+
+                        facts_data = build_canonical_facts_from_etl(
+                            report_id=report_id,
+                            doc_id=doc_id,
+                            extracted=merged,
+                        )
+                        if facts_data:
+                            await fact_repo.upsert_facts(bg_db, facts_data)
+                            facts_registered = len(facts_data)
+
+                        # Auto-populate SectionInput rows so generation can proceed immediately
+                        try:
+                            await _auto_populate_section_inputs(
+                                db=bg_db,
+                                report_id=report_id,
+                                doc_id=doc_id,
+                                extracted=merged,
+                                actor_user_id=user_id,
+                            )
+                        except Exception as _pop_err:
+                            logger.warning("[ETL-STREAM] section populate error: %s", _pop_err)
+
+                        # Update document ETL status
+                        doc_res = await bg_db.execute(
+                            select(SectionDocument).where(SectionDocument.id == doc_id)
+                        )
+                        bg_doc = doc_res.scalar_one_or_none()
+                        if bg_doc:
+                            bg_doc.etl_status = "done"
+                        await bg_db.commit()
+
+                    except Exception as _fe:
+                        logger.warning("[ETL-STREAM] fact registration error: %s", _fe)
+
+                _progress_bus.push(task_id, {
+                    "type": "complete",
+                    "sections_extracted": sorted(merged.keys()),
+                    "facts_registered": facts_registered,
+                    "doc_type": doc_type,
+                    "message": f"Done! {len(merged)} section(s), {facts_registered} fact(s) registered",
+                    "data": {str(k): v for k, v in merged.items()},
+                })
+
+            except Exception as exc:
+                logger.exception("[ETL-STREAM] task=%s error: %s", task_id, exc)
+                _progress_bus.push(task_id, {
+                    "type": "error",
+                    "message": f"ETL failed: {exc}",
+                })
+            finally:
+                _progress_bus.close(task_id)
+
+    background_tasks.add_task(_run_streaming_etl)
+    return {"task_id": task_id, "status": "running"}
+
+
+async def _sse_user(
+    request: Request,
+    token: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Resolve current user from Bearer header OR ?token= query param (needed for EventSource)."""
+    from credit_report.security.auth import decode_token
+    from credit_report.security.models import User as _User
+    bearer = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        bearer = auth_header[7:].strip()
+    if not bearer and token:
+        bearer = token
+    if not bearer:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = decode_token(bearer)
+        user_id = payload.get("sub")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    result = await db.execute(select(_User).where(_User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user
+
+
+@router.get("/documents/etl/stream/{task_id}")
+async def etl_stream_events(
+    request: Request,
+    report_id: str,
+    task_id: str,
+    token: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE endpoint — stream ETL progress events for a given task_id (EventSource-compatible)."""
+    await _sse_user(request, token=token, db=db)
+    return StreamingResponse(
+        _progress_bus.stream(task_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -570,6 +1016,12 @@ async def generate_section(
                     "status": output.status,
                     "tokens_used": output.tokens_used,
                 })
+                _progress_bus.push(task_id, {
+                    "type": "section_done",
+                    "section_no": section_no,
+                    "tokens_used": output.tokens_used,
+                    "message": f"§{section_no} generation complete ({output.tokens_used} tokens)",
+                })
                 logger.info(
                     "generate_section[bg]: done section=%d report=%s status=%s tokens=%s",
                     section_no, report_id, output.status, output.tokens_used,
@@ -631,11 +1083,13 @@ async def generate_full_report(
 
     task_id = str(uuid.uuid4())
     _generation_tasks.set(task_id, {"status": "running"})
+    _progress_bus.create(task_id)
     user_id, user_role = current_user.id, current_user.role
     full_output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
     async def _bg_generate_full_report():
         from credit_report.database import AsyncSessionLocal
+        from credit_report.config import GENERATION_ORDER
         async with AsyncSessionLocal() as bg_db:
             try:
                 logger.info(
@@ -651,6 +1105,19 @@ async def generate_full_report(
                 )
                 await bg_db.commit()
                 done = sum(1 for v in results.values() if v == "done")
+                done_count = 0
+                for sec_no in GENERATION_ORDER:
+                    status = results.get(sec_no, "skipped")
+                    done_count += 1
+                    _progress_bus.push(task_id, {
+                        "type": "section_progress",
+                        "section_no": sec_no,
+                        "status": status,
+                        "done_count": done_count,
+                        "total": len(GENERATION_ORDER),
+                        "pct": round(done_count / len(GENERATION_ORDER) * 100),
+                        "message": f"§{sec_no} {status} ({done_count}/{len(GENERATION_ORDER)} sections)",
+                    })
                 _generation_tasks.update(task_id, {
                     "status": "done",
                     "sections": {str(k): v for k, v in results.items()},
@@ -672,6 +1139,8 @@ async def generate_full_report(
                     "generate_full_report[bg]: error report=%s task=%s: %s",
                     report_id, task_id, exc,
                 )
+            finally:
+                _progress_bus.close(task_id)
 
     background_tasks.add_task(_bg_generate_full_report)
     logger.info(
@@ -679,6 +1148,26 @@ async def generate_full_report(
         task_id, report_id, user_id, sections_with_data,
     )
     return GenerateTaskResult(task_id=task_id, status="running")
+
+
+@router.get("/generate/stream/{task_id}")
+async def generation_stream_events(
+    request: Request,
+    report_id: str,
+    task_id: str,
+    token: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE endpoint — stream section generation progress (EventSource-compatible)."""
+    await _sse_user(request, token=token, db=db)
+    return StreamingResponse(
+        _progress_bus.stream(task_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ── Section output retrieval ──────────────────────────────────────────────────

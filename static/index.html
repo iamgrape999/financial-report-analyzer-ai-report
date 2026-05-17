@@ -229,6 +229,8 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
           <button class="btn btn-warning btn-sm" onclick="openConflictsModal()" id="conflictsBtn" style="display:none">
             ⚠ <span id="conflictsCount">0</span> <span data-i18n="conflicts.btn_label">Conflicts</span>
           </button>
+          <!-- Live generation progress (shown while generateAll runs) -->
+          <div id="genProgressBar" class="d-none mt-1" style="font-size:12px;"></div>
         </div>
       </div>
     </div>
@@ -1973,6 +1975,7 @@ function updateJsonPreview(){
 // ── Auth ──────────────────────────────────────────────────────────────────────
 function H(){return{'Authorization':'Bearer '+token};}
 function HJ(){return{'Authorization':'Bearer '+token,'Content-Type':'application/json'};}
+function _getToken(){return token||'';}
 
 function loginClearErr(field){
   if(field==='email'){
@@ -2295,33 +2298,49 @@ async function loadSectionOutput(sec){
 
 // ── Generation polling helpers ─────────────────────────────────────────────────
 async function _pollGenerationTask(taskId, secNo, maxWaitMs=300000){
-  const interval=3000, start=Date.now();
-  while(Date.now()-start<maxWaitMs){
-    await new Promise(r=>setTimeout(r,interval));
-    try{
-      const r=await fetch(API+'/reports/'+currentRid+'/generate/status/'+taskId,{headers:H()});
-      if(!r.ok)throw new Error('Status check failed');
-      const t=await r.json();
-      if(t.status==='done'){return t;}
-      if(t.status==='error'){throw new Error(t.detail||'Generation error');}
-    }catch(e){throw e;}
-  }
-  throw new Error('Generation timed out after '+(maxWaitMs/1000)+'s — check server logs');
+  // Try SSE stream first; fall back to polling if EventSource fails
+  return new Promise((resolve, reject) => {
+    const url = API + '/reports/' + currentRid + '/generate/stream/' + taskId;
+    const evs = new EventSource(url + '?token=' + encodeURIComponent(_getToken()));
+    const timer = setTimeout(() => { evs.close(); reject(new Error('Generation timed out')); }, maxWaitMs);
+
+    evs.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.type === 'section_done' && (secNo == null || ev.section_no === secNo)) {
+          clearTimeout(timer); evs.close();
+          resolve({ status: 'done', tokens_used: ev.tokens_used });
+        } else if (ev.type === 'complete') {
+          clearTimeout(timer); evs.close();
+          resolve({ status: 'done', sections: ev.sections, tokens_used: ev.tokens_used });
+        } else if (ev.type === 'error') {
+          clearTimeout(timer); evs.close();
+          reject(new Error(ev.message || 'Generation error'));
+        }
+      } catch (_) {}
+    };
+    evs.onerror = () => {
+      evs.close();
+      // SSE unavailable (no token support) — fall back to polling
+      const interval = 3000, start = Date.now();
+      const poll = async () => {
+        if (Date.now() - start > maxWaitMs) { clearTimeout(timer); reject(new Error('Generation timed out')); return; }
+        try {
+          const r = await fetch(API + '/reports/' + currentRid + '/generate/status/' + taskId, { headers: H() });
+          if (!r.ok) throw new Error('Status check failed');
+          const t = await r.json();
+          if (t.status === 'done') { clearTimeout(timer); resolve(t); }
+          else if (t.status === 'error') { clearTimeout(timer); reject(new Error(t.detail || 'Generation error')); }
+          else setTimeout(poll, interval);
+        } catch(e) { clearTimeout(timer); reject(e); }
+      };
+      setTimeout(poll, 3000);
+    };
+  });
 }
 
 async function _pollFullReportTask(taskId, maxWaitMs=900000){
-  const interval=5000, start=Date.now();
-  while(Date.now()-start<maxWaitMs){
-    await new Promise(r=>setTimeout(r,interval));
-    try{
-      const r=await fetch(API+'/reports/'+currentRid+'/generate/status/'+taskId,{headers:H()});
-      if(!r.ok)throw new Error('Status check failed');
-      const t=await r.json();
-      if(t.status==='done'){return t;}
-      if(t.status==='error'){throw new Error(t.detail||'Generation error');}
-    }catch(e){throw e;}
-  }
-  throw new Error('Full report generation timed out after '+(maxWaitMs/1000)+'s');
+  return _pollGenerationTask(taskId, null, maxWaitMs);
 }
 
 async function generateCurrentSection(){
@@ -2390,18 +2409,93 @@ async function preflight(){
 async function generateAll(){
   const sp=document.getElementById('genAllSpin');sp.classList.remove('d-none');
   toast(tl('Generating full report — this may take several minutes…','正在生成完整報告 — 可能需要數分鐘…'),'info');
+
+  // Show live per-section generation progress
+  const SECS=[1,2,3,4,5,6,7,8,9,10];
+  const genBarEl=document.getElementById('genProgressBar');
+  if(genBarEl){
+    genBarEl.innerHTML=`
+      <div class="text-muted small fw-bold mb-1">${tl('Generating sections:','正在生成段落：')}</div>
+      ${SECS.map(n=>`<div id="gpRow${n}" class="gen-progress-row gpr-waiting">
+        <span class="fw-semibold">§${n}</span> <span class="text-muted small">${esc(snm(n))}</span>
+        <span id="gpBadge${n}" class="badge bg-secondary float-end">${tl('waiting','等待中')}</span>
+      </div>`).join('')}
+      <div class="progress mt-2" style="height:8px;">
+        <div id="gpOverall" class="progress-bar bg-success progress-bar-striped progress-bar-animated" style="width:0%"></div>
+      </div>`;
+    genBarEl.classList.remove('d-none');
+  }
+
+  function _markSec(n, state){
+    const row=document.getElementById('gpRow'+n);
+    const badge=document.getElementById('gpBadge'+n);
+    if(!row||!badge)return;
+    row.className='gen-progress-row gpr-'+state;
+    const labels={waiting:tl('waiting','等待中'),generating:tl('generating…','生成中…'),done:'✓ done',error:'✗ error'};
+    const bgs={waiting:'secondary',generating:'warning',done:'success',error:'danger'};
+    badge.className='badge bg-'+(bgs[state]||'secondary')+' float-end';
+    badge.textContent=labels[state]||state;
+  }
+  function _setOverall(pct){
+    const b=document.getElementById('gpOverall');
+    if(b)b.style.width=Math.max(0,Math.min(100,pct))+'%';
+  }
+
+  let doneSecs=0;
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/generate?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||'Generation failed');
-    // 202: background task — poll until done
-    const result=await _pollFullReportTask(d.task_id);
-    const sections=result.sections||{};
-    const ss=Object.entries(sections).map(([k,v])=>`§${k}:${v.split(':')[0]}`).join(' ');
-    toast(tl('Generation complete. ','生成完成。')+ss,'success');
+    const taskId=d.task_id;
+
+    // Wire SSE for live per-section updates
+    const sseUrl=API+'/reports/'+currentRid+'/generate/stream/'+taskId+'?token='+encodeURIComponent(_getToken());
+    await new Promise((resolve,reject)=>{
+      const evs=new EventSource(sseUrl);
+      const timer=setTimeout(()=>{evs.close();reject(new Error('Generation timed out'));},900000);
+      evs.onmessage=(e)=>{
+        try{
+          const ev=JSON.parse(e.data);
+          if(ev.type==='section_progress'){
+            const n=ev.section_no;
+            if(n){_markSec(n,'generating');}
+            _setOverall(ev.pct||0);
+          }else if(ev.type==='section_done'){
+            const n=ev.section_no;
+            if(n){_markSec(n,'done');doneSecs++;}
+            _setOverall(Math.round(doneSecs/SECS.length*100));
+          }else if(ev.type==='complete'){
+            _setOverall(100);
+            clearTimeout(timer);evs.close();resolve(ev);
+          }else if(ev.type==='error'){
+            clearTimeout(timer);evs.close();reject(new Error(ev.message||'Generation error'));
+          }
+        }catch(_){}
+      };
+      evs.onerror=()=>{
+        // SSE unavailable — fall back to polling without progress display
+        evs.close();
+        const poll=async()=>{
+          try{
+            const r=await fetch(API+'/reports/'+currentRid+'/generate/status/'+taskId,{headers:H()});
+            if(!r.ok)throw new Error('poll failed');
+            const t=await r.json();
+            if(t.status==='done'){clearTimeout(timer);resolve(t);}
+            else if(t.status==='error'){clearTimeout(timer);reject(new Error(t.detail||'error'));}
+            else setTimeout(poll,5000);
+          }catch(e){clearTimeout(timer);reject(e);}
+        };
+        setTimeout(poll,5000);
+      };
+    });
+
+    toast(tl('Generation complete!','報告生成完成！'),'success');
     await loadReportDetail(currentRid);
   }catch(e){toast(e.message,'danger');}
-  finally{sp.classList.add('d-none');}
+  finally{
+    sp.classList.add('d-none');
+    if(genBarEl)setTimeout(()=>genBarEl.classList.add('d-none'),4000);
+  }
 }
 
 // ── Full Report Review ────────────────────────────────────────────────────────
@@ -2792,57 +2886,190 @@ async function deleteDocument(docId){
   }catch(e){toast(e.message,'danger');}
 }
 
+function _renderEtlResults(d, filename, body, st){
+  if(!d.sections_extracted||!d.sections_extracted.length){
+    body.innerHTML=`<div class="alert alert-warning m-3">${tl('No structured data could be extracted from this document. The document may be an image-only scan or have no recognisable credit report data.','無法從此文件萃取結構化資料。文件可能為純圖像掃描件，或不含可辨識的信貸報告資料。')}</div>`;
+    st.textContent=tl('No data extracted','未萃取到任何資料');
+    return;
+  }
+  const rows=d.sections_extracted.map(n=>{
+    const sec=parseInt(n)||n;
+    const data=d.data[String(sec)]||{};
+    const fcount=Object.keys(data).length;
+    const preview=JSON.stringify(data,null,2).slice(0,800);
+    return`<div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:#e8f5ee;">
+        <span class="fw-bold">§${sec} — ${esc(snm(sec))}</span>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge bg-success">${fcount} ${tl(`field${fcount!==1?'s':''} extracted`,`個欄位已萃取`)}</span>
+          <button class="btn btn-sm btn-primary" onclick="previewEtlMerge(${sec})">
+            ${tl(`Apply to §${sec}`,`套用至 §${sec}`)}</button>
+        </div>
+      </div>
+      <div class="card-body p-2">
+        <details><summary class="text-muted small" style="cursor:pointer">Show extracted JSON</summary>
+        <pre class="mt-2" style="font-size:11px;max-height:250px;overflow-y:auto;background:#f8f9fa;padding:8px;border-radius:4px;">${esc(preview)}${preview.length===800?'\n…(truncated)':''}</pre>
+        </details>
+      </div>
+    </div>`;
+  }).join('');
+  const factsNote=d.facts_registered>0?`<span class="badge bg-info ms-2">${d.facts_registered} ${tl('facts registered','個事實已登記')}</span>`:'';
+  body.innerHTML=`<div class="alert alert-success m-3 py-2"><strong>✓ ${tl('AI ETL Complete','AI ETL 完成')}</strong> — ${tl(`${d.sections_extracted.length} section(s) extracted`,`已萃取 ${d.sections_extracted.length} 個段落`)} ${factsNote}<br><small class="text-muted">${tl('Review extracted data below. Click "Apply to §N" to save fields as section input.','請在下方審查萃取資料，點擊「套用至 §N」以儲存為段落輸入。')}</small></div>${rows}`;
+  st.textContent=tl(`${d.sections_extracted.length} sections extracted`,`已萃取 ${d.sections_extracted.length} 個段落`);
+}
+
 async function etlDocument(docId,filename){
   const modal=new bootstrap.Modal(document.getElementById('etlModal'));
   const body=document.getElementById('etlModalBody');
   const st=document.getElementById('etlModalStatus');
-  body.innerHTML=`<div class="text-center py-5"><div class="spinner-border text-success" style="width:3rem;height:3rem;"></div><div class="mt-3 text-muted fw-semibold">${tl('Running AI extraction on:','正在執行AI萃取：')} <strong>${esc(filename)}</strong><br><small>${tl('This may take 20-60 seconds…','可能需要20-60秒…')}</small></div></div>`;
-  st.textContent='';
   modal.show();
+
+  // Show streaming progress panel
+  const _pHtml=()=>`
+    <div class="px-3 py-3">
+      <div class="fw-bold mb-2" style="color:#00703C">🔍 ${tl('AI ETL Processing:','AI ETL 處理中：')} <em>${esc(filename)}</em></div>
+      <div id="etlStageBar" class="progress mb-2" style="height:10px;">
+        <div id="etlStageBarFill" class="progress-bar bg-success progress-bar-striped progress-bar-animated" style="width:5%"></div>
+      </div>
+      <div id="etlStageLabel" class="text-muted small mb-3">Starting…</div>
+      <div id="etlEventLog" style="font-size:11px;max-height:240px;overflow-y:auto;background:#f8f9fa;border-radius:6px;padding:8px;font-family:monospace;"></div>
+    </div>`;
+  body.innerHTML=_pHtml();
+  st.textContent='';
+
+  const logEl=()=>document.getElementById('etlEventLog');
+  const barEl=()=>document.getElementById('etlStageBarFill');
+  const lblEl=()=>document.getElementById('etlStageLabel');
+
+  function _addLog(msg, cls=''){
+    const el=logEl();
+    if(!el)return;
+    const row=document.createElement('div');
+    row.className=cls;
+    row.textContent=msg;
+    el.appendChild(row);
+    el.scrollTop=el.scrollHeight;
+  }
+  function _setPct(pct,label){
+    const b=barEl(),l=lblEl();
+    if(b)b.style.width=Math.max(5,Math.min(100,pct))+'%';
+    if(l&&label)l.textContent=label;
+  }
+
+  // Start streaming ETL
+  let finalData=null;
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/etl',{method:'POST',headers:H()});
-    const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||'ETL failed');
-    if(!d.sections_extracted||!d.sections_extracted.length){
-      body.innerHTML=`<div class="alert alert-warning m-3">${tl('No structured data could be extracted from this document. The document may be an image-only scan or have no recognisable credit report data.','無法從此文件萃取結構化資料。文件可能為純圖像掃描件，或不含可辨識的信貸報告資料。')}</div>`;
-      st.textContent=tl('No data extracted','未萃取到任何資料');
+    const startRes=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/etl/stream',{method:'POST',headers:H()});
+    if(!startRes.ok){
+      // Streaming not available — fall back to non-streaming
+      throw new Error('stream_unavailable');
+    }
+    const startJson=await startRes.json();
+    const taskId=startJson.task_id;
+
+    // Listen to SSE stream
+    await new Promise((resolve,reject)=>{
+      const sseUrl=API+'/reports/'+currentRid+'/documents/etl/stream/'+taskId;
+      const evs=new EventSource(sseUrl+'?token='+encodeURIComponent(_getToken()));
+      const timer=setTimeout(()=>{evs.close();reject(new Error('ETL timed out after 10 minutes'));},600000);
+
+      evs.onmessage=(e)=>{
+        try{
+          const ev=JSON.parse(e.data);
+          switch(ev.type){
+            case 'start':
+              _setPct(5,tl('Starting…','開始中…'));
+              _addLog('▶ '+ev.message);
+              break;
+            case 'ocr_start':
+              _setPct(8,tl('Extracting text…','擷取文字中…'));
+              _addLog('📄 '+ev.message);
+              break;
+            case 'ocr_vlm_start':
+              _setPct(10,tl('Gemini Vision OCR starting…','Gemini Vision OCR 啟動中…'));
+              _addLog('👁 '+ev.message,'text-info');
+              break;
+            case 'ocr_pages_total':
+              _setPct(12,tl(`VLM OCR — ${ev.total_pages} pages…`,`VLM OCR — ${ev.total_pages} 頁…`));
+              _addLog(`📚 ${tl('Total pages:','共')} ${ev.total_pages}`);
+              break;
+            case 'ocr_page':
+              _setPct(10+Math.round(ev.pct*0.35),tl(`OCR page ${ev.page}/${ev.total}…`,`OCR 第 ${ev.page}/${ev.total} 頁…`));
+              if(ev.page%5===0||ev.page===ev.total)
+                _addLog(`  ${tl('Page','頁')} ${ev.page}/${ev.total} — ${ev.chars.toLocaleString()} chars`);
+              break;
+            case 'ocr_done':
+              _setPct(45,tl(`Text ready (${(ev.chars||0).toLocaleString()} chars)`,`文字就緒（${(ev.chars||0).toLocaleString()} 字元）`));
+              _addLog(`✓ ${ev.message}`,'text-success');
+              break;
+            case 'etl_start':
+              _setPct(50,tl('AI extraction started…','AI 萃取開始…'));
+              _addLog(`🤖 ${ev.message}`);
+              break;
+            case 'etl_chunk':
+              _setPct(50+Math.round((ev.pct||0)*0.4),tl(`Analysing chunk ${ev.chunk}/${ev.total_chunks}`,`分析區塊 ${ev.chunk}/${ev.total_chunks}`));
+              _addLog(`  ${tl('Chunk','區塊')} ${ev.chunk}/${ev.total_chunks} — ${ev.pct}%`);
+              break;
+            case 'etl_done':
+              _setPct(90,tl('Extraction complete','萃取完成'));
+              _addLog(`✓ ${ev.message}`,'text-success');
+              break;
+            case 'facts_start':
+              _setPct(93,tl('Registering facts…','登記事實中…'));
+              _addLog(`📊 ${ev.message}`);
+              break;
+            case 'complete':
+              _setPct(100,tl('Done!','完成！'));
+              _addLog(`🎉 ${ev.message}`,'fw-bold text-success');
+              finalData={
+                sections_extracted:ev.sections_extracted||[],
+                data:ev.data||{},
+                facts_registered:ev.facts_registered||0,
+              };
+              clearTimeout(timer);evs.close();resolve();
+              break;
+            case 'error':
+              clearTimeout(timer);evs.close();
+              reject(new Error(ev.message||'ETL error'));
+              break;
+          }
+        }catch(_){}
+      };
+      evs.onerror=()=>{
+        // SSE connection error — may be a redirect or auth issue
+        clearTimeout(timer);evs.close();
+        reject(new Error('stream_unavailable'));
+      };
+    });
+  }catch(streamErr){
+    if(streamErr.message==='stream_unavailable'||streamErr.message.includes('stream')){
+      // Fallback: non-streaming synchronous ETL
+      body.innerHTML=`<div class="px-3 py-4 text-center"><div class="spinner-border text-success mb-3" style="width:3rem;height:3rem;"></div><div class="fw-semibold">${tl('Running AI extraction…','正在執行AI萃取…')}</div><div class="text-muted small">${esc(filename)} — ${tl('This may take 20-90 seconds for long documents','長文件可能需要20-90秒')}</div></div>`;
+      try{
+        const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/etl',{method:'POST',headers:H()});
+        const d=await res.json();
+        if(!res.ok)throw new Error(d.detail||'ETL failed');
+        finalData=d;
+      }catch(e){
+        body.innerHTML=`<div class="alert alert-danger m-3"><strong>${tl('ETL Failed:','ETL 失敗：')}</strong> ${esc(e.message)}</div>`;
+        st.textContent=tl('Error','錯誤');
+        return;
+      }
+    }else{
+      body.innerHTML=`<div class="alert alert-danger m-3"><strong>${tl('ETL Failed:','ETL 失敗：')}</strong> ${esc(streamErr.message)}</div>`;
+      st.textContent=tl('Error','錯誤');
       return;
     }
-    // Build rows using raw d.data directly (never pass JSON through onclick attributes)
-    const rows=d.sections_extracted.map(n=>{
-      const sec=parseInt(n)||n;
-      const data=d.data[String(sec)]||{};
-      const fcount=Object.keys(data).length;
-      const preview=JSON.stringify(data,null,2).slice(0,800);
-      return`<div class="card mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:#e8f5ee;">
-          <span class="fw-bold">§${sec} — ${esc(snm(sec))}</span>
-          <div class="d-flex align-items-center gap-2">
-            <span class="badge bg-success">${fcount} ${tl(`field${fcount!==1?'s':''} extracted`,`個欄位已萃取`)}</span>
-            <button class="btn btn-sm btn-primary" onclick="previewEtlMerge(${sec})">
-              ${tl(`Apply to §${sec}`,`套用至 §${sec}`)}</button>
-          </div>
-        </div>
-        <div class="card-body p-2">
-          <details><summary class="text-muted small" style="cursor:pointer">Show extracted JSON</summary>
-          <pre class="mt-2" style="font-size:11px;max-height:250px;overflow-y:auto;background:#f8f9fa;padding:8px;border-radius:4px;">${esc(preview)}${preview.length===800?'\n…(truncated)':''}</pre>
-          </details>
-        </div>
-      </div>`;
-    }).join('');
-    body.innerHTML=`<div class="alert alert-success m-3 py-2"><strong>✓ ${tl('AI ETL Complete','AI ETL 完成')}</strong> — ${tl(`${d.sections_extracted.length} section(s) extracted from`,`已從 <em>${esc(filename)}</em> 萃取 ${d.sections_extracted.length} 個段落`)} ${tl(`<em>${esc(filename)}</em>`,'')}<br><small class="text-muted">${tl('Review extracted data below. Click "Apply to §N" to save fields as section input (merges with existing data).','請在下方審查萃取資料，點擊「套用至 §N」以將欄位儲存為段落輸入（將與現有資料合併）。')}</small></div>${rows}`;
-    st.textContent=tl(`${d.sections_extracted.length} sections extracted`,`已萃取 ${d.sections_extracted.length} 個段落`);
-    await loadReportDetail(currentRid); // refresh etl_status badge — this resets _etlExtractedData
-    // Re-populate AFTER loadReportDetail so Apply buttons have data when the user clicks them
-    _etlExtractedData = {};
-    d.sections_extracted.forEach(n=>{
-      const sec=parseInt(n)||n;
-      _etlExtractedData[sec]=d.data[String(sec)]||{};
-    });
-  }catch(e){
-    body.innerHTML=`<div class="alert alert-danger m-3"><strong>${tl('ETL Failed:','ETL 失敗：')}</strong> ${esc(e.message)}</div>`;
-    st.textContent=tl('Error','錯誤');
   }
+
+  // Render results
+  _renderEtlResults(finalData, filename, body, st);
+  await loadReportDetail(currentRid);
+  _etlExtractedData={};
+  (finalData.sections_extracted||[]).forEach(n=>{
+    const sec=parseInt(n)||n;
+    _etlExtractedData[sec]=(finalData.data||{})[String(sec)]||{};
+  });
 }
 
 // ── ETL Merge Diff Preview ────────────────────────────────────────────────────

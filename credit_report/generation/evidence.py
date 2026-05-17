@@ -140,7 +140,17 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     pdf_kb = len(pdf_bytes) // 1024
     logger.info("[OCR] extract_text_from_pdf: start bytes=%dKB", pdf_kb)
 
-    # pdfminer — best for native-text PDFs
+    # pdfplumber — table-aware extraction, best for financial PDFs with structured tables
+    t0 = time.perf_counter()
+    plumber_text = _extract_tables_pdfplumber(pdf_bytes)
+    elapsed = (time.perf_counter() - t0) * 1000
+    if plumber_text and _text_quality_ok(plumber_text):
+        logger.info("[OCR] pdfplumber: elapsed=%.0fms quality OK → using table-aware text", elapsed)
+        return plumber_text
+    if plumber_text:
+        logger.info("[OCR] pdfplumber: elapsed=%.0fms low quality, trying pdfminer", elapsed)
+
+    # pdfminer — best for native-text PDFs without complex table layouts
     t0 = time.perf_counter()
     try:
         import io
@@ -204,6 +214,46 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         "— returning empty so caller triggers Vision OCR"
     )
     return ""
+
+
+def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
+    """Extract text + tables from PDF via pdfplumber, rendering tables as Markdown.
+
+    Used as a quality supplement: when pdfminer/pypdf produce quality text we
+    prepend pdfplumber's table-aware extraction so ETL can read structured financial
+    tables (e.g. income statement, balance sheet) that otherwise appear as
+    concatenated rows without column context.
+    """
+    try:
+        import io
+        import pdfplumber
+
+        parts: list[str] = []
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page_no, page in enumerate(pdf.pages, 1):
+                page_text = page.extract_text() or ""
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        if not table or not table[0]:
+                            continue
+                        headers = [str(c).strip() if c is not None else "" for c in table[0]]
+                        parts.append(f"\n[Page {page_no} Table]\n")
+                        parts.append("| " + " | ".join(headers) + " |")
+                        parts.append("| " + " | ".join(["---"] * len(headers)) + " |")
+                        for row in table[1:]:
+                            cells = [str(c).strip() if c is not None else "" for c in row]
+                            parts.append("| " + " | ".join(cells) + " |")
+                if page_text.strip():
+                    parts.append(f"\n[Page {page_no}]\n{page_text}")
+        result = "\n".join(parts)
+        logger.info("[OCR] pdfplumber: extracted %d chars from PDF", len(result))
+        return result
+    except ImportError:
+        return ""
+    except Exception as e:
+        logger.warning("[OCR] pdfplumber: extraction failed: %s", e)
+        return ""
 
 
 # ── Office format extraction ──────────────────────────────────────────────────
@@ -367,7 +417,7 @@ _GEMINI_PDF_SIZE_LIMIT = 20 * 1024 * 1024  # 20 MB
 _PDF_PAGE_THRESHOLD = 30
 
 
-def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 60) -> str:
+def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200) -> str:
     """
     For scanned/image PDFs where text extraction yields nothing:
     send the PDF to Gemini Vision for OCR.
@@ -499,6 +549,112 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 60) 
         return ""
 
 
+async def extract_text_from_scanned_pdf_vision_async(
+    pdf_bytes: bytes,
+    on_progress: Optional[callable] = None,
+    max_pages: int = 200,
+) -> str:
+    """
+    Async page-by-page Gemini Vision OCR for large PDFs (up to 200 pages).
+    on_progress(page_idx, total_pages, chars_so_far) called after each page.
+    """
+    from google import genai
+    from google.genai import types as genai_types
+    from credit_report.config import GEMINI_API_KEY, GEMINI_OCR_MODEL
+
+    if not GEMINI_API_KEY:
+        return ""
+
+    pdf_kb = len(pdf_bytes) // 1024
+    logger.info("[OCR-ASYNC] start pdf_kb=%d max_pages=%d", pdf_kb, max_pages)
+    t0 = time.perf_counter()
+
+    # For small PDFs that fit in one call, use single-call path
+    use_page_split = len(pdf_bytes) > _GEMINI_PDF_SIZE_LIMIT
+    if not use_page_split:
+        try:
+            import io
+            from pypdf import PdfReader
+            n_pages = len(PdfReader(io.BytesIO(pdf_bytes)).pages)
+            use_page_split = n_pages > _PDF_PAGE_THRESHOLD
+            logger.info("[OCR-ASYNC] pages=%d use_page_split=%s", n_pages, use_page_split)
+        except Exception:
+            pass
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    if not use_page_split:
+        # Single-call path for short PDFs
+        try:
+            response = await client.aio.models.generate_content(
+                model=GEMINI_OCR_MODEL,
+                contents=[
+                    genai_types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                    genai_types.Part.from_text(_OCR_PROMPT),
+                ],
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+            )
+            result = response.text or ""
+            if on_progress:
+                on_progress(1, 1, len(result))
+            return result
+        except Exception as e:
+            logger.warning("[OCR-ASYNC] single-call failed: %s — trying page split", e)
+            use_page_split = True
+
+    # Page-by-page path
+    page_blobs = _split_pdf_pages(pdf_bytes)
+    if not page_blobs:
+        # Fallback: send capped single call
+        data = pdf_bytes[:_GEMINI_PDF_SIZE_LIMIT]
+        try:
+            response = await client.aio.models.generate_content(
+                model=GEMINI_OCR_MODEL,
+                contents=[
+                    genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
+                    genai_types.Part.from_text(_OCR_PROMPT),
+                ],
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+            )
+            return response.text or ""
+        except Exception as e:
+            logger.warning("[OCR-ASYNC] fallback call failed: %s", e)
+            return ""
+
+    n_pages = len(page_blobs)
+    capped = page_blobs[:max_pages]
+    logger.info("[OCR-ASYNC] page-by-page: total=%d processing=%d", n_pages, len(capped))
+
+    page_texts: list[str] = []
+    chars_total = 0
+    for idx, blob in enumerate(capped):
+        try:
+            response = await client.aio.models.generate_content(
+                model=GEMINI_OCR_MODEL,
+                contents=[
+                    genai_types.Part.from_bytes(data=blob, mime_type="application/pdf"),
+                    genai_types.Part.from_text(_OCR_PROMPT),
+                ],
+                config=genai_types.GenerateContentConfig(max_output_tokens=8192),
+            )
+            page_text = response.text or ""
+            page_texts.append(page_text)
+            chars_total += len(page_text)
+        except Exception as e:
+            logger.warning("[OCR-ASYNC] page %d failed: %s", idx + 1, e)
+            page_texts.append("")
+
+        if on_progress:
+            on_progress(idx + 1, len(capped), chars_total)
+
+    result = "\n\n".join(t for t in page_texts if t.strip())
+    elapsed = (time.perf_counter() - t0) * 1000
+    logger.info("[OCR-ASYNC] done: pages=%d elapsed=%.0fms chars=%d", len(capped), elapsed, len(result))
+    if n_pages > max_pages:
+        logger.warning("[OCR-ASYNC] PDF has %d pages, only first %d processed", n_pages, max_pages)
+    return result
+
+
 # ── xlsx / xls ────────────────────────────────────────────────────────────────
 
 def _extract_text_from_xlsx(file_bytes: bytes) -> str:
@@ -519,7 +675,7 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
             n_cols = len(headers)
             parts.append("| " + " | ".join(headers) + " |")
             parts.append("| " + " | ".join(["---"] * n_cols) + " |")
-            for row in rows[1:51]:   # cap at 50 data rows per sheet
+            for row in rows[1:201]:   # cap at 200 data rows per sheet
                 raw = [str(c) if c is not None else "" for c in row]
                 # Pad/truncate to match header width so the markdown table stays valid.
                 padded = (raw + [""] * n_cols)[:n_cols]
