@@ -51,6 +51,7 @@ async def list_conflicts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _assert_report_access(db, report_id, current_user)
     return await repo.get_open_conflicts(db, report_id)
 
 

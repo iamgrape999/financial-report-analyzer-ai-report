@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from credit_report.audit.events import write_event
 from credit_report.database import get_db
 from credit_report.fact_store import repository as repo
-from credit_report.fact_store.models import FactConflict
+from credit_report.fact_store.models import CanonicalFact, FactConflict
+from credit_report.models import Report
 from credit_report.schemas import ConflictResponse, ResolveConflictRequest
 from credit_report.security.auth import get_current_user, require_analyst
 from credit_report.security.models import User
@@ -21,12 +22,25 @@ class MarkUnresolvedResponse(BaseModel):
 router = APIRouter(prefix="/reports/{report_id}/facts/conflicts", tags=["conflicts"])
 
 
+async def _assert_conflict_report_access(
+    db: AsyncSession, report_id: str, current_user: User
+) -> None:
+    """Raise 404/403 if the caller does not own the report (admin exempt)."""
+    result = await db.execute(select(Report).where(Report.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if current_user.role != "admin" and report.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
 @router.get("", response_model=list[ConflictResponse])
 async def list_conflicts(
     report_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _assert_conflict_report_access(db, report_id, current_user)
     return await repo.get_open_conflicts(db, report_id)
 
 
@@ -37,6 +51,7 @@ async def get_conflict(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _assert_conflict_report_access(db, report_id, current_user)
     result = await db.execute(
         select(FactConflict).where(
             FactConflict.id == conflict_id,
@@ -108,6 +123,20 @@ async def mark_unresolved(
     conflict = result.scalar_one_or_none()
     if not conflict:
         raise HTTPException(status_code=404, detail="Conflict not found")
+
+    # When unresolving a previously resolved conflict, restore the involved facts
+    # back to "conflicted" so the conflict can be re-resolved. Without this,
+    # the chosen fact stays "approved" (can only → deprecated) and rejected facts
+    # stay "deprecated" (terminal), making the conflict unresolvable again.
+    if conflict.status == "resolved":
+        for fid in (conflict.fact_a_id, conflict.fact_b_id):
+            if not fid:
+                continue
+            fr = await db.execute(select(CanonicalFact).where(CanonicalFact.id == fid))
+            fact = fr.scalar_one_or_none()
+            if fact and fact.state in ("approved", "deprecated"):
+                fact.state = "conflicted"
+                fact.version += 1
 
     conflict.status = "open"
     conflict.chosen_fact_id = None
