@@ -1118,6 +1118,13 @@ async def generate_full_report(
                         "pct": round(done_count / len(GENERATION_ORDER) * 100),
                         "message": f"§{sec_no} {status} ({done_count}/{len(GENERATION_ORDER)} sections)",
                     })
+                _progress_bus.push(task_id, {
+                    "type": "complete",
+                    "sections": {str(k): v for k, v in results.items()},
+                    "done_count": done,
+                    "total": len(GENERATION_ORDER),
+                    "message": f"Report generation complete — {done}/{len(results)} sections done",
+                })
                 _generation_tasks.update(task_id, {
                     "status": "done",
                     "sections": {str(k): v for k, v in results.items()},

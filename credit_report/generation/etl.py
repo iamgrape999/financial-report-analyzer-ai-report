@@ -1518,11 +1518,40 @@ def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
 
 
 # ── Mapping of ETL section fields → CanonicalFact metric names ───────────────────────────────
-# (section_no, sub_key, field_path_dotted) → (metric_name, unit, currency_field)
-# Only scalar-numeric fields that are meaningful as standalone facts are included here.
+# (section_no, sub_key, field_dotted_path, metric_name, unit)
+# Dotted paths (e.g. "deal_dscr.dscr_value") are supported for nested fields.
+# Only scalar-numeric fields meaningful as standalone facts are included here.
 _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
-    # (section_no, sub_key, field, metric_name, unit)
-    # §7 borrower financials — income / debt
+    # §1 — Credit Facility
+    (1, "facility_summary", "totals.total_credit_limit_usd_m", "credit_limit_usd_m",   "mn"),
+    (1, "facility_summary", "totals.psr_spot_limit_usd_m",     "psr_spot_limit_usd_m", "mn"),
+    (1, "account_strategy", "nii_usd_m",                       "nii_usd_m",            "mn"),
+
+    # §2 — Overall Comments
+    (2, "2B_solvency", "deal_dscr.dscr_value",          "dscr",                  None),
+    (2, "2B_solvency", "ema.debt_ebitda_ratio",          "debt_ebitda",           None),
+    (2, "2B_solvency", "ema.interest_coverage",          "interest_coverage",     None),
+    (2, "2B_solvency", "ema.op_ebitda_bn_usd",           "ema_ebitda_usd_bn",     "bn"),
+    (2, "2B_solvency", "ema.total_debt_bn_usd",          "ema_total_debt_usd_bn", "bn"),
+    (2, "2C_guarantor", "cash_usd_bn",                   "guarantor_cash_usd_bn",      "bn"),
+    (2, "2C_guarantor", "total_debt_usd_bn",             "guarantor_total_debt_usd_bn","bn"),
+    (2, "2C_guarantor", "interest_coverage",             "guarantor_interest_coverage", None),
+
+    # §4 — Corporate History
+    (4, "4D_business", "market_share_pct",             "market_share_pct",          None),
+    (4, "4D_business", "annual_cargo_volume_m_teu",    "annual_cargo_volume_m_teu", "mn"),
+    (4, "4E_financials", "revenue",                    "revenue",                   "mn"),
+    (4, "4E_financials", "ebitda",                     "ebitda",                    "mn"),
+    (4, "4E_financials", "net_income",                 "net_income",                "mn"),
+    (4, "4F_fleet",    "total_fleet_teu",              "total_fleet_teu",           None),
+    (4, "4F_fleet",    "total_vessels",                "total_vessels",             None),
+
+    # §5 — Collateral / Guarantor
+    (5, "5B_refund_guarantee", "lag_time_days",        "rg_lag_time_days",          None),
+    (5, "5C_vessel_mortgage",  "contract_price_usd_m", "contract_price_usd_m",      "mn"),
+    (5, "5C_vessel_mortgage",  "loan_amount_usd_m",    "loan_amount_usd_m",         "mn"),
+
+    # §7 — Borrower Financial Analysis (primary financial facts)
     (7, "7A_borrower_financials", "revenue",              "revenue",              "mn"),
     (7, "7A_borrower_financials", "ebitda",               "ebitda",               "mn"),
     (7, "7A_borrower_financials", "net_income",           "net_income",           "mn"),
@@ -1531,12 +1560,32 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (7, "7A_borrower_financials", "interest_expense",     "interest_expense",     "mn"),
     (7, "7A_borrower_financials", "total_equity",         "total_equity",         "mn"),
     (7, "7A_borrower_financials", "total_assets",         "total_assets",         "mn"),
-    # §7B income statement (may be structured differently)
-    (7, "7B_income_statement", "revenue",          "revenue",      "mn"),
-    (7, "7B_income_statement", "gross_profit",     "gross_profit", "mn"),
-    (7, "7B_income_statement", "ebitda",           "ebitda",       "mn"),
-    (7, "7B_income_statement", "net_income",       "net_income",   "mn"),
+    # §7B income statement (deduplication via seen set handles overlap with §7A)
+    (7, "7B_income_statement", "revenue",                 "revenue",              "mn"),
+    (7, "7B_income_statement", "gross_profit",            "gross_profit",         "mn"),
+    (7, "7B_income_statement", "ebitda",                  "ebitda",               "mn"),
+    (7, "7B_income_statement", "net_income",              "net_income",           "mn"),
+
+    # §8 — ACRA Banking Charges
+    (8, "8A_acra_banking_charges", "summary.total_active_usd_m", "acra_total_active_usd_m", "mn"),
+    (8, "8A_acra_banking_charges", "summary.cub_total_usd_m",    "acra_cub_total_usd_m",    "mn"),
+
+    # §9 — Recommendation
+    (9, "9C_recommendation", "facility_amount_usd_m", "proposed_facility_usd_m", "mn"),
+    (9, "9C_recommendation", "tenor_years",            "proposed_tenor_years",    None),
+    (9, "9C_recommendation", "balloon_ltv_pct",        "balloon_ltv_pct",         None),
+    (9, "9C_recommendation", "margin_bps",             "margin_bps",              None),
 ]
+
+
+def _get_nested(d: dict, dotted_path: str):
+    """Get a value from a nested dict by dotted key path (e.g. 'totals.total_credit_limit_usd_m')."""
+    cur = d
+    for key in dotted_path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
 
 
 # ── Numeric unit normalizer ───────────────────────────────────────────────────
@@ -1644,20 +1693,66 @@ def _try_float(val) -> Optional[float]:
         return None
 
 
+def _extract_entity_period_currency(
+    extracted: dict[int, dict],
+    default_entity: str,
+    default_period: str,
+    default_currency: str,
+) -> tuple[str, str, str]:
+    """Derive entity name, fiscal period, and currency from ETL output where available."""
+    sec4 = extracted.get(4, {}) if isinstance(extracted.get(4), dict) else {}
+    borrower = sec4.get("4A_borrower", {}) or {}
+    financials = sec4.get("4E_financials", {}) or {}
+
+    # Entity: prefer English name, fall back to Chinese
+    entity = (
+        (borrower.get("company_name_en") or "").strip()
+        or (borrower.get("company_name_zh") or "").strip()
+        or default_entity
+    )
+
+    # Period: prefer 4E_financials.fiscal_year, then 4A_borrower.fiscal_year_end
+    raw_period = (
+        str(financials.get("fiscal_year") or "").strip()
+        or str(borrower.get("fiscal_year_end") or "").strip()
+    )
+    if raw_period and raw_period != "None":
+        # Normalise to "FY2024" form if it's a bare 4-digit year
+        period = f"FY{raw_period}" if raw_period.isdigit() and len(raw_period) == 4 else raw_period
+    else:
+        period = default_period
+
+    # Currency: prefer 4E_financials.currency
+    raw_ccy = str(financials.get("currency") or "").strip().upper()
+    currency = raw_ccy if raw_ccy and len(raw_ccy) == 3 else default_currency
+
+    return entity, period, currency
+
+
 def build_canonical_facts_from_etl(
     report_id: str,
     doc_id: str,
     extracted: dict[int, dict],
-    entity: str = "borrower",
-    period: str = "FY2024",
+    entity: str = "",
+    period: str = "",
     currency: str = "USD",
 ) -> list[dict]:
     """
     Convert an ETL extraction result into a list of CanonicalFact dicts for upsert.
 
-    Only maps well-known scalar numeric fields; all others are stored as section JSON
-    by the caller.  Returns an empty list if nothing mappable is found.
+    Entity name and fiscal period are extracted dynamically from the document when
+    available (§4A company_name_en, §4E fiscal_year); defaults apply as fallback.
+    Only maps well-known scalar numeric fields from _ETL_FACT_MAP.
+    Returns an empty list if nothing mappable is found.
     """
+    # Resolve entity/period/currency from document content
+    resolved_entity, resolved_period, resolved_currency = _extract_entity_period_currency(
+        extracted,
+        default_entity=entity or "borrower",
+        default_period=period or "FY2024",
+        default_currency=currency or "USD",
+    )
+
     facts: list[dict] = []
     seen: set[str] = set()  # deduplicate by (metric_name, entity, period)
 
@@ -1668,24 +1763,24 @@ def build_canonical_facts_from_etl(
         sub = sec_data.get(sub_key)
         if not isinstance(sub, dict):
             continue
-        raw_val = sub.get(field)
+        raw_val = _get_nested(sub, field)
         if raw_val is None:
             continue
 
         # For string values, try to extract embedded currency/unit
         if isinstance(raw_val, str):
             num_val, parsed_currency, parsed_unit = parse_financial_value(raw_val)
-            resolved_currency = parsed_currency or currency
-            resolved_unit = parsed_unit or unit
+            fact_currency = parsed_currency or resolved_currency
+            fact_unit = parsed_unit or unit
         else:
             num_val = _try_float(raw_val)
-            resolved_currency = currency
-            resolved_unit = unit
+            fact_currency = resolved_currency
+            fact_unit = unit
 
         if num_val is None:
             continue
 
-        dedup_key = f"{metric_name}|{entity}|{period}"
+        dedup_key = f"{metric_name}|{resolved_entity}|{resolved_period}"
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
@@ -1693,12 +1788,12 @@ def build_canonical_facts_from_etl(
         facts.append({
             "report_id": report_id,
             "metric_name": metric_name,
-            "entity": entity,
-            "period": period,
+            "entity": resolved_entity,
+            "period": resolved_period,
             "value": num_val,
             "value_text": str(raw_val),
-            "currency": resolved_currency,
-            "unit": resolved_unit,
+            "currency": fact_currency,
+            "unit": fact_unit or "",
             "source_type": "pdf_extraction",
             "source_priority": 3,
             "source_evidence_id": doc_id,
