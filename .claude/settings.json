@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/test_health_report.py --print 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"$CLAUDE_TOOL_INPUT_COMMAND\" | grep -qE \"pytest|python.*-m.*pytest\" && python3 scripts/test_health_report.py 2>/dev/null || true'"
+          }
+        ]
+      }
+    ]
+  }
+}

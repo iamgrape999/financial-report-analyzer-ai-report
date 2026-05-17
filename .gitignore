@@ -14,3 +14,7 @@ data/credit_reports/
 data/logs/
 *.log
 .DS_Store
+
+# Test health tracking (local machine state)
+.claude/test_history.jsonl
+.claude/test_health.md

@@ -5,7 +5,10 @@ pytest loads conftest.py files before collecting/importing test modules, so this
 ensures credit_report.config reads the correct test values when imported by any suite.
 """
 import asyncio
+import json
 import os
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -15,6 +18,63 @@ os.environ.setdefault("ADMIN_EMAIL", "admin@example.com")
 os.environ.setdefault("ADMIN_PASSWORD", "admin123")
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("AUTO_CREATE_TABLES", "true")
+
+
+# ── Test Health Tracking ──────────────────────────────────────────────────────
+# Writes per-test results to .claude/test_history.jsonl so the health-report
+# script can detect flaky / broken / slow tests across sessions.
+
+_ROOT = Path(__file__).parent.parent
+_HEALTH_DIR = _ROOT / ".claude"
+_HISTORY_FILE = _HEALTH_DIR / "test_history.jsonl"
+
+_run_buffer: list[dict] = []
+_start_times: dict[str, float] = {}
+
+
+def pytest_runtest_logstart(nodeid: str, location) -> None:  # type: ignore[override]
+    _start_times[nodeid] = time.monotonic()
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:  # type: ignore[override]
+    if report.when != "call":
+        return
+    elapsed = time.monotonic() - _start_times.pop(report.nodeid, time.monotonic())
+    if report.passed:
+        status = "passed"
+    elif report.failed:
+        status = "failed"
+    elif report.skipped:
+        status = "skipped"
+    else:
+        status = "error"
+    _run_buffer.append({
+        "test_id": report.nodeid,
+        "status": status,
+        "duration": round(elapsed, 3),
+        "ts": int(time.time()),
+    })
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if not _run_buffer:
+        return
+    _HEALTH_DIR.mkdir(parents=True, exist_ok=True)
+    with _HISTORY_FILE.open("a") as fh:
+        for record in _run_buffer:
+            fh.write(json.dumps(record) + "\n")
+    _run_buffer.clear()
+    # Regenerate the health report non-critically
+    report_script = _ROOT / "scripts" / "test_health_report.py"
+    if report_script.exists():
+        subprocess.run(
+            ["python3", str(report_script)],
+            capture_output=True,
+            cwd=_ROOT,
+        )
+
+
+# ── Test Fixtures ─────────────────────────────────────────────────────────────
 
 
 @pytest.fixture(scope="session", autouse=True)
