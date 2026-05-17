@@ -59,10 +59,14 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:  # type: ignore
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not _run_buffer:
         return
-    _HEALTH_DIR.mkdir(parents=True, exist_ok=True)
-    with _HISTORY_FILE.open("a") as fh:
-        for record in _run_buffer:
-            fh.write(json.dumps(record) + "\n")
+    try:
+        _HEALTH_DIR.mkdir(parents=True, exist_ok=True)
+        with _HISTORY_FILE.open("a") as fh:
+            for record in _run_buffer:
+                fh.write(json.dumps(record) + "\n")
+    except (OSError, PermissionError):
+        _run_buffer.clear()
+        return
     _run_buffer.clear()
     # Regenerate the health report non-critically
     report_script = _ROOT / "scripts" / "test_health_report.py"

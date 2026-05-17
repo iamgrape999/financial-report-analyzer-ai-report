@@ -264,23 +264,21 @@ async def run_section_generation(
             )
         # ─────────────────────────────────────────────────────────────────────
 
-        # ── Block AST parsing (isolated session — failure must not abort main tx) ──
+        # ── Block AST parsing (savepoint — failure rolls back AST only, not main tx) ──
         try:
             from credit_report.block_ast.builder import build_blocks
             from credit_report.block_ast.repository import save_blocks
             from credit_report.fact_store.repository import get_facts_for_report
-            from credit_report.database import AsyncSessionLocal
 
-            async with AsyncSessionLocal() as ast_db:
-                raw_facts = await get_facts_for_report(ast_db, report_id)
-                facts_payload = [
-                    {"fact_id": f.id, "value": f.value, "value_text": f.value_text}
-                    for f in raw_facts
-                    if f.value is not None
-                ]
-                blocks, cells = build_blocks(report_id, section_no, markdown, facts_payload)
-                await save_blocks(ast_db, blocks, cells)
-                await ast_db.commit()
+            raw_facts = await get_facts_for_report(db, report_id)
+            facts_payload = [
+                {"fact_id": f.id, "value": f.value, "value_text": f.value_text}
+                for f in raw_facts
+                if f.value is not None
+            ]
+            blocks, cells = build_blocks(report_id, section_no, markdown, facts_payload)
+            async with db.begin_nested():
+                await save_blocks(db, blocks, cells)
             logger.info("[AST] section=%d report=%s blocks=%d cells=%d",
                         section_no, report_id, len(blocks), len(cells))
         except Exception as _ast_err:
