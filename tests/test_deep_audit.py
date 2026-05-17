@@ -470,13 +470,13 @@ class TestXLSXExtraction:
             cell_count = len(line.split("|")) - 2  # subtract border pipes
             assert cell_count == 3, f"Row has {cell_count} cells, expected 3: {line!r}"
 
-    def test_xlsx_row_cap_at_50(self):
-        """Only first 50 data rows are extracted (ETL cap)."""
+    def test_xlsx_row_cap_at_200(self):
+        """Only first 200 data rows are extracted per sheet (ETL cap)."""
         import openpyxl, io as _io
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.append(["Value"])
-        for i in range(100):
+        for i in range(300):
             ws.append([i])
         buf = _io.BytesIO()
         wb.save(buf)
@@ -485,7 +485,8 @@ class TestXLSXExtraction:
         from credit_report.generation.evidence import _extract_text_from_xlsx
         text = _extract_text_from_xlsx(buf.read())
         data_rows = [l for l in text.splitlines() if l.startswith("|") and "Value" not in l and "---" not in l]
-        assert len(data_rows) <= 50, f"More than 50 rows extracted: {len(data_rows)}"
+        assert len(data_rows) <= 200, f"More than 200 rows extracted: {len(data_rows)}"
+        assert len(data_rows) == 200, f"Expected exactly 200 rows, got {len(data_rows)}"
 
     def test_corrupted_xlsx_returns_empty_string(self):
         """Corrupted bytes → empty string (not exception)."""
