@@ -1193,18 +1193,26 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
 }
 
 
-def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> tuple[str, str]:
+# Maximum characters sent per Gemini call. Gemini 1.5 Pro supports ~2M tokens;
+# 350 000 chars ≈ 87 500 tokens — generous headroom for schema + response.
+_ETL_CHUNK_SIZE = 350_000
+_ETL_CHUNK_OVERLAP = 10_000
+
+
+def _build_etl_prompt(
+    document_type: str, text: str, section_nos: list[int], chunk_info: str = ""
+) -> tuple[str, str]:
     """Return (system_prompt, user_prompt) for Gemini ETL extraction."""
     schema_parts = "\n\n".join(
         SECTION_EXTRACTION_SCHEMA[n] for n in section_nos if n in SECTION_EXTRACTION_SCHEMA
     )
     doc_type_label = document_type.replace("_", " ").title()
-    text_snippet = text[:400000]
+    chunk_note = f"\n[Document chunk: {chunk_info}]\n" if chunk_info else ""
     user_prompt = (
-        f"Document type: {doc_type_label}\n\n"
+        f"Document type: {doc_type_label}{chunk_note}\n\n"
         f"Target sections to extract: {section_nos}\n\n"
         f"Required JSON schema (extract these fields if present):\n{schema_parts}\n\n"
-        f"---DOCUMENT TEXT START---\n{text_snippet}\n---DOCUMENT TEXT END---\n\n"
+        f"---DOCUMENT TEXT START---\n{text}\n---DOCUMENT TEXT END---\n\n"
         "Return ONLY valid JSON with section numbers (as strings) as keys. "
         "Example: {\"4\": {\"4A_borrower\": {\"company_name_zh\": \"...\", ...}, ...}, "
         "\"7\": {\"7A_borrower_financials\": {...}}}\n"
@@ -1212,13 +1220,137 @@ def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> 
     )
     logger.info(
         "[ETL] _build_etl_prompt: doc_type=%s sections=%s "
-        "system_prompt_chars=%d schema_chars=%d text_chars=%d "
-        "(text_total=%d truncated=%s) user_prompt_chars=%d",
+        "system_prompt_chars=%d schema_chars=%d text_chars=%d user_prompt_chars=%d chunk=%r",
         document_type, section_nos,
-        len(ETL_SYSTEM_PROMPT), len(schema_parts), len(text_snippet),
-        len(text), len(text_snippet) < len(text), len(user_prompt),
+        len(ETL_SYSTEM_PROMPT), len(schema_parts), len(text), len(user_prompt), chunk_info,
     )
     return ETL_SYSTEM_PROMPT, user_prompt
+
+
+def _deep_merge_etl(base: dict, overlay: dict) -> dict:
+    """Merge two ETL result dicts: overlay fills nulls in base; lists are extended (no dupes)."""
+    merged: dict = dict(base)
+    for k, v in overlay.items():
+        if k not in merged or merged[k] is None:
+            merged[k] = v
+        elif isinstance(merged[k], dict) and isinstance(v, dict):
+            merged[k] = _deep_merge_etl(merged[k], v)
+        elif isinstance(merged[k], list) and isinstance(v, list):
+            # Append items from overlay that aren't already in base
+            existing_strs = {json.dumps(item, sort_keys=True) for item in merged[k]}
+            merged[k] = list(merged[k]) + [
+                item for item in v if json.dumps(item, sort_keys=True) not in existing_strs
+            ]
+        # If base already has a non-null scalar, keep it (base wins)
+    return merged
+
+
+async def _call_gemini_etl_once(
+    document_type: str,
+    text_chunk: str,
+    target_sections: list[int],
+    chunk_info: str = "",
+) -> dict[int, dict]:
+    """Single Gemini ETL call — returns {section_no: data}. Used by chunked and non-chunked paths."""
+    from google import genai
+    from google.genai import types as genai_types
+    from credit_report.config import GEMINI_API_KEY, GEMINI_ETL_MODEL
+
+    system_prompt, user_prompt = _build_etl_prompt(document_type, text_chunk, target_sections, chunk_info)
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    t_gemini = time.perf_counter()
+    response = await client.aio.models.generate_content(
+        model=GEMINI_ETL_MODEL,
+        contents=user_prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=65536,
+        ),
+    )
+    gemini_ms = (time.perf_counter() - t_gemini) * 1000
+    raw = (response.text or "").strip()
+
+    finish_reason = "unknown"
+    try:
+        finish_reason = str(response.candidates[0].finish_reason) if response.candidates else "no_candidates"
+    except Exception:
+        pass
+
+    logger.info("[ETL] Gemini response chunk=%r: elapsed=%.0fms chars=%d finish_reason=%s",
+                chunk_info, gemini_ms, len(raw), finish_reason)
+
+    if finish_reason not in ("FinishReason.STOP", "STOP", "1", "unknown"):
+        logger.warning("[ETL] Gemini finish_reason=%s chunk=%r — may be truncated. tail=%r",
+                       finish_reason, chunk_info, raw[-300:])
+
+    if not raw:
+        return {}
+
+    # Strip markdown fences
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        if raw.endswith("```"):
+            raw = raw[: raw.rfind("```")]
+
+    parsed = _parse_json_tolerant(raw, document_type)
+    if parsed is None:
+        return {}
+
+    result: dict[int, dict] = {}
+    for k, v in parsed.items():
+        try:
+            sec_no = int(k)
+            if isinstance(v, dict) and v and _has_any_value(v):
+                result[sec_no] = v
+        except (ValueError, TypeError):
+            pass
+    return result
+
+
+async def _etl_document_chunked(
+    text: str,
+    document_type: str,
+    target_sections: list[int],
+    t_start: float,
+) -> dict[int, dict]:
+    """Process large documents by splitting into overlapping chunks and merging results."""
+    chunks: list[str] = []
+    i = 0
+    while i < len(text):
+        chunk = text[i: i + _ETL_CHUNK_SIZE]
+        if chunk.strip():
+            chunks.append(chunk)
+        i += _ETL_CHUNK_SIZE - _ETL_CHUNK_OVERLAP
+
+    n_chunks = len(chunks)
+    logger.info("[ETL] chunked mode: doc_chars=%d chunks=%d chunk_size=%d overlap=%d",
+                len(text), n_chunks, _ETL_CHUNK_SIZE, _ETL_CHUNK_OVERLAP)
+
+    merged: dict[int, dict] = {}
+    for idx, chunk in enumerate(chunks):
+        chunk_info = f"{idx + 1}/{n_chunks}"
+        try:
+            chunk_result = await _call_gemini_etl_once(
+                document_type=document_type,
+                text_chunk=chunk,
+                target_sections=target_sections,
+                chunk_info=chunk_info,
+            )
+            # Deep-merge: first chunk populates, subsequent chunks fill nulls
+            for sec_no, sec_data in chunk_result.items():
+                if sec_no in merged:
+                    merged[sec_no] = _deep_merge_etl(merged[sec_no], sec_data)
+                else:
+                    merged[sec_no] = sec_data
+            logger.info("[ETL] chunk %s extracted sections=%s", chunk_info, list(chunk_result.keys()))
+        except Exception as chunk_exc:
+            logger.warning("[ETL] chunk %s FAILED: %s — continuing with other chunks", chunk_info, chunk_exc)
+
+    total_ms = (time.perf_counter() - t_start) * 1000
+    logger.info("[ETL] chunked ETL complete: chunks=%d sections=%s total_ms=%.0f",
+                n_chunks, list(merged.keys()), total_ms)
+    return merged
 
 
 async def etl_document(
@@ -1261,104 +1393,27 @@ async def etl_document(
     if sample_tail:
         logger.info("[ETL] document text sample (tail): %r", sample_tail)
 
-    from google import genai
-    from google.genai import types as genai_types
-    from credit_report.config import GEMINI_API_KEY, GEMINI_ETL_MODEL
+    from credit_report.config import GEMINI_API_KEY
 
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY is not configured — cannot run ETL extraction")
 
-    system_prompt, user_prompt = _build_etl_prompt(document_type, text, target_sections)
+    # For documents exceeding _ETL_CHUNK_SIZE, split into overlapping chunks and merge.
+    # This eliminates the previous 400 000-char silent truncation that caused data loss.
+    if len(text) > _ETL_CHUNK_SIZE:
+        return await _etl_document_chunked(
+            text=text,
+            document_type=document_type,
+            target_sections=target_sections,
+            t_start=t_start,
+        )
 
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        logger.info(
-            "[ETL] calling Gemini model=%s max_output_tokens=65536 "
-            "doc_type=%s sections=%s",
-            GEMINI_ETL_MODEL, document_type, target_sections,
+        result = await _call_gemini_etl_once(
+            document_type=document_type,
+            text_chunk=text,
+            target_sections=target_sections,
         )
-        t_gemini = time.perf_counter()
-        response = await client.aio.models.generate_content(
-            model=GEMINI_ETL_MODEL,
-            contents=user_prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=65536,
-            ),
-        )
-        gemini_ms = (time.perf_counter() - t_gemini) * 1000
-
-        raw = (response.text or "").strip()
-
-        # Log Gemini finish reason to detect truncation
-        finish_reason = "unknown"
-        try:
-            finish_reason = str(response.candidates[0].finish_reason) if response.candidates else "no_candidates"
-        except Exception:
-            pass
-
-        logger.info(
-            "[ETL] Gemini response: elapsed=%.0fms chars=%d finish_reason=%s",
-            gemini_ms, len(raw), finish_reason,
-        )
-        if finish_reason not in ("FinishReason.STOP", "STOP", "1", "unknown"):
-            logger.warning(
-                "[ETL] Gemini finish_reason=%s — response may be truncated or blocked. "
-                "Raw tail: %r", finish_reason, raw[-300:],
-            )
-        if not raw:
-            logger.warning("[ETL] Gemini returned EMPTY response for doc_type=%s", document_type)
-            return {}
-
-        # Log raw response head/tail for debugging
-        logger.info("[ETL] raw response head (300 chars): %r", raw[:300])
-        if len(raw) > 300:
-            logger.info("[ETL] raw response tail (200 chars): %r", raw[-200:])
-
-        # Strip markdown code fences if present
-        had_fences = raw.startswith("```")
-        if had_fences:
-            raw = raw.split("\n", 1)[-1]
-            if raw.endswith("```"):
-                raw = raw[: raw.rfind("```")]
-            logger.info("[ETL] stripped markdown code fences from response")
-
-        parsed = _parse_json_tolerant(raw, document_type)
-        if parsed is None:
-            logger.error(
-                "[ETL] JSON parse FAILED and recovery returned None — "
-                "doc_type=%s raw_chars=%d",
-                document_type, len(raw),
-            )
-            return {}
-
-        logger.info("[ETL] parsed JSON: top-level keys=%s", list(parsed.keys()))
-
-        result: dict[int, dict] = {}
-        for k, v in parsed.items():
-            try:
-                sec_no = int(k)
-                if not isinstance(v, dict) or not v:
-                    logger.info("[ETL] section %s: skipped (not a non-empty dict, got %s)", k, type(v).__name__)
-                    continue
-                has_val = _has_any_value(v)
-                sub_keys = list(v.keys())
-                logger.info(
-                    "[ETL] section %s: sub_keys=%s has_any_value=%s",
-                    k, sub_keys, has_val,
-                )
-                if has_val:
-                    result[sec_no] = v
-                else:
-                    logger.warning(
-                        "[ETL] section %s: ALL values are null — section excluded. "
-                        "This means the document has no matching data for this section.",
-                        k,
-                    )
-            except (ValueError, TypeError) as e:
-                logger.warning("[ETL] section key %r could not be parsed: %s", k, e)
-                continue
-
         total_ms = (time.perf_counter() - t_start) * 1000
         logger.info(
             "[ETL] etl_document: COMPLETE doc_type=%s total_elapsed=%.0fms "
@@ -1460,3 +1515,94 @@ def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
         return recovered
     logger.error("etl_document: JSON recovery failed doc_type=%s raw_head=%r", doc_type, raw[:300])
     return None
+
+
+# ── Mapping of ETL section fields → CanonicalFact metric names ───────────────────────────────
+# (section_no, sub_key, field_path_dotted) → (metric_name, unit, currency_field)
+# Only scalar-numeric fields that are meaningful as standalone facts are included here.
+_ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
+    # (section_no, sub_key, field, metric_name, unit)
+    # §7 borrower financials — income / debt
+    (7, "7A_borrower_financials", "revenue",              "revenue",              "mn"),
+    (7, "7A_borrower_financials", "ebitda",               "ebitda",               "mn"),
+    (7, "7A_borrower_financials", "net_income",           "net_income",           "mn"),
+    (7, "7A_borrower_financials", "total_debt",           "total_debt",           "mn"),
+    (7, "7A_borrower_financials", "cash_and_equivalents", "cash_and_equivalents", "mn"),
+    (7, "7A_borrower_financials", "interest_expense",     "interest_expense",     "mn"),
+    (7, "7A_borrower_financials", "total_equity",         "total_equity",         "mn"),
+    (7, "7A_borrower_financials", "total_assets",         "total_assets",         "mn"),
+    # §7B income statement (may be structured differently)
+    (7, "7B_income_statement", "revenue",          "revenue",      "mn"),
+    (7, "7B_income_statement", "gross_profit",     "gross_profit", "mn"),
+    (7, "7B_income_statement", "ebitda",           "ebitda",       "mn"),
+    (7, "7B_income_statement", "net_income",       "net_income",   "mn"),
+]
+
+
+def _try_float(val) -> Optional[float]:
+    """Safely convert a value to float; return None if not possible."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        return float(str(val).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def build_canonical_facts_from_etl(
+    report_id: str,
+    doc_id: str,
+    extracted: dict[int, dict],
+    entity: str = "borrower",
+    period: str = "FY2024",
+    currency: str = "USD",
+) -> list[dict]:
+    """
+    Convert an ETL extraction result into a list of CanonicalFact dicts for upsert.
+
+    Only maps well-known scalar numeric fields; all others are stored as section JSON
+    by the caller.  Returns an empty list if nothing mappable is found.
+    """
+    facts: list[dict] = []
+    seen: set[str] = set()  # deduplicate by (metric_name, entity, period)
+
+    for sec_no, sub_key, field, metric_name, unit in _ETL_FACT_MAP:
+        sec_data = extracted.get(sec_no)
+        if not isinstance(sec_data, dict):
+            continue
+        sub = sec_data.get(sub_key)
+        if not isinstance(sub, dict):
+            continue
+        raw_val = sub.get(field)
+        num_val = _try_float(raw_val)
+        if num_val is None:
+            continue
+
+        dedup_key = f"{metric_name}|{entity}|{period}"
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+
+        facts.append({
+            "report_id": report_id,
+            "metric_name": metric_name,
+            "entity": entity,
+            "period": period,
+            "value": num_val,
+            "value_text": str(raw_val),
+            "currency": currency,
+            "unit": unit,
+            "source_type": "pdf_extraction",
+            "source_priority": 3,
+            "source_evidence_id": doc_id,
+            "source_section_no": sec_no,
+            "state": "extracted",
+        })
+
+    logger.info(
+        "[ETL] build_canonical_facts_from_etl: report=%s doc=%s facts_found=%d",
+        report_id, doc_id, len(facts),
+    )
+    return facts

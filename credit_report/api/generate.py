@@ -68,6 +68,7 @@ class ETLResult(BaseModel):
     document_type: str
     sections_extracted: list[int]
     data: dict[str, dict]  # {str(section_no): {field: value}}
+    facts_registered: int = 0  # CanonicalFact records auto-created from ETL output
 
 
 class SectionJsonImportResult(BaseModel):
@@ -359,11 +360,38 @@ async def etl_document_endpoint(
 
     doc.etl_status = "done"
 
+    # Auto-register key financial metrics extracted by ETL as CanonicalFact records.
+    # This enables downstream fact-conflict detection and report generation without
+    # requiring analysts to manually import each field.
+    facts_registered = 0
+    try:
+        from credit_report.generation.etl import build_canonical_facts_from_etl
+        from credit_report.fact_store import repository as fact_repo
+
+        facts_data = build_canonical_facts_from_etl(
+            report_id=report_id,
+            doc_id=doc_id,
+            extracted=extracted,
+        )
+        if facts_data:
+            await fact_repo.upsert_facts(db, facts_data)
+            facts_registered = len(facts_data)
+            logger.info(
+                "etl_document_endpoint: auto-registered %d facts doc=%s report=%s",
+                facts_registered, doc_id, report_id,
+            )
+    except Exception as _freg_err:
+        logger.warning(
+            "etl_document_endpoint: fact auto-registration failed doc=%s report=%s: %s",
+            doc_id, report_id, _freg_err,
+        )
+
     return ETLResult(
         doc_id=doc_id,
         document_type=doc_type,
         sections_extracted=sorted(extracted.keys()),
         data={str(k): v for k, v in extracted.items()},
+        facts_registered=facts_registered,
     )
 
 

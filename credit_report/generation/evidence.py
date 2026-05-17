@@ -341,20 +341,45 @@ def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -
         return ""
 
 
-def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) -> str:
+def _split_pdf_pages(pdf_bytes: bytes) -> list[bytes]:
+    """Return a list of single-page PDF byte blobs using pypdf."""
+    try:
+        import io
+        from pypdf import PdfReader, PdfWriter
+
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        pages: list[bytes] = []
+        for page in reader.pages:
+            writer = PdfWriter()
+            writer.add_page(page)
+            buf = io.BytesIO()
+            writer.write(buf)
+            pages.append(buf.getvalue())
+        return pages
+    except Exception as e:
+        logger.warning("[OCR] _split_pdf_pages failed: %s — will send full PDF", e)
+        return []
+
+
+# Gemini inline PDF upload limit per request
+_GEMINI_PDF_SIZE_LIMIT = 20 * 1024 * 1024  # 20 MB
+# Page count threshold: PDFs larger than this go through page-by-page VLM
+_PDF_PAGE_THRESHOLD = 30
+
+
+def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 60) -> str:
     """
     For scanned/image PDFs where text extraction yields nothing:
-    send the PDF directly to Gemini Vision for OCR.
-    Gemini 2.5 Flash natively understands PDF inline data.
+    send the PDF to Gemini Vision for OCR.
+
+    Strategy:
+    - Small PDFs (≤ 20 MB): send whole file in one call.
+    - Large PDFs (> 20 MB) or those with many pages: split into single-page chunks,
+      OCR each page separately, concatenate.  This prevents silent truncation and
+      ensures every page is processed.
     """
     pdf_kb = len(pdf_bytes) // 1024
-    data = pdf_bytes[:20 * 1024 * 1024]
-    truncated = len(data) < len(pdf_bytes)
-    logger.info(
-        "[OCR] extract_text_from_scanned_pdf_vision: start pdf_kb=%d "
-        "sending_kb=%d truncated=%s",
-        pdf_kb, len(data) // 1024, truncated,
-    )
+    logger.info("[OCR] extract_text_from_scanned_pdf_vision: start pdf_kb=%d", pdf_kb)
     try:
         from google import genai
         from google.genai import types as genai_types
@@ -364,37 +389,111 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) 
             logger.warning("[OCR] extract_text_from_scanned_pdf_vision: GEMINI_API_KEY not set")
             return ""
 
-        t0 = time.perf_counter()
         client = genai.Client(api_key=GEMINI_API_KEY)
-        logger.info("[OCR] calling Gemini Vision PDF OCR model=%s max_tokens=32768", GEMINI_OCR_MODEL)
-        response = client.models.generate_content(
-            model=GEMINI_OCR_MODEL,
-            contents=[
-                genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
-                genai_types.Part.from_text(_OCR_PROMPT),
-            ],
-            config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+        t0 = time.perf_counter()
+
+        # Decide strategy: whole-PDF vs page-by-page
+        use_page_split = len(pdf_bytes) > _GEMINI_PDF_SIZE_LIMIT
+        if not use_page_split:
+            # Try to count pages; switch to page-split if > _PDF_PAGE_THRESHOLD
+            try:
+                import io
+                from pypdf import PdfReader
+                n_pages = len(PdfReader(io.BytesIO(pdf_bytes)).pages)
+                use_page_split = n_pages > _PDF_PAGE_THRESHOLD
+                logger.info("[OCR] PDF pages=%d use_page_split=%s", n_pages, use_page_split)
+            except Exception:
+                pass
+
+        if not use_page_split:
+            # Single-call path (fast for short PDFs)
+            logger.info("[OCR] calling Gemini Vision PDF OCR (single-call) model=%s", GEMINI_OCR_MODEL)
+            response = client.models.generate_content(
+                model=GEMINI_OCR_MODEL,
+                contents=[
+                    genai_types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                    genai_types.Part.from_text(_OCR_PROMPT),
+                ],
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+            )
+            result = response.text or ""
+            elapsed = (time.perf_counter() - t0) * 1000
+            stats = _quality_stats(result)
+            finish_reason = (
+                str(response.candidates[0].finish_reason) if response.candidates else "no_candidates"
+            )
+            logger.info(
+                "[OCR] vision_ocr single-call: elapsed=%.0fms chars=%d "
+                "meaningful=%d ratio=%.1f%% finish_reason=%s sample=%r",
+                elapsed, stats["chars"], stats["meaningful"],
+                stats["ratio_pct"], finish_reason, stats["sample"][:200],
+            )
+            if stats["ratio_pct"] < 5:
+                logger.warning(
+                    "[OCR] vision_ocr: low quality ratio=%.1f%% — escalating to page-by-page",
+                    stats["ratio_pct"],
+                )
+                use_page_split = True  # fall through to page split below
+            else:
+                return result
+
+        # Page-by-page path: split into single-page PDFs, OCR each, concatenate
+        page_blobs = _split_pdf_pages(pdf_bytes)
+        if not page_blobs:
+            # pypdf split failed — fall back to capped single-call
+            data = pdf_bytes[:_GEMINI_PDF_SIZE_LIMIT]
+            logger.info("[OCR] page split failed — fallback single-call sending_kb=%d", len(data) // 1024)
+            response = client.models.generate_content(
+                model=GEMINI_OCR_MODEL,
+                contents=[
+                    genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
+                    genai_types.Part.from_text(_OCR_PROMPT),
+                ],
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+            )
+            return response.text or ""
+
+        n_pages = len(page_blobs)
+        capped_pages = page_blobs[:max_pages]
+        logger.info(
+            "[OCR] page-by-page OCR: total_pages=%d processing=%d model=%s",
+            n_pages, len(capped_pages), GEMINI_OCR_MODEL,
         )
+        page_texts: list[str] = []
+        for page_idx, page_blob in enumerate(capped_pages):
+            try:
+                page_response = client.models.generate_content(
+                    model=GEMINI_OCR_MODEL,
+                    contents=[
+                        genai_types.Part.from_bytes(data=page_blob, mime_type="application/pdf"),
+                        genai_types.Part.from_text(_OCR_PROMPT),
+                    ],
+                    config=genai_types.GenerateContentConfig(max_output_tokens=8192),
+                )
+                page_text = page_response.text or ""
+                page_texts.append(page_text)
+                if page_idx % 10 == 0:
+                    logger.info("[OCR] page-by-page: processed %d/%d pages", page_idx + 1, len(capped_pages))
+            except Exception as page_err:
+                logger.warning("[OCR] page-by-page: page %d failed: %s", page_idx + 1, page_err)
+                page_texts.append("")  # preserve page numbering
+
+        result = "\n\n".join(t for t in page_texts if t.strip())
         elapsed = (time.perf_counter() - t0) * 1000
-        result = response.text or ""
-        finish_reason = getattr(getattr(response, "candidates", [None])[0], "finish_reason", "unknown") if response.candidates else "no_candidates"
         stats = _quality_stats(result)
         logger.info(
-            "[OCR] extract_text_from_scanned_pdf_vision: elapsed=%.0fms chars=%d "
-            "meaningful=%d ratio=%.1f%% finish_reason=%s",
-            elapsed, stats["chars"], stats["meaningful"],
-            stats["ratio_pct"], finish_reason,
+            "[OCR] page-by-page OCR complete: total_pages=%d elapsed=%.0fms chars=%d "
+            "meaningful=%d ratio=%.1f%% sample=%r",
+            len(capped_pages), elapsed, stats["chars"], stats["meaningful"],
+            stats["ratio_pct"], stats["sample"][:200],
         )
-        logger.info("[OCR] vision_ocr sample (first 300 chars): %r", stats["sample"][:300])
-        if not result:
-            logger.warning("[OCR] extract_text_from_scanned_pdf_vision: Gemini returned empty response")
-        elif stats["ratio_pct"] < 5:
+        if n_pages > max_pages:
             logger.warning(
-                "[OCR] extract_text_from_scanned_pdf_vision: low quality OCR result "
-                "ratio=%.1f%% — PDF may be image-only or unsupported format",
-                stats["ratio_pct"],
+                "[OCR] page-by-page: PDF has %d pages but only first %d were processed",
+                n_pages, max_pages,
             )
         return result
+
     except Exception as e:
         logger.warning("[OCR] extract_text_from_scanned_pdf_vision: Gemini Vision failed: %s", e)
         return ""
