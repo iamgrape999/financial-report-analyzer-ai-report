@@ -24,6 +24,7 @@ from credit_report.generation.etl import (
     _ETL_CHUNK_SIZE,
     build_canonical_facts_from_etl,
     _try_float,
+    _normalise_year_key,
 )
 from credit_report.generation.evidence import _split_pdf_pages
 from main import app
@@ -433,3 +434,149 @@ class TestAutoRegistrationIntegration:
         rev_fact = next(f for f in facts if f["metric_name"] == "revenue")
         assert rev_fact["source_type"] == "pdf_extraction"
         assert rev_fact["value"] == pytest.approx(2500.0)
+
+
+# ── Tests: _normalise_year_key ────────────────────────────────────────────────
+
+class TestNormaliseYearKey:
+    """Unit tests for the FY_YYYY key canonicalisation helper."""
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("2024",        "FY2024"),
+        ("2024F",       "FY2024F"),
+        ("2024E",       "FY2024E"),
+        ("2024f",       "FY2024F"),
+        ("FY2024",      "FY2024"),
+        ("FY2024F",     "FY2024F"),
+        ("FY_2024",     "FY2024"),
+        ("FY_2024F",    "FY2024F"),
+        ("1Q25",        "1Q25"),    # quarterly — kept as-is
+        ("2Q2025",      "2Q2025"),  # quarterly — kept as-is
+        ("FY_YYYY",     "FY_YYYY"), # template placeholder — kept as-is
+        ("QN_YYYY",     "QN_YYYY"), # template placeholder — kept as-is
+    ])
+    def test_normalise_year_key(self, raw: str, expected: str):
+        assert _normalise_year_key(raw) == expected, f"_normalise_year_key({raw!r}) should be {expected!r}"
+
+
+# ── Tests: ETL §7 → CanonicalFact → recalculate integration ──────────────────
+
+class TestETLToCalculationIntegration:
+    """End-to-end: ETL §7 facts registered → /recalculate → derived ratios present."""
+
+    @pytest.mark.asyncio
+    async def test_etl_facts_enable_recalculation(self, ac, admin_hdrs):
+        """
+        Full chain:
+          1. Upload a document
+          2. Mock ETL to return §7 income+balance data (nested FY_YYYY format)
+          3. Verify CanonicalFacts registered (revenue, ebitda, total_debt, ...)
+          4. POST /recalculate → derived ratios (ebitda_margin_pct, net_debt_ebitda, ...) appear
+        """
+        import io
+
+        # Create analyst user + report
+        email = f"analyst_{uuid.uuid4().hex[:6]}@etl-calc-test.com"
+        await ac.post(
+            "/api/credit-report/auth/register",
+            json={"email": email, "password": "Pass1234!", "role": "analyst"},
+            headers=admin_hdrs,
+        )
+        r = await ac.post(
+            "/api/credit-report/auth/login",
+            data={"username": email, "password": "Pass1234!"},
+        )
+        hdrs = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        rr = await ac.post(
+            "/api/credit-report/reports",
+            json={"borrower_name": "ETL Calc Test Co"},
+            headers=hdrs,
+        )
+        report_id = rr.json()["id"]
+
+        # Upload dummy document
+        upload_r = await ac.post(
+            f"/api/credit-report/reports/{report_id}/documents",
+            headers=hdrs,
+            data={"document_type": "financial_statement"},
+            files={"file": ("financials.txt", io.BytesIO(b"Revenue 1500\nEBITDA 300"), "text/plain")},
+        )
+        doc_id = upload_r.json()["id"]
+
+        # Mock ETL with correct nested FY_YYYY structure
+        mock_etl = {
+            7: {
+                "7A_borrower_financials": {
+                    "reporting_currency": "USD",
+                    "unit": "millions",
+                    "income_statement": {
+                        "2024": {
+                            "revenue": 1500.0,
+                            "ebitda": 300.0,
+                            "net_income": 180.0,
+                            "finance_cost": 45.0,
+                        }
+                    },
+                    "balance_sheet": {
+                        "2024": {
+                            "cash": 200.0,
+                            "total_equity": 600.0,
+                            "total_assets": 2000.0,
+                            "st_borrowings": 100.0,
+                            "lt_borrowings": 800.0,
+                        }
+                    },
+                    "cash_flow": {
+                        "2024": {"ocf": 250.0, "capex": -80.0},
+                    },
+                },
+                "7B_key_ratios": {
+                    "2024": {"debt_ebitda": 3.0, "dscr": 1.35},
+                },
+            }
+        }
+
+        with patch(
+            "credit_report.api.generate.etl_document",
+            new=AsyncMock(return_value=mock_etl),
+        ):
+            etl_r = await ac.post(
+                f"/api/credit-report/reports/{report_id}/documents/{doc_id}/etl",
+                headers=hdrs,
+            )
+        assert etl_r.status_code == 200
+        assert etl_r.json()["facts_registered"] >= 6, "Expected ≥6 facts (revenue, ebitda, net_income, cash, equity, total_debt)"
+
+        # Verify core facts registered
+        facts_r = await ac.get(f"/api/credit-report/reports/{report_id}/facts", headers=hdrs)
+        facts = facts_r.json()
+        metrics = {f["metric_name"] for f in facts}
+        assert "revenue" in metrics
+        assert "ebitda" in metrics
+        assert "total_debt" in metrics          # derived st+lt
+        assert "cash_and_equivalents" in metrics
+        assert "cash_flow_from_operations" in metrics
+
+        # Verify period is normalised to FY2024
+        periods = {f["period"] for f in facts}
+        assert "FY2024" in periods, f"Expected FY2024 in periods, got {periods}"
+
+        # POST /recalculate → derives ebitda_margin_pct, net_debt_ebitda, etc.
+        calc_r = await ac.post(
+            f"/api/credit-report/reports/{report_id}/recalculate",
+            headers=hdrs,
+        )
+        assert calc_r.status_code == 200
+        body = calc_r.json()
+        assert body["calculations_computed"] > 0, "Recalculate should derive at least one ratio"
+
+        # Verify at least one derived ratio exists in calculations
+        calcs_r = await ac.get(
+            f"/api/credit-report/reports/{report_id}/calculations",
+            headers=hdrs,
+        )
+        assert calcs_r.status_code == 200
+        calc_metrics = {c["metric_name"] for c in calcs_r.json()}
+        assert len(calc_metrics) > 0, f"Expected derived calculations, got none"
+        # ebitda_margin_pct = ebitda/revenue — should always be derivable
+        assert "ebitda_margin_pct" in calc_metrics, f"Expected ebitda_margin_pct, got {calc_metrics}"
