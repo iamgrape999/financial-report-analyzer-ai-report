@@ -126,14 +126,14 @@ class FXRateOut(BaseModel):
 @router.get("/fx-rates", response_model=list[FXRateOut])
 async def list_fx_rates(
     report_id: str,
+    include_stale: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(FXRate)
-        .where(FXRate.report_id == report_id, FXRate.is_stale == False)
-        .order_by(FXRate.created_at.desc())
-    )
+    q = select(FXRate).where(FXRate.report_id == report_id)
+    if not include_stale:
+        q = q.where(FXRate.is_stale == False)  # noqa: E712
+    result = await db.execute(q.order_by(FXRate.created_at.desc()))
     return list(result.scalars().all())
 
 

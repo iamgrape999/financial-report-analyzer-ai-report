@@ -330,6 +330,8 @@ class TestElementIDIntegrity:
             "factTab-",         # template prefix: getElementById('factTab-'+tab)
             "reason-",          # template prefix: getElementById('reason-'+id)
             "vstatus-",         # template prefix: getElementById('vstatus-'+id)
+            "gpRow",            # dynamically created: id="gpRow${n}" in generateAll() progress panel
+            "gpBadge",          # dynamically created: id="gpBadge${n}" in generateAll() progress panel
         }
         actual_missing = missing - dynamic_ok
         assert not actual_missing, (

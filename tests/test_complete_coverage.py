@@ -1089,13 +1089,17 @@ class TestCalculationEngineModules:
                      json={"from_currency": "GBP", "to_currency": "USD",
                            "rate": 1.27, "rate_date": "2024-01-02"},
                      headers=admin_hdrs)
+        # Active rates (default view)
         r = await ac.get(f"{RPTS}/{rid}/fx-rates", headers=admin_hdrs)
-        rates = r.json()
-        gbp_rates = [x for x in rates if x["from_currency"] == "GBP"]
-        stale = [x for x in gbp_rates if x["is_stale"]]
-        active = [x for x in gbp_rates if not x["is_stale"]]
-        assert len(active) == 1, f"Expected 1 active GBP/USD rate, got {active}"
-        assert active[0]["rate"] == 1.27
+        active_rates = [x for x in r.json() if x["from_currency"] == "GBP"]
+        assert len(active_rates) == 1, f"Expected 1 active GBP/USD rate, got {active_rates}"
+        assert active_rates[0]["rate"] == 1.27
+        assert not active_rates[0]["is_stale"]
+
+        # All rates including stale (use include_stale=true)
+        r2 = await ac.get(f"{RPTS}/{rid}/fx-rates?include_stale=true", headers=admin_hdrs)
+        all_rates = [x for x in r2.json() if x["from_currency"] == "GBP"]
+        stale = [x for x in all_rates if x["is_stale"]]
         assert len(stale) >= 1, "Old rate should be marked stale"
 
 
