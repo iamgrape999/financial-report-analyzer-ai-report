@@ -361,3 +361,49 @@ async def test_full_report_pipeline_skips_section_with_unmet_dep(db: AsyncSessio
     assert "error" in results.get(7, "")
     # Section 2 depends on section 7 which failed → skipped
     assert "skipped_missing_deps" in results.get(2, "")
+
+
+@pytest.mark.asyncio
+async def test_ast_block_failure_does_not_abort_generation(db: AsyncSession):
+    """
+    Block AST parsing is wrapped in a savepoint.  If save_blocks() raises,
+    the main section_output (markdown + status='done') must still be committed;
+    only the block rows are rolled back.
+    """
+    from sqlalchemy import select
+    from credit_report.block_ast.models import ReportBlock
+
+    db.add(SectionInput(
+        id=str(uuid.uuid4()),
+        report_id=REPORT_ID,
+        section_no=4,
+        input_json='{"4A_corporate": {"borrower_name": "SavepointCo"}}',
+        saved_by="user-001",
+    ))
+    await db.flush()
+
+    mock_markdown = "## §4\n\nSavepoint isolation test.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+
+    with patch(
+        "credit_report.generation.pipeline.generate_section_markdown",
+        new_callable=AsyncMock,
+        return_value=(mock_markdown, 100),
+    ), patch(
+        "credit_report.generation.pipeline.retrieve_evidence",
+        return_value=[],
+    ), patch(
+        "credit_report.block_ast.repository.save_blocks",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("simulated save_blocks crash"),
+    ):
+        output = await run_section_generation(db, REPORT_ID, section_no=4, actor_user_id="user-001")
+
+    # Main section generation must succeed despite AST failure
+    assert output.status == "done", f"Expected status=done, got {output.status}"
+    assert output.markdown == mock_markdown
+
+    # Blocks table must be empty — savepoint rolled back the failed write
+    result = await db.execute(
+        select(ReportBlock).where(ReportBlock.report_id == REPORT_ID, ReportBlock.section_no == 4)
+    )
+    assert result.scalars().all() == [], "AST block rows should be absent after savepoint rollback"
