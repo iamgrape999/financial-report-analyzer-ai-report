@@ -1551,20 +1551,7 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (5, "5C_vessel_mortgage",  "contract_price_usd_m", "contract_price_usd_m",      "mn"),
     (5, "5C_vessel_mortgage",  "loan_amount_usd_m",    "loan_amount_usd_m",         "mn"),
 
-    # §7 — Borrower Financial Analysis (primary financial facts)
-    (7, "7A_borrower_financials", "revenue",              "revenue",              "mn"),
-    (7, "7A_borrower_financials", "ebitda",               "ebitda",               "mn"),
-    (7, "7A_borrower_financials", "net_income",           "net_income",           "mn"),
-    (7, "7A_borrower_financials", "total_debt",           "total_debt",           "mn"),
-    (7, "7A_borrower_financials", "cash_and_equivalents", "cash_and_equivalents", "mn"),
-    (7, "7A_borrower_financials", "interest_expense",     "interest_expense",     "mn"),
-    (7, "7A_borrower_financials", "total_equity",         "total_equity",         "mn"),
-    (7, "7A_borrower_financials", "total_assets",         "total_assets",         "mn"),
-    # §7B income statement (deduplication via seen set handles overlap with §7A)
-    (7, "7B_income_statement", "revenue",                 "revenue",              "mn"),
-    (7, "7B_income_statement", "gross_profit",            "gross_profit",         "mn"),
-    (7, "7B_income_statement", "ebitda",                  "ebitda",               "mn"),
-    (7, "7B_income_statement", "net_income",              "net_income",           "mn"),
+    # §7 — handled by _extract_section7_facts() due to dynamic FY_YYYY nesting
 
     # §8 — ACRA Banking Charges
     (8, "8A_acra_banking_charges", "summary.total_active_usd_m", "acra_total_active_usd_m", "mn"),
@@ -1586,6 +1573,159 @@ def _get_nested(d: dict, dotted_path: str):
             return None
         cur = cur.get(key)
     return cur
+
+
+def _normalise_year_key(key: str) -> str:
+    """Convert FY_YYYY / YYYY / YYYYF to canonical 'FY2024' period string."""
+    import re
+    s = str(key).strip()
+    if "YYYY" in s or "QN" in s:
+        return s  # template placeholder — skip
+    if re.match(r"^FY\d{4}", s):
+        return s  # already canonical: FY2024, FY2024F
+    m = re.match(r"^FY_(\d{4})([A-Za-z]?)$", s)
+    if m:
+        return f"FY{m.group(1)}{m.group(2).upper()}"
+    m = re.match(r"^(\d{4})([FEfe]?)$", s)
+    if m:
+        suffix = m.group(2).upper()
+        return f"FY{m.group(1)}{suffix}"
+    return s  # quarterly keys (1Q25) or other — keep as-is
+
+
+def _extract_section7_facts(
+    sec7: dict,
+    report_id: str,
+    doc_id: str,
+    default_entity: str,
+    default_currency: str,
+    seen: set,
+) -> list[dict]:
+    """Extract multi-year financial facts from §7's FY_YYYY nested structure.
+
+    §7A uses income_statement/{year}/{field}, balance_sheet/{year}/{field},
+    cash_flow/{year}/{field}. §7B uses 7B_key_ratios/{year}/{field}.
+    Each year becomes a separate CanonicalFact with period='FY{year}'.
+    """
+    facts: list[dict] = []
+
+    fin = sec7.get("7A_borrower_financials") or {}
+    if not isinstance(fin, dict):
+        fin = {}
+
+    raw_ccy = str(fin.get("reporting_currency") or "").strip().upper()
+    currency = raw_ccy if raw_ccy and len(raw_ccy) == 3 else (default_currency or "USD")
+
+    raw_entity = str(fin.get("reporting_entity") or "").strip()
+    entity = raw_entity or default_entity or "borrower"
+
+    def _push(metric: str, raw_val, period: str, unit: str = "mn") -> None:
+        dedup = f"{metric}|{entity}|{period}"
+        if dedup in seen or raw_val is None:
+            return
+        num_val = _try_float(raw_val)
+        if num_val is None:
+            return
+        seen.add(dedup)
+        facts.append({
+            "report_id": report_id,
+            "metric_name": metric,
+            "entity": entity,
+            "period": period,
+            "value": num_val,
+            "value_text": str(raw_val),
+            "currency": currency,
+            "unit": unit or "",
+            "source_type": "pdf_extraction",
+            "source_priority": 3,
+            "source_evidence_id": doc_id,
+            "source_section_no": 7,
+            "state": "extracted",
+        })
+
+    # ── Income statement ────────────────────────────────────────────────────────
+    income_stmt = fin.get("income_statement") or {}
+    if isinstance(income_stmt, dict):
+        for year_key, yr in income_stmt.items():
+            if not isinstance(yr, dict):
+                continue
+            p = _normalise_year_key(year_key)
+            _push("revenue",                yr.get("revenue"),               p)
+            _push("ebitda",                 yr.get("ebitda"),                p)
+            _push("gross_profit",           yr.get("gross_profit"),          p)
+            _push("net_income",             yr.get("net_income"),            p)
+            _push("net_income_to_parent",   yr.get("net_income_to_parent"),  p)
+            _push("interest_expense",       yr.get("finance_cost"),          p)
+            _push("depreciation",           yr.get("depreciation"),          p)
+
+    # ── Balance sheet ──────────────────────────────────────────────────────────
+    bal_sheet = fin.get("balance_sheet") or {}
+    if isinstance(bal_sheet, dict):
+        for year_key, yr in bal_sheet.items():
+            if not isinstance(yr, dict):
+                continue
+            p = _normalise_year_key(year_key)
+            _push("cash_and_equivalents",  yr.get("cash"),          p)
+            _push("total_equity",          yr.get("total_equity"),  p)
+            _push("total_assets",          yr.get("total_assets"),  p)
+            # Derive total_debt = short-term + long-term borrowings
+            st = _try_float(yr.get("st_borrowings"))
+            lt = _try_float(yr.get("lt_borrowings"))
+            if st is not None and lt is not None:
+                dedup = f"total_debt|{entity}|{p}"
+                if dedup not in seen:
+                    seen.add(dedup)
+                    facts.append({
+                        "report_id": report_id,
+                        "metric_name": "total_debt",
+                        "entity": entity,
+                        "period": p,
+                        "value": round(st + lt, 4),
+                        "value_text": f"st={st}+lt={lt}",
+                        "currency": currency,
+                        "unit": "mn",
+                        "source_type": "pdf_extraction",
+                        "source_priority": 3,
+                        "source_evidence_id": doc_id,
+                        "source_section_no": 7,
+                        "state": "extracted",
+                    })
+
+    # ── Cash flow ──────────────────────────────────────────────────────────────
+    cf = fin.get("cash_flow") or {}
+    if isinstance(cf, dict):
+        for year_key, yr in cf.items():
+            if not isinstance(yr, dict):
+                continue
+            p = _normalise_year_key(year_key)
+            _push("cash_flow_from_operations", yr.get("ocf"),   p)
+            _push("capex",                     yr.get("capex"), p)
+            _push("free_cash_flow",            yr.get("fcf"),   p)
+
+    # ── 7B key ratios (FY_YYYY nested) ────────────────────────────────────────
+    key_ratios = sec7.get("7B_key_ratios") or {}
+    if isinstance(key_ratios, dict):
+        for year_key, yr in key_ratios.items():
+            if not isinstance(yr, dict):
+                continue
+            p = _normalise_year_key(year_key)
+            _push("total_debt",        yr.get("total_debt"),        p)
+            _push("net_debt",          yr.get("net_debt"),          p)
+            _push("debt_ebitda",       yr.get("debt_ebitda"),       p, unit="")
+            _push("interest_coverage", yr.get("ebitda_interest"),   p, unit="")
+            _push("dscr",              yr.get("dscr"),               p, unit="")
+            _push("ebitda_margin_pct", yr.get("ebitda_margin_pct"), p, unit="")
+            _push("gross_margin_pct",  yr.get("gross_margin_pct"),  p, unit="")
+            _push("net_margin_pct",    yr.get("ni_margin_pct"),     p, unit="")
+            _push("roe_pct",           yr.get("roe_pct"),           p, unit="")
+            _push("debt_to_equity",    yr.get("debt_equity"),       p, unit="")
+            _push("current_ratio",     yr.get("current_ratio"),     p, unit="")
+            _push("ocf_interest",      yr.get("ocf_interest"),      p, unit="")
+
+    logger.debug(
+        "[ETL] _extract_section7_facts: entity=%r facts=%d", entity, len(facts)
+    )
+    return facts
 
 
 # ── Numeric unit normalizer ───────────────────────────────────────────────────
@@ -1755,6 +1895,18 @@ def build_canonical_facts_from_etl(
 
     facts: list[dict] = []
     seen: set[str] = set()  # deduplicate by (metric_name, entity, period)
+
+    # §7 uses dynamic FY_YYYY nesting — handled by dedicated extractor
+    sec7 = extracted.get(7)
+    if isinstance(sec7, dict):
+        facts.extend(_extract_section7_facts(
+            sec7=sec7,
+            report_id=report_id,
+            doc_id=doc_id,
+            default_entity=resolved_entity,
+            default_currency=resolved_currency,
+            seen=seen,
+        ))
 
     for sec_no, sub_key, field, metric_name, unit in _ETL_FACT_MAP:
         sec_data = extracted.get(sec_no)

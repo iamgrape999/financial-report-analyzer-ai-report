@@ -132,16 +132,28 @@ class TestTryFloat:
 
 class TestBuildCanonicalFactsFromETL:
     def _make_extracted(self, revenue=1000.0, ebitda=200.0, net_income=100.0) -> dict[int, dict]:
+        """Use the correct §7 nested FY_YYYY structure that Gemini actually produces."""
         return {
             7: {
                 "7A_borrower_financials": {
-                    "revenue": revenue,
-                    "ebitda": ebitda,
-                    "net_income": net_income,
-                    "total_debt": 500.0,
-                    "cash_and_equivalents": 50.0,
-                    "interest_expense": 30.0,
-                    "total_equity": 300.0,
+                    "reporting_currency": "USD",
+                    "income_statement": {
+                        "2024": {
+                            "revenue": revenue,
+                            "ebitda": ebitda,
+                            "net_income": net_income,
+                            "finance_cost": 30.0,
+                        }
+                    },
+                    "balance_sheet": {
+                        "2024": {
+                            "cash": 50.0,
+                            "total_equity": 300.0,
+                            "total_assets": 900.0,
+                            "st_borrowings": 100.0,
+                            "lt_borrowings": 400.0,
+                        }
+                    },
                 }
             }
         }
@@ -174,22 +186,29 @@ class TestBuildCanonicalFactsFromETL:
             assert f["source_evidence_id"] == "doc-xyz"
 
     def test_null_values_excluded(self):
-        extracted = {7: {"7A_borrower_financials": {"revenue": None, "ebitda": None}}}
+        extracted = {7: {"7A_borrower_financials": {
+            "income_statement": {"2024": {"revenue": None, "ebitda": None}}
+        }}}
         facts = build_canonical_facts_from_etl("r1", "d1", extracted)
         assert facts == []
 
     def test_string_number_converted(self):
-        extracted = {7: {"7A_borrower_financials": {"revenue": "1,500.0"}}}
+        extracted = {7: {"7A_borrower_financials": {
+            "income_statement": {"2024": {"revenue": "1,500.0"}}
+        }}}
         facts = build_canonical_facts_from_etl("r1", "d1", extracted)
         revenue_fact = next((f for f in facts if f["metric_name"] == "revenue"), None)
         assert revenue_fact is not None
         assert revenue_fact["value"] == pytest.approx(1500.0)
 
     def test_no_duplicates_across_sub_keys(self):
+        """revenue in income_statement and same metric in 7B_key_ratios should not duplicate."""
         extracted = {
             7: {
-                "7A_borrower_financials": {"revenue": 1000.0},
-                "7B_income_statement": {"revenue": 900.0},  # should not duplicate
+                "7A_borrower_financials": {
+                    "income_statement": {"2024": {"revenue": 1000.0}},
+                },
+                "7B_key_ratios": {"2024": {"total_debt": 500.0, "dscr": 1.5}},
             }
         }
         facts = build_canonical_facts_from_etl("r1", "d1", extracted)
@@ -199,15 +218,47 @@ class TestBuildCanonicalFactsFromETL:
     def test_empty_extraction_returns_empty(self):
         assert build_canonical_facts_from_etl("r1", "d1", {}) == []
 
-    def test_custom_entity_and_period(self):
-        extracted = {7: {"7A_borrower_financials": {"revenue": 500.0}}}
+    def test_custom_entity_and_period_override(self):
+        """When no §4 company name is present, entity/period/currency defaults apply."""
+        extracted = {7: {"7A_borrower_financials": {
+            "income_statement": {"2025": {"revenue": 500.0}}
+        }}}
         facts = build_canonical_facts_from_etl(
             "r1", "d1", extracted,
             entity="TestCo", period="FY2025", currency="TWD",
         )
+        # period comes from the year key "2025" → normalised to "FY2025"
         assert facts[0]["entity"] == "TestCo"
         assert facts[0]["period"] == "FY2025"
+        # Currency comes from reporting_currency in 7A (missing here) → falls back to param
         assert facts[0]["currency"] == "TWD"
+
+    def test_total_debt_derived_from_balance_sheet(self):
+        """total_debt = st_borrowings + lt_borrowings when not in 7B_key_ratios."""
+        extracted = {7: {"7A_borrower_financials": {
+            "balance_sheet": {"2024": {"st_borrowings": 100.0, "lt_borrowings": 400.0}},
+        }}}
+        facts = build_canonical_facts_from_etl("r1", "d1", extracted)
+        td = next((f for f in facts if f["metric_name"] == "total_debt"), None)
+        assert td is not None
+        assert td["value"] == pytest.approx(500.0)
+
+    def test_key_ratios_extracted_per_year(self):
+        """7B_key_ratios facts are registered per year with correct metrics."""
+        extracted = {7: {
+            "7B_key_ratios": {
+                "2023": {"ebitda_margin_pct": 18.5, "debt_ebitda": 4.2},
+                "2024": {"ebitda_margin_pct": 20.0, "debt_ebitda": 3.5, "dscr": 1.3},
+            }
+        }}
+        facts = build_canonical_facts_from_etl("r1", "d1", extracted)
+        periods = {f["period"] for f in facts}
+        assert "FY2023" in periods
+        assert "FY2024" in periods
+        metrics = {f["metric_name"] for f in facts}
+        assert "ebitda_margin_pct" in metrics
+        assert "debt_ebitda" in metrics
+        assert "dscr" in metrics
 
 
 # ── Tests: Chunked ETL threshold ──────────────────────────────────────────────
@@ -323,9 +374,8 @@ class TestAutoRegistrationIntegration:
         mock_extracted = {
             7: {
                 "7A_borrower_financials": {
-                    "revenue": 1000.0,
-                    "ebitda": 200.0,
-                    "net_income": 100.0,
+                    "reporting_currency": "USD",
+                    "income_statement": {"2024": {"revenue": 1000.0, "ebitda": 200.0, "net_income": 100.0}},
                 }
             }
         }
@@ -359,8 +409,8 @@ class TestAutoRegistrationIntegration:
         mock_extracted = {
             7: {
                 "7A_borrower_financials": {
-                    "revenue": 2500.0,
-                    "ebitda": 500.0,
+                    "reporting_currency": "USD",
+                    "income_statement": {"2024": {"revenue": 2500.0, "ebitda": 500.0}},
                 }
             }
         }
