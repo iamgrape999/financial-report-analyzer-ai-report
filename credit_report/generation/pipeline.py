@@ -183,6 +183,28 @@ async def run_section_generation(
             )
 
         markdown = _strip_qa_output(markdown)
+
+        # Quality gate — guard against empty/trivial Gemini responses
+        _MIN_SECTION_CHARS = 150
+        if not markdown or not markdown.strip():
+            logger.error(
+                "run_section_generation: EMPTY output section=%d report=%s tokens=%d — "
+                "marking as error to prevent blank section being saved",
+                section_no, report_id, tokens_used,
+            )
+            output.status = "error"
+            output.model_id = GEMINI_MODEL
+            output.tokens_used = tokens_used
+            raise RuntimeError(
+                f"Gemini returned empty markdown for §{section_no} — will not save blank section"
+            )
+        if len(markdown.strip()) < _MIN_SECTION_CHARS:
+            logger.warning(
+                "run_section_generation: SHORT output section=%d report=%s chars=%d "
+                "(< %d minimum) — saving but flagging",
+                section_no, report_id, len(markdown.strip()), _MIN_SECTION_CHARS,
+            )
+
         output.markdown = markdown
         output.status = "done"
         output.model_id = GEMINI_MODEL
