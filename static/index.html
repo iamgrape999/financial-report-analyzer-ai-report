@@ -283,8 +283,9 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <small class="text-muted align-self-center" data-i18n="sp.load_template_hint">Replace template values with actual report data, then Save.</small>
       </div>
       <textarea id="jsonEd" class="form-control json-ed" rows="20"></textarea>
-      <div class="d-flex gap-2 mt-2 align-items-center">
+      <div class="d-flex gap-2 mt-2 align-items-center flex-wrap">
         <button class="btn btn-primary btn-sm" onclick="saveSectionInput()" data-i18n="sp.save_input">💾 Save Input</button>
+        <button class="btn btn-outline-info btn-sm" onclick="syncJsonToForm()" data-i18n="sp.sync_to_form" title="Parse the JSON above and populate all structured form fields">→ Sync to Form</button>
         <span id="savedAt" class="text-muted small"></span>
       </div>
       <!-- Field completeness checklist -->
@@ -295,6 +296,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <div id="tabForm" class="p-3" style="display:none">
       <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
         <button class="btn btn-primary btn-sm" onclick="saveFormInput()" data-i18n="sp.save_form">💾 Save Form</button>
+        <button class="btn btn-outline-info btn-sm" onclick="syncJsonToForm()" data-i18n="sp.import_from_json" title="Populate form fields from the JSON in the Raw JSON tab">📥 Import from JSON</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="syncFormToJson()" data-i18n="sp.sync_json">↔ Sync to JSON</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="toggleJsonPreview()" id="splitViewBtn" title="Show JSON preview alongside form">⟷ JSON Preview</button>
         <small class="text-muted" data-i18n="sp.form_hint">Fill in each field below and click Save. ✗ fields contribute to completeness (50% target for draft generation).</small>
@@ -721,7 +723,9 @@ const TRANSLATIONS={
     'sp.load_template':'📋 Load Template',
     'sp.load_template_hint':'Replace template values with actual report data, then Save.',
     'sp.save_input':'💾 Save Input',
+    'sp.sync_to_form':'→ Sync to Form',
     'sp.save_form':'💾 Save Form',
+    'sp.import_from_json':'📥 Import from JSON',
     'sp.sync_json':'↔ Sync to JSON',
     'sp.form_hint':'Fill in each field below and click Save. ✗ fields contribute to completeness (50% target for draft generation).',
     'sp.refresh':'🔄 Refresh',
@@ -1954,6 +1958,43 @@ function syncFormToJson(){
   renderCompleteness(sec,data);
   toast(tl('Form synced to JSON editor','表單已同步至JSON編輯器'),'info');
   updateJsonPreview();
+}
+
+function syncJsonToForm(){
+  const sec=currentPanelSec;if(!sec)return;
+  const raw=document.getElementById('jsonEd').value.trim();
+  if(!raw){
+    // If jsonEd is empty, try sectionInputDataMap as fallback
+    const cached=sectionInputDataMap[sec];
+    if(!cached){toast(tl('No JSON found — paste JSON in the Raw JSON tab first.','未找到JSON — 請先在「原始JSON」標籤貼上JSON。'),'warning');return;}
+    _applyJsonToForm(sec,cached);return;
+  }
+  let parsed;
+  try{parsed=JSON.parse(raw);}catch(e){toast(tl('Invalid JSON: ','無效的JSON：')+e.message,'danger');return;}
+  if(typeof parsed!=='object'||Array.isArray(parsed)){toast(tl('Input must be a JSON object {}','輸入必須為JSON物件 {}'),'warning');return;}
+  _applyJsonToForm(sec,parsed);
+}
+
+function _applyJsonToForm(sec,parsed){
+  // Manually switch to form tab without triggering openStructuredForm (which re-fetches from API)
+  const order=['form','input','output'];
+  document.querySelectorAll('#panelTabs .nav-link').forEach((el,i)=>el.classList.toggle('active',i===order.indexOf('form')));
+  document.getElementById('tabForm').style.display='block';
+  document.getElementById('tabInput').style.display='none';
+  document.getElementById('tabOutput').style.display='none';
+  // Render form fields and populate from the pasted JSON
+  const container=document.getElementById('formFields');
+  container.innerHTML=renderFieldForm(sec);
+  const expanded=expandPayload(sec,parsed);
+  populateForm(sec,expanded);
+  sectionInputDataMap[sec]=parsed;
+  renderCompleteness(sec,expanded);
+  const{pct}=getCompleteness(sec,expanded);
+  updateJsonPreview();
+  toast(tl(
+    `§${sec} JSON imported to form ✓ (${pct}% of standard fields filled). Review fields then click Save Form.`,
+    `§${sec} JSON已匯入表單欄位 ✓（標準欄位完整度 ${pct}%）。確認後請點「儲存表單」。`
+  ),'success');
 }
 
 function toggleJsonPreview(){
