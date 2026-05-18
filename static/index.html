@@ -612,6 +612,30 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
   </div></div>
 </div>
 
+<!-- Data Source Selection Modal -->
+<div class="modal fade" id="dataSourceModal" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header" style="background:#00703C;color:#fff;">
+      <h5 class="modal-title fw-bold" data-i18n="ds.title">⚠ Choose Data Source — §<span id="dsModalSecNo"></span></h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      <p data-i18n="ds.body">Both <strong>structured form</strong> and <strong>raw JSON</strong> contain data for this section and they differ. Choose which to use for AI generation:</p>
+    </div>
+    <div class="modal-footer flex-column align-items-stretch gap-2 pb-3">
+      <button class="btn btn-outline-primary text-start" onclick="_dsChooseForm()">
+        <strong data-i18n="ds.use_form">📝 Use Saved Form Data</strong><br>
+        <small class="text-muted fw-normal" data-i18n="ds.use_form_hint">Data saved via Structured Form or last Save Input</small>
+      </button>
+      <button class="btn btn-outline-success text-start" onclick="_dsChooseJson()">
+        <strong data-i18n="ds.use_json">{ } Use Raw JSON from Editor</strong><br>
+        <small class="text-muted fw-normal" data-i18n="ds.use_json_hint">JSON currently in the Raw JSON tab (will be saved first)</small>
+      </button>
+      <button class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
+    </div>
+  </div></div>
+</div>
+
 <!-- Improve Paragraph Panel -->
 <div id="improvePanel" class="improve-panel hidden">
   <div class="d-flex justify-content-between align-items-center mb-3">
@@ -797,6 +821,12 @@ const TRANSLATIONS={
     'modal.etl_merge_title_text':'Review ETL Merge',
     'modal.etl_merge_apply':'✅ Apply Merge',
     'modal.fact_inspector_title':'🔍 Fact Inspector',
+    'ds.title':'⚠ Choose Data Source — §',
+    'ds.body':'Both <strong>structured form</strong> and <strong>raw JSON</strong> contain data for this section and they differ. Choose which to use for AI generation:',
+    'ds.use_form':'📝 Use Saved Form Data',
+    'ds.use_form_hint':'Data saved via Structured Form or last Save Input',
+    'ds.use_json':'{ } Use Raw JSON from Editor',
+    'ds.use_json_hint':'JSON currently in the Raw JSON tab (will be saved first)',
     'fact.filter_all':'All',
     'fact.filter_validated':'Validated',
     'fact.filter_conflicted':'Conflicted',
@@ -936,6 +966,12 @@ const TRANSLATIONS={
     'modal.etl_merge_title_text':'審查ETL合併',
     'modal.etl_merge_apply':'✅ 確認合併',
     'modal.fact_inspector_title':'🔍 事實查詢器',
+    'ds.title':'⚠ 選擇資料來源 — §',
+    'ds.body':'此段落的<strong>結構化表單</strong>與<strong>原始JSON</strong>皆有資料且內容不同，請選擇用哪份資料來生成報告：',
+    'ds.use_form':'📝 使用已儲存的表單資料',
+    'ds.use_form_hint':'透過結構化表單或上次儲存的資料',
+    'ds.use_json':'{ } 使用編輯器中的原始JSON',
+    'ds.use_json_hint':'目前在「原始JSON」標籤中的內容（會先儲存再生成）',
     'fact.filter_all':'全部',
     'fact.filter_validated':'已驗證',
     'fact.filter_conflicted':'衝突',
@@ -2420,18 +2456,58 @@ async function _pollFullReportTask(taskId, maxWaitMs=900000){
 async function generateCurrentSection(){
   const sec=currentPanelSec;if(!sec)return;
   if(!currentRid){toast(tl('No report loaded — please return to the dashboard and open a report.','尚未載入報告 — 請返回主頁並開啟一份報告。'),'danger');return;}
-  // Enforce 90% completeness gate using cached data (not the editor, which may show
-  // a different section's JSON when the Output tab is opened directly).
+
+  // If both raw JSON editor and saved form data exist and differ → ask user which to use
+  const jsonEdRaw=document.getElementById('jsonEd').value.trim();
+  const savedData=sectionInputDataMap[sec];
+  if(jsonEdRaw&&savedData){
+    let edParsed;
+    try{edParsed=JSON.parse(jsonEdRaw);}catch(e){/* invalid JSON in editor — ignore conflict check */}
+    if(edParsed&&JSON.stringify(edParsed)!==JSON.stringify(savedData)){
+      _pendingGenerateSec=sec;
+      document.getElementById('dsModalSecNo').textContent=sec;
+      new bootstrap.Modal(document.getElementById('dataSourceModal')).show();
+      return;
+    }
+  }
+  await _runGenerate(sec);
+}
+
+// ── Data-source modal callbacks ───────────────────────────────────────────────
+let _pendingGenerateSec=null;
+
+async function _dsChooseForm(){
+  bootstrap.Modal.getInstance(document.getElementById('dataSourceModal'))?.hide();
+  const sec=_pendingGenerateSec;_pendingGenerateSec=null;
+  if(sec)await _runGenerate(sec);
+}
+
+async function _dsChooseJson(){
+  bootstrap.Modal.getInstance(document.getElementById('dataSourceModal'))?.hide();
+  const sec=_pendingGenerateSec;_pendingGenerateSec=null;
+  if(!sec)return;
+  const raw=document.getElementById('jsonEd').value.trim();
+  let parsed;
+  try{parsed=JSON.parse(raw);}catch(e){toast(tl('Invalid JSON: ','無效的JSON：')+e.message,'danger');return;}
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:parsed})});
+    if(!res.ok)throw new Error((await res.json()).detail||tl('Save failed','儲存失敗'));
+    sectionInputMap[sec]={has_data:true};sectionInputDataMap[sec]=parsed;
+    toast(tl(`§${sec} Raw JSON saved — generating…`,`§${sec} 原始JSON已儲存，生成中…`),'info');
+  }catch(e){toast(e.message,'danger');return;}
+  await _runGenerate(sec);
+}
+
+async function _runGenerate(sec){
+  // Completeness hint (informational only — ETL data uses different key names so pct may read 0%)
   let cachedData=sectionInputDataMap[sec];
   if(!cachedData){
-    // Fetch and cache so we validate the actual saved input, not stale editor state.
     try{const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{headers:H()});
       if(r.ok){const d=await r.json();cachedData=d.input_json;sectionInputDataMap[sec]=cachedData;}
     }catch(e){}
   }
   if(cachedData){
     const{pct}=getCompleteness(sec,cachedData);
-    // Completeness is informational only — ETL data uses different key names so pct may read 0%
     if(pct>0&&pct<50){
       toast(tl(`§${sec} completeness is ${pct}% — generating draft with available data (ETL fields not counted in completeness score).`,`§${sec} 完整度為 ${pct}%，將以現有資料生成草稿（ETL欄位不計入分數）。`),'info');
     }
@@ -2441,7 +2517,6 @@ async function generateCurrentSection(){
     const res=await fetch(API+'/reports/'+currentRid+'/generate/'+sec+'?gen_language='+genOutputLang,{method:'POST',headers:H()});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||tl('Generation failed','生成失敗'));
-    // 202: background task — poll until done
     toast(tl(`§${sec} generation started… (${genOutputLang==='zh'?'繁中':'EN'})`,`§${sec} 生成中… (${genOutputLang==='zh'?'繁中':'EN'})`),'info');
     const result=await _pollGenerationTask(d.task_id,sec);
     toast(tl(`§${sec} generated — ${(result.tokens_used||0).toLocaleString()} tokens`,`§${sec} 已生成 — ${(result.tokens_used||0).toLocaleString()} tokens`),'success');
