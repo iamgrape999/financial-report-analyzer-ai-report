@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -215,17 +216,18 @@ async def save_section_input(
         raise HTTPException(status_code=404, detail="Report not found")
     _assert_owner_or_admin(report, current_user)
 
-    # Upsert section input
+    # Upsert section input — always read newest row (DESC) so subsequent saves are idempotent
     si_result = await db.execute(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        ).order_by(SectionInput.id)
+        ).order_by(SectionInput.id.desc())
     )
     si = si_result.scalars().first()
     if si:
         si.input_json = json.dumps(payload.input_json, ensure_ascii=False)
         si.saved_by = current_user.id
+        si.saved_at = datetime.now(timezone.utc)  # server_default only fires on INSERT; force update
     else:
         si = SectionInput(
             id=str(uuid.uuid4()),
@@ -314,7 +316,7 @@ async def get_section_input(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        ).order_by(SectionInput.id)
+        ).order_by(SectionInput.id.desc())
     )
     si = result.scalars().first()
     if not si:

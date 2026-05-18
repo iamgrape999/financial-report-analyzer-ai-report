@@ -120,7 +120,7 @@ async def run_section_generation(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        ).order_by(SectionInput.id)
+        ).order_by(SectionInput.id.desc())
     )
     si = si_result.scalars().first()
     input_json: dict = json.loads(si.input_json) if si and si.input_json else {}

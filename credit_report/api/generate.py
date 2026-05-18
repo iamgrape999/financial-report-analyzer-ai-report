@@ -885,9 +885,9 @@ async def import_section_json(
         select(SectionInput).where(
             SectionInput.report_id == report_id,
             SectionInput.section_no == section_no,
-        )
+        ).order_by(SectionInput.id.desc())
     )
-    existing = result.scalar_one_or_none()
+    existing = result.scalars().first()
 
     if existing:
         try:

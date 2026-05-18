@@ -1656,7 +1656,7 @@ function finalizePayload(secNo,data){
     }
     const tc=d['terms_and_conditions'];
     if(tc&&Array.isArray(tc.deal_comparison)){
-      tc.deal_comparison_rows=tc.deal_comparison.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{term:p[0]||'',proposed:p[1]||'',previous:p[2]||''};});
+      tc.deal_comparison_rows=tc.deal_comparison.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{term:p[0]||'',proposed_deal:p[1]||'',previous_deal:p[2]||''};});
       delete tc.deal_comparison;
     }
     const kpi=d['sll_kpi_performance'];
@@ -1690,7 +1690,7 @@ function finalizePayload(secNo,data){
   if(secNo===3){
     const ra=d['3A_external_ratings'];
     if(ra&&Array.isArray(ra.ratings)){
-      ra.ratings=ra.ratings.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{entity:p[0]||'',sp:p[1]||'NR',moodys:p[2]||'NR',fitch:p[3]||'NR'};});
+      ra.ratings=ra.ratings.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{entity_abbrev:p[0]||'',sp:p[1]||'NR',moodys:p[2]||'NR',fitch:p[3]||'NR'};});
     }
     const b=d['3B_internal_ratings']||{};const rows=[];
     if(b.borrower_entity_full_name||b.borrower_entity_abbrev)rows.push({entity_full_name:b.borrower_entity_full_name||'',entity_abbrev:b.borrower_entity_abbrev||'',role:'Borrower',fy2022_23:b.borrower_fy2022_23||'',fy2024:b.borrower_fy2024||'',interim:b.borrower_interim||'',current:b.borrower_current||'',override_flag:b.borrower_override_flag||false,override_remarks:b.borrower_override_remarks||''});
@@ -1763,7 +1763,10 @@ function finalizePayload(secNo,data){
   if(secNo===9){
     const c=d['9A_checklist'];
     if(c&&Array.isArray(c.items)){
-      c.items=c.items.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{item:p[0]||'',response:p[1]||'',remarks:p[2]||''};});
+      c.items=c.items.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());
+        // 4-col format: category|item|response|remarks; compat with legacy 3-col: item|response|remarks
+        if(p.length>=4)return{category:p[0]||'',item:p[1]||'',response:p[2]||'',remarks:p[3]||''};
+        return{category:'',item:p[0]||'',response:p[1]||'',remarks:p[2]||''};});
     }
     const bc=d['9B_conditions_covenants'];
     if(bc){
@@ -1953,9 +1956,10 @@ function expandPayload(secNo,data){
   if(secNo===9){
     const c=d['9A_checklist'];
     if(c&&Array.isArray(c.items)&&c.items.length&&typeof c.items[0]==='object'){
-      c.items=c.items.map(it=>`${it.item||it.category||''}|${it.response||''}|${it.remarks||''}`);
+      // 4-col: category|item|response|remarks — preserves ETL category through round-trips
+      c.items=c.items.map(it=>`${it.category||''}|${it.item||''}|${it.response||''}|${it.remarks||''}`);
     } else if(Array.isArray(c)){
-      d['9A_checklist']={items:c};
+      d['9A_checklist']={items:c.map(it=>typeof it==='object'?`${it.category||''}|${it.item||''}|${it.response||''}|${it.remarks||''}`:String(it))};
     }
     const bc=d['9B_conditions_covenants'];
     if(bc){
