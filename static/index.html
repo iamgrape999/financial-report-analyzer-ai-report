@@ -282,7 +282,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate()" data-i18n="sp.load_template">📋 Load Template</button>
         <small class="text-muted align-self-center" data-i18n="sp.load_template_hint">Replace template values with actual report data, then Save.</small>
       </div>
-      <textarea id="jsonEd" class="form-control json-ed" rows="20"></textarea>
+      <textarea id="jsonEd" class="form-control json-ed" rows="20" oninput="_jsonEdUserModified=true"></textarea>
       <div class="d-flex gap-2 mt-2 align-items-center flex-wrap">
         <button class="btn btn-primary btn-sm" onclick="saveSectionInput()" data-i18n="sp.save_input">💾 Save Input</button>
         <button class="btn btn-outline-info btn-sm" onclick="syncJsonToForm()" data-i18n="sp.sync_to_form" title="Parse the JSON above and populate all structured form fields">→ Sync to Form</button>
@@ -685,6 +685,7 @@ let allOutputs=[];
 let uploadedDocs=[];        // cached document list for duplicate detection
 let lang=localStorage.getItem('lang')||'en';
 let genOutputLang=localStorage.getItem('genOutputLang')||'en';
+let _jsonEdUserModified=false; // true only when the user directly edits the Raw JSON textarea
 
 const SNAMES={1:'Facility Structure & Key Terms',2:'Overall Comments',3:'Credit Risk Assessment',4:'Borrower Background',5:'Collateral Assessment',6:'Project Overview (Ship Finance)',7:'Financial Analysis',8:'Legal Documentation & Charges',9:'Compliance Checklist',10:'Appendix',11:'Analyst / External Research Report'};
 const SNAMES_ZH={1:'融資結構與主要條款',2:'綜合評述',3:'信用風險評估',4:'借款人背景',5:'擔保品評估',6:'船舶融資概覽',7:'財務分析',8:'法律文件與抵押',9:'法規遵循清單',10:'附錄',11:'外部研究報告參考資料'};
@@ -1644,18 +1645,18 @@ function finalizePayload(secNo,data){
   if(secNo===1){
     const fs=d['facility_summary'];
     if(fs&&Array.isArray(fs.rows)){
-      fs.rows=fs.rows.map(line=>{const p=line.split('|');return{item_no:parseInt(p[0])||1,borrower_full_name:p[1]||'',booking_location:p[2]||'',proposed_usd_m:parseFloat(p[3])||0,is_new:(p[4]||'').toLowerCase()==='yes',currency:p[5]||'USD',tenor:p[6]||'',facility_type:p[7]||'',collateral_pre_delivery:p[8]||'',collateral_post_delivery:p[9]||'',guarantor:p[10]||''};});
+      fs.rows=fs.rows.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{item_no:parseInt(p[0])||1,borrower_full_name:p[1]||'',booking_location:p[2]||'',proposed_usd_m:parseFloat(p[3])||0,is_new:(p[4]||'').toLowerCase()==='yes',currency:p[5]||'USD',tenor:p[6]||'',facility_type:p[7]||'',collateral_pre_delivery:p[8]||'',collateral_post_delivery:p[9]||'',guarantor:p[10]||''};});
     }
     if(fs&&Array.isArray(fs.footnotes)){
-      fs.footnotes=fs.footnotes.map(line=>{const m=line.match(/^(\[.*?\])\s*(.*)/);return m?{symbol:m[1],text_verbatim:m[2]}:{symbol:'',text_verbatim:line};});
+      fs.footnotes=fs.footnotes.map(line=>{const m=line.trim().match(/^(\S*)\s+(.*)/);return m?{symbol:m[1],text_verbatim:m[2].trim()}:{symbol:'',text_verbatim:line.trim()};});
     }
     const tc=d['terms_and_conditions'];
     if(tc&&Array.isArray(tc.deal_comparison)){
-      tc.deal_comparison=tc.deal_comparison.map(line=>{const p=line.split('|');return{term:p[0]||'',proposed:p[1]||'',previous:p[2]||''};});
+      tc.deal_comparison=tc.deal_comparison.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{term:p[0]||'',proposed:p[1]||'',previous:p[2]||''};});
     }
     const kpi=d['sll_kpi_performance'];
     if(kpi&&Array.isArray(kpi.kpis)){
-      kpi.kpis=kpi.kpis.map(line=>{const p=line.split('|');return{kpi_name:p[0]||'',target_value:p[1]||'',actual_value:p[2]||'',period:p[3]||'',on_track:(p[4]||'').toLowerCase()==='yes',ratchet_bps:parseInt(p[5])||0};});
+      kpi.kpis=kpi.kpis.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{kpi_name:p[0]||'',target_value:p[1]||'',actual_value:p[2]||'',period:p[3]||'',on_track:(p[4]||'').toLowerCase()==='yes',ratchet_bps:parseInt(p[5])||0};});
     }
   }
   if(secNo===2){
@@ -1684,7 +1685,7 @@ function finalizePayload(secNo,data){
   if(secNo===3){
     const ra=d['3A_external_ratings'];
     if(ra&&Array.isArray(ra.ratings)){
-      ra.ratings=ra.ratings.map(line=>{const p=line.split('|');return{entity:p[0]||'',sp:p[1]||'NR',moodys:p[2]||'NR',fitch:p[3]||'NR'};});
+      ra.ratings=ra.ratings.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{entity:p[0]||'',sp:p[1]||'NR',moodys:p[2]||'NR',fitch:p[3]||'NR'};});
     }
     const b=d['3B_internal_ratings']||{};const rows=[];
     if(b.borrower_entity_full_name||b.borrower_entity_abbrev)rows.push({entity_full_name:b.borrower_entity_full_name||'',entity_abbrev:b.borrower_entity_abbrev||'',role:'Borrower',fy2022_23:b.borrower_fy2022_23||'',fy2024:b.borrower_fy2024||'',interim:b.borrower_interim||'',current:b.borrower_current||'',override_flag:b.borrower_override_flag||false,override_remarks:b.borrower_override_remarks||''});
@@ -1753,15 +1754,15 @@ function finalizePayload(secNo,data){
   if(secNo===9){
     const c=d['9A_checklist'];
     if(c&&Array.isArray(c.items)){
-      c.items=c.items.map(line=>{const p=line.split('|');return{item:p[0]||'',response:p[1]||'',remarks:p[2]||''};});
+      c.items=c.items.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{item:p[0]||'',response:p[1]||'',remarks:p[2]||''};});
     }
     const bc=d['9B_conditions_covenants'];
     if(bc){
       if(Array.isArray(bc.conditions_precedent)){
-        bc.conditions_precedent=bc.conditions_precedent.map(line=>{const p=line.split('|');return{description:p[0]||'',testing:p[1]||''};});
+        bc.conditions_precedent=bc.conditions_precedent.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{description:p[0]||'',testing:p[1]||''};});
       }
       if(Array.isArray(bc.ongoing_covenants)){
-        bc.ongoing_covenants=bc.ongoing_covenants.map(line=>{const p=line.split('|');return{description:p[0]||'',threshold:p[1]||'',testing:p[2]||''};});
+        bc.ongoing_covenants=bc.ongoing_covenants.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{description:p[0]||'',threshold:p[1]||'',testing:p[2]||''};});
       }
     }
     const rec=d['9C_recommendation'];
@@ -1772,26 +1773,26 @@ function finalizePayload(secNo,data){
   if(secNo===10){
     const bg=d['10B_fleet_growth'];
     if(bg&&Array.isArray(bg.rows)){
-      bg.rows=bg.rows.map(line=>{const p=line.split('|');return{year_label:p[0]||'',owned_fleet_teu_m:parseFloat(p[1])||0,total_fleet_teu_m:parseFloat(p[2])||0,total_vessels:parseInt(p[3])||0,owned_pct:parseFloat(p[4])||0};});
+      bg.rows=bg.rows.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{year_label:p[0]||'',owned_fleet_teu_m:parseFloat(p[1])||0,total_fleet_teu_m:parseFloat(p[2])||0,total_vessels:parseInt(p[3])||0,owned_pct:parseFloat(p[4])||0};});
     }
     const pr=d['10C_projections'];
     if(pr){
       if(Array.isArray(pr.key_assumptions)){
-        pr.key_assumptions=pr.key_assumptions.map(line=>{const p=line.split('|');return{assumption:p[0]||'',FY2026E:parseFloat(p[1])||null,FY2027E:parseFloat(p[2])||null,FY2028E:parseFloat(p[3])||null};});
+        pr.key_assumptions=pr.key_assumptions.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{assumption:p[0]||'',FY2026E:parseFloat(p[1])||null,FY2027E:parseFloat(p[2])||null,FY2028E:parseFloat(p[3])||null};});
       }
       for(const f of['base_case_pl','base_case_bs','base_case_cf']){
         if(Array.isArray(pr[f])){
-          pr[f]=pr[f].map(line=>{const p=line.split('|');return{item:p[0]||'',FY2026E:parseFloat(p[1])||null,FY2027E:parseFloat(p[2])||null,FY2028E:parseFloat(p[3])||null,is_subtotal:(p[4]||'').toLowerCase()==='yes'};});
+          pr[f]=pr[f].map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{item:p[0]||'',FY2026E:parseFloat(p[1])||null,FY2027E:parseFloat(p[2])||null,FY2028E:parseFloat(p[3])||null,is_subtotal:(p[4]||'').toLowerCase()==='yes'};});
         }
       }
       if(Array.isArray(pr.base_case_dscr)){
-        pr.base_case_dscr=pr.base_case_dscr.map(line=>{const p=line.split('|');return{year_label:p[0]||'',ocf:parseFloat(p[1])||null,debt_service:parseFloat(p[2])||null,dscr:parseFloat(p[3])||null};});
+        pr.base_case_dscr=pr.base_case_dscr.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{year_label:p[0]||'',ocf:parseFloat(p[1])||null,debt_service:parseFloat(p[2])||null,dscr:parseFloat(p[3])||null};});
       }
       if(Array.isArray(pr.stress_assumptions)){
-        pr.stress_assumptions=pr.stress_assumptions.map(line=>{const p=line.split('|');return{assumption:p[0]||'',base_case:p[1]||'',worse_case:p[2]||'',stress_magnitude:p[3]||''};});
+        pr.stress_assumptions=pr.stress_assumptions.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{assumption:p[0]||'',base_case:p[1]||'',worse_case:p[2]||'',stress_magnitude:p[3]||''};});
       }
       if(Array.isArray(pr.worse_case_summary)){
-        pr.worse_case_summary=pr.worse_case_summary.map(line=>{const p=line.split('|');return{item:p[0]||'',value:parseFloat(p[1])||null,is_dscr:(p[2]||'').toLowerCase()==='yes'};});
+        pr.worse_case_summary=pr.worse_case_summary.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{item:p[0]||'',value:parseFloat(p[1])||null,is_dscr:(p[2]||'').toLowerCase()==='yes'};});
       }
     }
   }
@@ -1914,13 +1915,13 @@ function expandPayload(secNo,data){
         r.item_no,
         r.borrower_full_name||r.borrower||'',
         r.booking_location||r.booking_office||'',
-        r.proposed_usd_m!=null?r.proposed_usd_m:(r.proposed_facility||''),
+        r.proposed_usd_m!=null?r.proposed_usd_m:r.proposed_facility_usd_m!=null?r.proposed_facility_usd_m:(r.proposed_facility||''),
         (r.is_new!=null?r.is_new:r.proposed_facility_is_new)?'Yes':'No',
         r.currency||r.ccy||'',
         r.tenor||r.tenor_full_verbatim||'',
         r.facility_type||r.facility_type_full||'',
-        r.collateral_pre_delivery||r.collateral_full||'',
-        r.collateral_post_delivery||'',
+        r.collateral_pre_delivery||r.collateral_pre||r.collateral_full||'',
+        r.collateral_post_delivery||r.collateral_post||'',
         r.guarantor||''
       ].join('|'));
     }
@@ -2016,6 +2017,7 @@ async function saveFormInput(){
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
     sectionInputDataMap[sec]=finalized;
     document.getElementById('jsonEd').value=JSON.stringify(finalized,null,2);
+    _jsonEdUserModified=false;
     renderSectionsTable();toast(tl(`§${sec} saved via form ✓ (${pct}% of standard fields filled)`,`§${sec} 已透過表單儲存 ✓（標準欄位完整度 ${pct}%）`),'success');
   }catch(e){toast(e.message,'danger');}
 }
@@ -2361,6 +2363,7 @@ async function loadInputEditor(){
     if(!res.ok){renderCompleteness(sec,{});return;}
     const d=await res.json();
     ed.value=JSON.stringify(d.input_json,null,2);
+    _jsonEdUserModified=false;
     document.getElementById('savedAt').textContent=tl('Last saved: ','上次儲存：')+fd(d.saved_at);
     sectionInputDataMap[sec]=d.input_json;
     renderCompleteness(sec,d.input_json);
@@ -2377,7 +2380,11 @@ async function saveSectionInput(){
   const sec=currentPanelSec;
   if(!currentRid){toast(tl('No report loaded — please return to the dashboard and open a report.','尚未載入報告 — 請返回主頁並開啟一份報告。'),'danger');return;}
   const raw=document.getElementById('jsonEd').value.trim();
-  if(!raw){toast(tl('Input is empty','輸入內容為空'),'warning');return;}
+  if(!raw){
+    // Empty editor is fine — the structured form data is already saved separately
+    toast(tl('Raw JSON editor is empty. Data from the Structured Form is already saved.','原始JSON編輯器為空。結構化表單的資料已單獨儲存。'),'info');
+    return;
+  }
   let parsed;
   try{parsed=JSON.parse(raw);}catch(e){toast(tl('Invalid JSON: ','無效的JSON：')+e.message,'danger');return;}
   if(typeof parsed!=='object'||Array.isArray(parsed)){toast(tl('Input must be a JSON object {}','輸入必須為JSON物件 {}'),'warning');return;}
@@ -2389,6 +2396,7 @@ async function saveSectionInput(){
     if(!res.ok)throw new Error(d.detail||tl('Save failed','儲存失敗'));
     sectionInputMap[sec]={has_data:true,saved_at:d.saved_at};
     sectionInputDataMap[sec]=parsed;
+    _jsonEdUserModified=false;
     document.getElementById('savedAt').textContent=tl('Saved: ','已儲存：')+fd(d.saved_at);
     renderSectionsTable();
     toast(tl(`§${sec} input saved ✓ (${pct}% of standard fields filled — ETL data is always usable)`,`§${sec} 輸入已儲存 ✓（標準欄位完整度 ${pct}% — ETL資料始終可用）`),'success');
@@ -2457,13 +2465,12 @@ async function generateCurrentSection(){
   const sec=currentPanelSec;if(!sec)return;
   if(!currentRid){toast(tl('No report loaded — please return to the dashboard and open a report.','尚未載入報告 — 請返回主頁並開啟一份報告。'),'danger');return;}
 
-  // If both raw JSON editor and saved form data exist and differ → ask user which to use
+  // If user manually edited Raw JSON editor AND there's already saved form data → ask which to use
   const jsonEdRaw=document.getElementById('jsonEd').value.trim();
-  const savedData=sectionInputDataMap[sec];
-  if(jsonEdRaw&&savedData){
+  if(_jsonEdUserModified&&jsonEdRaw&&sectionInputDataMap[sec]){
     let edParsed;
-    try{edParsed=JSON.parse(jsonEdRaw);}catch(e){/* invalid JSON in editor — ignore conflict check */}
-    if(edParsed&&JSON.stringify(edParsed)!==JSON.stringify(savedData)){
+    try{edParsed=JSON.parse(jsonEdRaw);}catch(e){/* invalid JSON — skip conflict check */}
+    if(edParsed){
       _pendingGenerateSec=sec;
       document.getElementById('dsModalSecNo').textContent=sec;
       new bootstrap.Modal(document.getElementById('dataSourceModal')).show();
