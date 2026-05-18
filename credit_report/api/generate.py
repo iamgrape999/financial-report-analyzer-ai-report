@@ -268,6 +268,17 @@ async def _load_section_input(db: AsyncSession, report_id: str, section_no: int)
         return {}
 
 
+def _strip_nulls(obj: object) -> object:
+    """Recursively remove None values from dicts/lists to avoid wasting tokens on null fields."""
+    if isinstance(obj, dict):
+        return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        cleaned = [_strip_nulls(i) for i in obj if i is not None]
+        # Drop list items that became empty dicts after stripping
+        return [i for i in cleaned if not (isinstance(i, dict) and not i)]
+    return obj
+
+
 def _deep_merge_section_input(base: dict, overlay: dict) -> dict:
     """Merge ETL overlay into existing section input — analyst data (base) wins on non-null values."""
     result = dict(base)
@@ -308,7 +319,7 @@ async def _auto_populate_section_inputs(
                     current_data = json.loads(si.input_json)
                 except Exception:
                     current_data = {}
-                merged = _deep_merge_section_input(current_data, sec_data)
+                merged = _strip_nulls(_deep_merge_section_input(current_data, sec_data))
                 si.input_json = json.dumps(merged, ensure_ascii=False)
                 si.saved_by = actor_user_id
                 results[sec_no] = "merged"
@@ -317,7 +328,7 @@ async def _auto_populate_section_inputs(
                     id=str(uuid.uuid4()),
                     report_id=report_id,
                     section_no=sec_no,
-                    input_json=json.dumps(sec_data, ensure_ascii=False),
+                    input_json=json.dumps(_strip_nulls(sec_data), ensure_ascii=False),
                     saved_by=actor_user_id,
                 )
                 db.add(new_si)

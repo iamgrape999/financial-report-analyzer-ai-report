@@ -1573,6 +1573,16 @@ _ZH_INSTRUCTION = (
 )
 
 
+def _strip_nulls(obj: object) -> object:
+    """Recursively remove None values so null fields don't waste prompt tokens."""
+    if isinstance(obj, dict):
+        return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        cleaned = [_strip_nulls(i) for i in obj if i is not None]
+        return [i for i in cleaned if not (isinstance(i, dict) and not i)]
+    return obj
+
+
 def _normalize_section3_ratings(input_json: dict) -> dict:
     """
     Normalize §3 3B_internal_ratings FORMAT C to FORMAT A (flat MSR strings).
@@ -1757,7 +1767,7 @@ def build_section_prompt(
             "Do not repeat content already written. Resume the Markdown output directly."
         )
     else:
-        input_text = json.dumps(input_json, ensure_ascii=False, indent=2)
+        input_text = json.dumps(_strip_nulls(input_json), ensure_ascii=False, indent=2)
         user_prompt = (
             f"{report_type_block}\n\n"
             f"{instructions}\n\n"
