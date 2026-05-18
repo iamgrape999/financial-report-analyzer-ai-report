@@ -1777,8 +1777,9 @@ function expandPayload(secNo,data){
       ao.tariff_impact_paragraphs=ao.tariff_impact_paragraphs.join('\n\n');
       d['2A_credit_overview']=ao;
     }
-    // risk_factors: [{...}] → flat per-risk fields
+    // risk_factors: [{...}] → flat per-risk fields (ETL uses 'risks', form uses 'risk_factors')
     const re2=d['2E_risk_and_mitigants'];
+    if(re2&&Array.isArray(re2.risks)&&!re2.risk_factors)re2.risk_factors=re2.risks;
     if(re2&&Array.isArray(re2.risk_factors)){
       re2.risk_factors.forEach((r,i)=>{
         re2['risk_'+(i+1)+'_level']=r.level||'Medium';
@@ -1797,7 +1798,12 @@ function expandPayload(secNo,data){
   if(secNo===3){
     const ra=d['3A_external_ratings'];
     if(ra&&Array.isArray(ra.ratings)&&ra.ratings.length&&typeof ra.ratings[0]==='object'){
-      ra.ratings=ra.ratings.map(r=>`${r.entity||''}|${r.sp||'NR'}|${r.moodys||'NR'}|${r.fitch||'NR'}`);
+      ra.ratings=ra.ratings.map(r=>`${r.entity||r.entity_abbrev||''}|${r.sp||'NR'}|${r.moodys||'NR'}|${r.fitch||'NR'}`);
+    }
+    // ETL uses primary_paragraph_verbatim; FIELD_DEFS path is para_1_msr_mapping_verbatim
+    const c3=d['3C_mas_612'];
+    if(c3&&c3.primary_paragraph_verbatim&&!c3.para_1_msr_mapping_verbatim){
+      c3.para_1_msr_mapping_verbatim=c3.primary_paragraph_verbatim;
     }
     const b=d['3B_internal_ratings'];if(b&&b.rows){const flat={period_display_labels:b.period_display_labels||{}};const bw=b.rows.find(r=>r.role==='Borrower');const gw=b.rows.find(r=>r.role==='Guarantor');if(bw){flat.borrower_entity_full_name=bw.entity_full_name;flat.borrower_entity_abbrev=bw.entity_abbrev;flat.borrower_fy2022_23=bw.fy2022_23;flat.borrower_fy2024=bw.fy2024;flat.borrower_interim=bw.interim;flat.borrower_current=bw.current;flat.borrower_override_flag=bw.override_flag;flat.borrower_override_remarks=bw.override_remarks;}if(gw){flat.guarantor_entity_full_name=gw.entity_full_name;flat.guarantor_entity_abbrev=gw.entity_abbrev;flat.guarantor_fy2022_23=gw.fy2022_23;flat.guarantor_fy2024=gw.fy2024;flat.guarantor_interim=gw.interim;flat.guarantor_current=gw.current;}d['3B_internal_ratings']=flat;}
   }
@@ -1827,6 +1833,8 @@ function expandPayload(secNo,data){
       sa.security_instruments.forEach((instr,i)=>{flat['instr_'+(i+1)+'_instrument']=instr.instrument||'';flat['instr_'+(i+1)+'_description']=instr.description||'';});
       d['5A_security_overview']=flat;
     }
+    // ETL returns 5D_insurance as a direct array; form expects {instruments:[...]}
+    if(Array.isArray(d['5D_insurance']))d['5D_insurance']={instruments:d['5D_insurance']};
     const ins=d['5D_insurance'];
     if(ins&&Array.isArray(ins.instruments)){
       const flat={applicable:ins.applicable};
@@ -1841,7 +1849,10 @@ function expandPayload(secNo,data){
     const fg=d['5F_corporate_guarantee'];if(fg&&fg.guarantee_phases){const flat={...fg};flat.guarantee_covers_predelivery=fg.guarantee_phases.includes('Pre-delivery');flat.guarantee_covers_postdelivery=fg.guarantee_phases.includes('Post-delivery');const l2k={'Cash & Equivalents (TWD bn)':'cash_twd_bn','Cash & Equivalents (USD bn)':'cash_usd_bn','Total Debt (TWD bn)':'total_debt_twd_bn','Net Worth / Equity (TWD bn)':'net_worth_twd_bn','Revenue (TWD bn)':'revenue_twd_bn','EBITDA (TWD bn)':'ebitda_twd_bn','Interest Coverage (x)':'interest_coverage','Net Margin (%)':'net_margin_pct','ROE (%)':'roe_pct'};if(fg.guarantor_financials)fg.guarantor_financials.forEach(gf=>{if(l2k[gf.metric])flat[l2k[gf.metric]]=gf.fy_current_twd_bn;});d['5F_corporate_guarantee']=flat;}
   }
   if(secNo===6){
-    const md=d['6D_milestones'];if(md&&md.milestones){const flat={banking_act_commentary:md.banking_act_commentary||''};md.milestones.forEach((m,i)=>{flat['m'+(i+1)+'_name']=m.milestone;flat['m'+(i+1)+'_date']=m.expected_date;flat['m'+(i+1)+'_pct']=m.pct_of_contract;flat['m'+(i+1)+'_amount_usd_m']=m.amount_usd_m;});d['6D_milestones']=flat;}
+    const md=d['6D_milestones'];if(md&&md.milestones){
+      // ETL uses commentary_banking_act_33_3; expandPayload flattens to banking_act_commentary
+      const flat={banking_act_commentary:md.banking_act_commentary||md.commentary_banking_act_33_3||''};
+      md.milestones.forEach((m,i)=>{flat['m'+(i+1)+'_name']=m.milestone;flat['m'+(i+1)+'_date']=m.expected_date;flat['m'+(i+1)+'_pct']=m.pct_of_contract;flat['m'+(i+1)+'_amount_usd_m']=m.amount_usd_m;});d['6D_milestones']=flat;}
   }
   if(secNo===7){
     const ent=d['entities_to_analyze'];if(Array.isArray(ent)){const bw=ent.find(e=>e.role==='Borrower');const gw=ent.find(e=>e.role==='Guarantor');const flat={};if(bw){flat.borrower_name=bw.name;flat.borrower_currency=bw.currency;flat.borrower_unit=bw.unit;flat.guarantor_exists=bw.guarantor_exists;}if(gw){flat.guarantor_name=gw.name;flat.guarantor_currency=gw.currency;}d['entities_to_analyze']=flat;}
@@ -1863,14 +1874,30 @@ function expandPayload(secNo,data){
   if(secNo===1){
     const fs=d['facility_summary'];
     if(fs&&Array.isArray(fs.rows)&&fs.rows.length&&typeof fs.rows[0]==='object'){
-      fs.rows=fs.rows.map(r=>[r.item_no,r.borrower_full_name,r.booking_location,r.proposed_usd_m,r.is_new?'Yes':'No',r.currency,r.tenor,r.facility_type,r.collateral_pre_delivery,r.collateral_post_delivery,r.guarantor].join('|'));
+      fs.rows=fs.rows.map(r=>[
+        r.item_no,
+        r.borrower_full_name||r.borrower||'',
+        r.booking_location||r.booking_office||'',
+        r.proposed_usd_m!=null?r.proposed_usd_m:(r.proposed_facility||''),
+        (r.is_new!=null?r.is_new:r.proposed_facility_is_new)?'Yes':'No',
+        r.currency||r.ccy||'',
+        r.tenor||r.tenor_full_verbatim||'',
+        r.facility_type||r.facility_type_full||'',
+        r.collateral_pre_delivery||r.collateral_full||'',
+        r.collateral_post_delivery||'',
+        r.guarantor||''
+      ].join('|'));
     }
     if(fs&&Array.isArray(fs.footnotes)&&fs.footnotes.length&&typeof fs.footnotes[0]==='object'){
       fs.footnotes=fs.footnotes.map(fn=>`${fn.symbol||''} ${fn.text_verbatim||''}`.trim());
     }
     const tc=d['terms_and_conditions'];
+    // ETL returns deal_comparison_rows; form uses deal_comparison — normalise both
+    if(tc&&!Array.isArray(tc.deal_comparison)&&Array.isArray(tc.deal_comparison_rows)){
+      tc.deal_comparison=tc.deal_comparison_rows;
+    }
     if(tc&&Array.isArray(tc.deal_comparison)&&tc.deal_comparison.length&&typeof tc.deal_comparison[0]==='object'){
-      tc.deal_comparison=tc.deal_comparison.map(r=>`${r.term||''}|${r.proposed||''}|${r.previous||''}`);
+      tc.deal_comparison=tc.deal_comparison.map(r=>`${r.term||''}|${r.proposed||r.proposed_deal||''}|${r.previous||r.previous_deal||''}`);
     }
     const kpi=d['sll_kpi_performance'];
     if(kpi&&Array.isArray(kpi.kpis)&&kpi.kpis.length&&typeof kpi.kpis[0]==='object'){
@@ -1895,6 +1922,12 @@ function expandPayload(secNo,data){
     }
   }
   if(secNo===10){
+    // ETL nests approved_group_limit_usd_m under group_limit_sub_table; promote to top level
+    const ga=d['10A_group_exposure'];
+    if(ga&&ga.group_limit_sub_table&&ga.approved_group_limit_usd_m==null){
+      const sub=ga.group_limit_sub_table;
+      if(sub.approved_group_limit_usd_m!=null)ga.approved_group_limit_usd_m=sub.approved_group_limit_usd_m;
+    }
     const bg=d['10B_fleet_growth'];
     if(bg&&Array.isArray(bg.rows)&&bg.rows.length&&typeof bg.rows[0]==='object'){
       bg.rows=bg.rows.map(r=>`${r.year_label||''}|${r.owned_fleet_teu_m||''}|${r.total_fleet_teu_m||''}|${r.total_vessels||''}|${r.owned_pct||''}`);
