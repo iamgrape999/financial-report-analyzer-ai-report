@@ -1,0 +1,18 @@
+{
+  "name": "financial-report-analyzer-js-tests",
+  "private": true,
+  "scripts": {
+    "test:js": "jest tests/js --forceExit",
+    "test:e2e": "playwright test tests/e2e"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/js/**/*.test.js"
+    ],
+    "testTimeout": 30000
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

@@ -18,3 +18,5 @@ data/logs/
 # Test health tracking (local machine state)
 .claude/test_history.jsonl
 .claude/test_health.md
+node_modules/
+package-lock.json
