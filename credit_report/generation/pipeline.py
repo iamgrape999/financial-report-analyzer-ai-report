@@ -64,6 +64,7 @@ from credit_report.generation.quota import check_quota, reserve_and_record_token
 from credit_report.models import Report, SectionInput, SectionOutput
 
 _generation_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_GENERATIONS)
+_MIN_SECTION_CHARS = 150
 
 
 async def get_section_output(
@@ -185,7 +186,6 @@ async def run_section_generation(
         markdown = _strip_qa_output(markdown)
 
         # Quality gate — guard against empty/trivial Gemini responses
-        _MIN_SECTION_CHARS = 150
         if not markdown or not markdown.strip():
             logger.error(
                 "run_section_generation: EMPTY output section=%d report=%s tokens=%d — "

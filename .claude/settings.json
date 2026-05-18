@@ -19,6 +19,15 @@
             "command": "bash -c 'echo \"$CLAUDE_TOOL_INPUT_COMMAND\" | grep -qE \"pytest|python.*-m.*pytest\" && python3 scripts/test_health_report.py 2>/dev/null || true'"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"$CLAUDE_TOOL_INPUT_COMMAND\" | grep -qE \"gh pr create|gh pull-request\" && echo \"\n⚠️  PR GATE: /review must be run before gh pr create.\nRun: /review  then resolve any issues before pushing.\n\" >&2 || true'"
+          }
+        ]
       }
     ]
   }
