@@ -1105,7 +1105,7 @@ function renderCompleteness(secNo,data){
 const FIELD_DEFS={
   1:[
     {p:'report_type',l:'Report Type',lz:'報告類型',t:'select',opts:['new_deal','annual_review','new_deal_and_annual_review']},
-    {p:'facility_summary.rows',l:'1A — Facility Rows (one per line: ItemNo|BorrowerName|BookingLoc|ProposedUSD M|IsNew|Currency|Tenor|FacilityType|CollateralPre|CollateralPost|Guarantor)',lz:'1A — 授信項目列表（每行一項：項次｜借款人全名｜預訂地點｜提議金額USD M｜是否新增｜幣別｜期限｜授信類型｜交船前擔保品｜交船後擔保品｜保證人）',t:'lines',h:'1|EMA Pte Ltd|SG|178.5|Yes|USD|11 years|Term Loan (SLL)|RG (KDB)|Vessel mortgage|EMC',hz:'1|EMA私人有限公司|SG|178.5|Yes|USD|11年|定期貸款（SLL）|退款保證（KDB）|船舶抵押|EMC'},
+    {p:'facility_summary.rows',l:'1A — Facility Rows (one per line or separated by 。: ItemNo|BorrowerName|BookingLoc|ProposedUSD M|IsNew|Currency|Tenor|FacilityType|CollateralPre|CollateralPost|Guarantor)',lz:'1A — 授信項目列表（每行或以「。」分隔一項，接受｜或|分隔符，可含「欄位名稱=值」格式：項次｜借款人全名｜預訂地點｜提議金額USD M｜是否新增｜幣別｜期限｜授信類型｜交船前擔保品｜交船後擔保品｜保證人）',t:'lines',h:'1|EMA Pte Ltd|SG|178.5|Yes|USD|11 years|Term Loan (SLL)|RG (KDB)|Vessel mortgage|EMC\n2|EMA Pte Ltd|SG|50|No|USD|3 years|RCF|NIL|NIL|EMC',hz:'1|EMA私人有限公司|SG|178.5|Yes|USD|11年|定期貸款（SLL）|退款保證（KDB）|船舶抵押|EMC\n2|EMA私人有限公司|SG|50|No|USD|3年|循環信貸|無|無|EMC'},
     {p:'facility_summary.totals.total_credit_limit_usd_m',l:'1A — Total Credit Limit (USD m)',lz:'1A — 授信總額度 (USD m)',t:'number',h:'e.g. 178.5',hz:'例：178.5'},
     {p:'facility_summary.totals.psr_spot_limit_usd_m',l:'1A — PSR Spot Limit (USD m)',lz:'1A — PSR 即期限額 (USD m)',t:'number',h:'e.g. 178.5',hz:'例：178.5'},
     {p:'facility_summary.footnotes',l:'1A — Footnotes (one per line: [Symbol] Text)',lz:'1A — 腳注（每行一條：[符號] 說明文字）',t:'lines',h:'[1] Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period.\n[2] Facility to be cancelled if vessel not delivered by Latest Delivery Date.',hz:'[1] 預計船舶交付日期為2028年6月30日，含180天寬限期。\n[2] 若船舶未於最晚交付日期前交付，融資將被取消。'},
@@ -1645,7 +1645,11 @@ function finalizePayload(secNo,data){
   if(secNo===1){
     const fs=d['facility_summary'];
     if(fs&&Array.isArray(fs.rows)){
-      fs.rows=fs.rows.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{item_no:parseInt(p[0])||1,borrower_full_name:p[1]||'',booking_location:p[2]||'',proposed_usd_m:parseFloat(p[3])||0,is_new:(p[4]||'').toLowerCase()==='yes',currency:p[5]||'USD',tenor:p[6]||'',facility_type:p[7]||'',collateral_pre_delivery:p[8]||'',collateral_post_delivery:p[9]||'',guarantor:p[10]||''};});
+      // _ukv: strip "label=value" prefix (Chinese/Latin label before first =)
+      const _ukv=s=>{s=s.trim();const i=s.indexOf('=');if(i>1&&/^[一-龥a-zA-Z\s_]+$/.test(s.slice(0,i)))return s.slice(i+1).trim();return s;};
+      // Flatten: normalize ｜→|, split 。-separated rows, then split each row on |
+      const rawLines=fs.rows.flatMap(s=>s.replace(/｜/g,'|').split(/[。｡]/).map(l=>l.trim()).filter(Boolean));
+      fs.rows=rawLines.map(line=>{const p=line.split('|').map(_ukv);return{item_no:parseInt(p[0])||1,borrower_full_name:p[1]||'',booking_location:p[2]||'',proposed_usd_m:parseFloat(p[3])||0,is_new:(p[4]||'').toLowerCase()==='yes',currency:p[5]||'USD',tenor:p[6]||'',facility_type:p[7]||'',collateral_pre_delivery:p[8]||'',collateral_post_delivery:p[9]||'',guarantor:p[10]||''};});
     }
     if(fs&&Array.isArray(fs.footnotes)){
       fs.footnotes=fs.footnotes.map(line=>{const m=line.trim().match(/^(\S*)\s+(.*)/);return m?{symbol:m[1],text_verbatim:m[2].trim()}:{symbol:'',text_verbatim:line.trim()};});
