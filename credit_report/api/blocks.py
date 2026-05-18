@@ -105,6 +105,7 @@ async def list_blocks(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    await _get_report_or_403(db, report_id, current_user)
     blocks = await block_repo.get_all_blocks(db, report_id)
     if stale_only:
         blocks = [b for b in blocks if b.is_stale]
@@ -118,6 +119,7 @@ async def block_stats(
     current_user=Depends(get_current_user),
 ):
     """Return data-quality summary: block validation counts and cell binding rate."""
+    await _get_report_or_403(db, report_id, current_user)
     from sqlalchemy import func, select as sa_select
 
     blocks = await block_repo.get_all_blocks(db, report_id)
@@ -181,6 +183,16 @@ async def patch_block(
             db, block_id, payload.content, current_user.id,
             payload.reason, payload.expected_version,
         )
+        await write_event(
+            db,
+            action="block.edited",
+            actor_user_id=current_user.id,
+            actor_role=current_user.role,
+            report_id=report_id,
+            target_type="block",
+            target_id=block_id,
+            after=f"version={updated.version} reason={payload.reason or ''}",
+        )
         await db.commit()
         await db.refresh(updated)
         return updated
@@ -221,6 +233,7 @@ async def section_blocks(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    await _get_report_or_403(db, report_id, current_user)
     return await block_repo.get_blocks_for_section(db, report_id, section_no)
 
 
@@ -232,6 +245,7 @@ async def validate_block(
     current_user=Depends(get_current_user),
 ):
     """Mark a block's validation_status as 'passed'."""
+    await _get_report_or_403(db, report_id, current_user)
     block = await block_repo.get_block(db, block_id)
     if not block or block.report_id != report_id:
         raise HTTPException(status_code=404, detail="Block not found")

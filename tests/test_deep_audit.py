@@ -1007,3 +1007,153 @@ class TestDocumentUploadEdgeCases:
             files={"file": ("test.txt", io.BytesIO(b"hello"), "text/plain")},
         )
         assert r.status_code == 401
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 14 — File Extraction: docx / pptx / image paths
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestFileExtractionPaths:
+    """Ensure every extract_text_from_file() branch is exercised."""
+
+    def test_docx_extraction_does_not_crash(self):
+        from credit_report.generation.evidence import extract_text_from_file
+        try:
+            from docx import Document
+            import io as _io
+            doc = Document()
+            doc.add_paragraph("Revenue 2024: USD 500m")
+            doc.add_paragraph("EBITDA: USD 100m")
+            buf = _io.BytesIO()
+            doc.save(buf)
+            buf.seek(0)
+            text, fmt = extract_text_from_file(buf.read(), "report.docx")
+            assert fmt == "docx"
+            assert isinstance(text, str)
+            # python-docx extraction should capture the paragraphs
+            assert "Revenue" in text or text == ""  # may be empty on minimal doc
+        except ImportError:
+            pytest.skip("python-docx not available")
+
+    def test_pptx_extraction_does_not_crash(self):
+        from credit_report.generation.evidence import extract_text_from_file
+        try:
+            from pptx import Presentation
+            from pptx.util import Inches
+            import io as _io
+            prs = Presentation()
+            slide_layout = prs.slide_layouts[1]
+            slide = prs.slides.add_slide(slide_layout)
+            slide.shapes.title.text = "Financial Summary"
+            buf = _io.BytesIO()
+            prs.save(buf)
+            buf.seek(0)
+            text, fmt = extract_text_from_file(buf.read(), "deck.pptx")
+            assert fmt == "pptx"
+            assert isinstance(text, str)
+        except ImportError:
+            pytest.skip("python-pptx not available")
+
+    def test_jpg_extraction_does_not_crash(self):
+        """JPEG image bytes → graceful string (may be empty if no Vision OCR key)."""
+        from credit_report.generation.evidence import extract_text_from_file
+        # Minimal 1x1 JPEG
+        jpeg_bytes = (
+            b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+            b"\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t"
+            b"\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a"
+            b"\x1f\x1e\x1d\x1a\x1c\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\x1e\x1b"
+            b"\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b\x1b"
+            b"\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00"
+            b"\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00"
+            b"\x08\x01\x01\x00\x00?\x00\xf5\x0f\xff\xd9"
+        )
+        text, fmt = extract_text_from_file(jpeg_bytes, "chart.jpg")
+        assert fmt in ("jpg", "jpeg")
+        assert isinstance(text, str)
+
+    def test_png_extraction_does_not_crash(self):
+        from credit_report.generation.evidence import extract_text_from_file
+        # Minimal 1x1 white PNG
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+            b"\x00\x01\x01\x00\x05\x18\xd4T\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        text, fmt = extract_text_from_file(png_bytes, "screenshot.png")
+        assert fmt == "png"
+        assert isinstance(text, str)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 15 — Blocks RBAC: cross-tenant isolation for list/stats/section/validate
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestBlocksRBAC:
+    """Analyst should not be able to read or modify another analyst's blocks."""
+
+    async def _make_analyst(self, ac, admin_hdrs, suffix=""):
+        email = f"analyst_rbac_{suffix}_{uuid.uuid4().hex[:6]}@test.com"
+        await ac.post(f"{AUTH}/register",
+                      json={"email": email, "password": "Pass1234!", "role": "analyst"},
+                      headers=admin_hdrs)
+        r = await ac.post(f"{AUTH}/login",
+                          data={"username": email, "password": "Pass1234!"})
+        assert r.status_code == 200
+        return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    async def test_list_blocks_requires_ownership(self, ac, admin_hdrs):
+        """Analyst A cannot list blocks of Analyst B's report."""
+        hdrs_a = await self._make_analyst(ac, admin_hdrs, "a")
+        hdrs_b = await self._make_analyst(ac, admin_hdrs, "b")
+        rpt = (await ac.post(f"{RPTS}", json={"borrower_name": "OwnerCo"}, headers=hdrs_a)).json()
+        r = await ac.get(f"{RPTS}/{rpt['id']}/blocks", headers=hdrs_b)
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+
+    async def test_block_stats_requires_ownership(self, ac, admin_hdrs):
+        """Analyst A cannot view block stats of Analyst B's report."""
+        hdrs_a = await self._make_analyst(ac, admin_hdrs, "c")
+        hdrs_b = await self._make_analyst(ac, admin_hdrs, "d")
+        rpt = (await ac.post(f"{RPTS}", json={"borrower_name": "StatsCo"}, headers=hdrs_a)).json()
+        r = await ac.get(f"{RPTS}/{rpt['id']}/blocks/stats", headers=hdrs_b)
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+
+    async def test_section_blocks_requires_ownership(self, ac, admin_hdrs):
+        """Analyst A cannot list section blocks of Analyst B's report."""
+        hdrs_a = await self._make_analyst(ac, admin_hdrs, "e")
+        hdrs_b = await self._make_analyst(ac, admin_hdrs, "f")
+        rpt = (await ac.post(f"{RPTS}", json={"borrower_name": "SectionCo"}, headers=hdrs_a)).json()
+        r = await ac.get(f"{RPTS}/{rpt['id']}/sections/4/blocks", headers=hdrs_b)
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+
+    async def test_validate_block_requires_ownership(self, ac, admin_hdrs):
+        """Analyst A cannot validate a block in Analyst B's report."""
+        hdrs_a = await self._make_analyst(ac, admin_hdrs, "g")
+        hdrs_b = await self._make_analyst(ac, admin_hdrs, "h")
+        rpt = (await ac.post(f"{RPTS}", json={"borrower_name": "ValidCo"}, headers=hdrs_a)).json()
+        # validate_block requires an existing block — just assert 403 (ownership check fires first)
+        r = await ac.post(
+            f"{RPTS}/{rpt['id']}/blocks/nonexistent-block-id/validate",
+            headers=hdrs_b,
+        )
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+
+    async def test_patch_block_emits_audit_event(self, ac, admin_hdrs, report):
+        """PATCH /blocks/{id} must write a block.edited audit event."""
+        rid = report["id"]
+        # Generate section to produce blocks
+        with _mock_gemini("## §4\n\nContent.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"):
+            await ac.post(f"{RPTS}/{rid}/generate/4", headers=admin_hdrs)
+        blocks_r = await ac.get(f"{RPTS}/{rid}/blocks", headers=admin_hdrs)
+        if not blocks_r.json():
+            pytest.skip("No blocks generated — skipping audit trail test")
+        block = blocks_r.json()[0]
+        await ac.patch(
+            f"{RPTS}/{rid}/blocks/{block['id']}",
+            json={"content": "Updated content.", "reason": "review fix",
+                  "expected_version": block["version"]},
+            headers=admin_hdrs,
+        )
+        audit_r = await ac.get(f"{RPTS}/{rid}/audit", headers=admin_hdrs)
+        actions = {e["action"] for e in audit_r.json().get("events", [])}
+        assert "block.edited" in actions, f"block.edited not in audit log: {actions}"

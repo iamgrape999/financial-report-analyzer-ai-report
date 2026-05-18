@@ -1551,6 +1551,14 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (5, "5C_vessel_mortgage",  "contract_price_usd_m", "contract_price_usd_m",      "mn"),
     (5, "5C_vessel_mortgage",  "loan_amount_usd_m",    "loan_amount_usd_m",         "mn"),
 
+    # §6 — Ship Finance / Project Analysis
+    (6, "6A_project", "contract_price_usd_m", "contract_price_usd_m", "mn"),
+    (6, "6A_project", "loan_amount_usd_m",    "loan_amount_usd_m",    "mn"),
+    (6, "6A_project", "ltc_pct",              "ltc_pct",              None),
+    (6, "6A_project", "teu",                  "vessel_teu",           None),
+    (6, "6A_project", "dwt",                  "vessel_dwt",           None),
+    (6, "6B_builder", "ontime_delivery_pct",  "builder_ontime_pct",   None),
+
     # §7 — handled by _extract_section7_facts() due to dynamic FY_YYYY nesting
 
     # §8 — ACRA Banking Charges
