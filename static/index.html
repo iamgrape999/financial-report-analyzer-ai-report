@@ -1685,7 +1685,7 @@ function finalizePayload(secNo,data){
     }
     const arf=re2['additional_risk_factors_from_previous'];
     const arfArr=typeof arf==='string'?arf.split('\n').filter(l=>l.trim()).map(l=>({title:l,level:'Medium',note:l})):(Array.isArray(arf)?arf:[]);
-    d['2E_risk_and_mitigants']={risk_factors:risks,additional_risk_factors_from_previous:arfArr};
+    d['2E_risk_and_mitigants']={risks:risks,additional_risk_factors_from_previous:arfArr};
   }
   if(secNo===3){
     const ra=d['3A_external_ratings'];
@@ -1696,6 +1696,10 @@ function finalizePayload(secNo,data){
     if(b.borrower_entity_full_name||b.borrower_entity_abbrev)rows.push({entity_full_name:b.borrower_entity_full_name||'',entity_abbrev:b.borrower_entity_abbrev||'',role:'Borrower',fy2022_23:b.borrower_fy2022_23||'',fy2024:b.borrower_fy2024||'',interim:b.borrower_interim||'',current:b.borrower_current||'',override_flag:b.borrower_override_flag||false,override_remarks:b.borrower_override_remarks||''});
     if(b.guarantor_entity_full_name||b.guarantor_entity_abbrev)rows.push({entity_full_name:b.guarantor_entity_full_name||'',entity_abbrev:b.guarantor_entity_abbrev||'',role:'Guarantor',fy2022_23:b.guarantor_fy2022_23||'',fy2024:b.guarantor_fy2024||'',interim:b.guarantor_interim||'',current:b.guarantor_current||'',override_flag:false,override_remarks:''});
     if(rows.length)d['3B_internal_ratings']={rows,period_display_labels:b.period_display_labels||{}};
+    // Sync para_1_msr_mapping_verbatim (form key) → primary_paragraph_verbatim (ETL key)
+    // so that subsequent ETL merges cannot overwrite the analyst's corrected text.
+    const c3=d['3C_mas_612'];
+    if(c3&&c3.para_1_msr_mapping_verbatim)c3.primary_paragraph_verbatim=c3.para_1_msr_mapping_verbatim;
   }
   if(secNo===4){
     const mgt=d['4C_management']||{};
@@ -1734,7 +1738,7 @@ function finalizePayload(secNo,data){
   if(secNo===6){
     const md=d['6D_milestones']||{};const ms=[];
     for(let i=1;i<=4;i++){if(md['m'+i+'_name'])ms.push({no:i,milestone:md['m'+i+'_name'],expected_date:md['m'+i+'_date']||'',status:'⏳ Pending',pct_of_contract:md['m'+i+'_pct']||0,amount_usd_m:md['m'+i+'_amount_usd_m']||0,rg_in_force:i<4?'✅':'❌'});}
-    if(ms.length)d['6D_milestones']={milestones:ms,banking_act_commentary:md.banking_act_commentary||''};
+    if(ms.length)d['6D_milestones']={milestones:ms,commentary_banking_act_33_3:md.banking_act_commentary||md.commentary_banking_act_33_3||''};
   }
   if(secNo===7){
     const ent=d['entities_to_analyze']||{};
