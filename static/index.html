@@ -1656,7 +1656,8 @@ function finalizePayload(secNo,data){
     }
     const tc=d['terms_and_conditions'];
     if(tc&&Array.isArray(tc.deal_comparison)){
-      tc.deal_comparison=tc.deal_comparison.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{term:p[0]||'',proposed:p[1]||'',previous:p[2]||''};});
+      tc.deal_comparison_rows=tc.deal_comparison.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());return{term:p[0]||'',proposed:p[1]||'',previous:p[2]||''};});
+      delete tc.deal_comparison;
     }
     const kpi=d['sll_kpi_performance'];
     if(kpi&&Array.isArray(kpi.kpis)){
@@ -2414,7 +2415,13 @@ async function loadSectionOutput(sec){
     const res=await fetch(API+'/reports/'+currentRid+'/sections/'+sec+'/output',{headers:H()});
     if(!res.ok){el.innerHTML=`<p class="text-muted fst-italic">${tl('Not yet generated.<br>Fill in input data (✏ Input Data tab) then click Generate.','尚未生成。<br>請先填寫輸入資料（✏ 輸入資料標籤），然後點擊生成。')}</p>`;return;}
     const d=await res.json();
-    el.innerHTML=d.markdown?marked.parse(d.markdown):`<p class="text-muted fst-italic">${tl('No content yet.','尚無內容。')}</p>`;
+    sectionOutputMap[sec]=d;
+    let staleBanner='';
+    const inp=sectionInputMap[sec];
+    if(inp&&inp.saved_at&&d.generated_at&&new Date(inp.saved_at)>new Date(d.generated_at)){
+      staleBanner=`<div class="alert alert-warning p-2 mb-2 small">⚠ ${tl('Output is outdated — form was saved after last generation. Click ⚡ Generate to refresh.','輸出已過期 — 表單儲存時間晚於上次產生時間。請點擊 ⚡ 產生 以更新。')}</div>`;
+    }
+    el.innerHTML=staleBanner+(d.markdown?marked.parse(d.markdown):`<p class="text-muted fst-italic">${tl('No content yet.','尚無內容。')}</p>`);
   }catch(e){el.innerHTML=`<p class="text-danger">${esc(e.message)}</p>`;}
 }
 
@@ -2651,6 +2658,9 @@ async function generateAll(){
 
     toast(tl('Generation complete!','報告生成完成！'),'success');
     await loadReportDetail(currentRid);
+    if(currentPanelSec&&document.getElementById('tabOutput')?.style.display!=='none'){
+      await loadSectionOutput(currentPanelSec);
+    }
   }catch(e){toast(e.message,'danger');}
   finally{
     sp.classList.add('d-none');

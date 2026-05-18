@@ -1101,39 +1101,79 @@ async def generate_full_report(
     async def _bg_generate_full_report():
         from credit_report.database import AsyncSessionLocal
         from credit_report.config import GENERATION_ORDER
+        from credit_report.generation.pipeline import (
+            run_section_generation,
+            check_hard_dependencies,
+        )
         async with AsyncSessionLocal() as bg_db:
             try:
                 logger.info(
                     "generate_full_report[bg]: starting report=%s user=%s task=%s lang=%s",
                     report_id, user_id, task_id, full_output_lang,
                 )
-                results = await run_full_report_generation(
-                    db=bg_db,
-                    report_id=report_id,
-                    actor_user_id=user_id,
-                    actor_role=user_role,
-                    output_language=full_output_lang,
-                )
-                await bg_db.commit()
-                done = sum(1 for v in results.values() if v == "done")
-                done_count = 0
-                for sec_no in GENERATION_ORDER:
-                    status = results.get(sec_no, "skipped")
-                    done_count += 1
+                results: dict = {}
+                generated_outputs: dict = {}
+                total = len(GENERATION_ORDER)
+
+                for section_no in GENERATION_ORDER:
+                    done_count = len(results)
                     _progress_bus.push(task_id, {
                         "type": "section_progress",
-                        "section_no": sec_no,
-                        "status": status,
+                        "section_no": section_no,
+                        "status": "generating",
                         "done_count": done_count,
-                        "total": len(GENERATION_ORDER),
-                        "pct": round(done_count / len(GENERATION_ORDER) * 100),
-                        "message": f"§{sec_no} {status} ({done_count}/{len(GENERATION_ORDER)} sections)",
+                        "total": total,
+                        "pct": round(done_count / total * 100),
+                        "message": f"§{section_no} generating… ({done_count}/{total})",
                     })
+
+                    missing_deps = await check_hard_dependencies(bg_db, report_id, section_no)
+                    if missing_deps:
+                        logger.warning(
+                            "generate_full_report[bg]: skipping section=%d missing_deps=%s report=%s",
+                            section_no, missing_deps, report_id,
+                        )
+                        results[section_no] = f"skipped_missing_deps:{missing_deps}"
+                    else:
+                        try:
+                            output = await run_section_generation(
+                                db=bg_db,
+                                report_id=report_id,
+                                section_no=section_no,
+                                actor_user_id=user_id,
+                                actor_role=user_role,
+                                preceding_outputs=generated_outputs,
+                                output_language=full_output_lang,
+                            )
+                            results[section_no] = output.status
+                            if output.markdown:
+                                generated_outputs[section_no] = output.markdown
+                        except Exception as exc:
+                            logger.error(
+                                "generate_full_report[bg]: section=%d failed report=%s: %s",
+                                section_no, report_id, exc,
+                            )
+                            results[section_no] = f"error:{exc}"
+
+                    done_count = len(results)
+                    sec_status = results[section_no]
+                    _progress_bus.push(task_id, {
+                        "type": "section_done",
+                        "section_no": section_no,
+                        "status": sec_status,
+                        "done_count": done_count,
+                        "total": total,
+                        "pct": round(done_count / total * 100),
+                        "message": f"§{section_no} {sec_status} ({done_count}/{total} sections)",
+                    })
+
+                await bg_db.commit()
+                done = sum(1 for v in results.values() if v == "done")
                 _progress_bus.push(task_id, {
                     "type": "complete",
                     "sections": {str(k): v for k, v in results.items()},
                     "done_count": done,
-                    "total": len(GENERATION_ORDER),
+                    "total": total,
                     "message": f"Report generation complete — {done}/{len(results)} sections done",
                 })
                 _generation_tasks.update(task_id, {
