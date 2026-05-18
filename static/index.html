@@ -933,6 +933,8 @@ const TRANSLATIONS={
     'sp.load_template_hint':'將範本數值替換為實際報告資料，然後儲存。',
     'sp.save_input':'💾 儲存輸入',
     'sp.save_form':'💾 儲存表單',
+    'sp.sync_to_form':'→ 同步至表單',
+    'sp.import_from_json':'📥 從JSON匯入',
     'sp.sync_json':'↔ 同步至JSON',
     'sp.form_hint':'填寫以下各欄位後點擊儲存。✗ 欄位將影響完整度（草稿產生目標50%）。',
     'sp.refresh':'🔄 刷新',
@@ -1142,12 +1144,12 @@ function renderCompleteness(secNo,data){
   const badgeCls=pct>=50?'bg-success':pct>=30?'bg-warning text-dark':'bg-secondary';
   panel.style.display='block';
   panel.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-1">
-    <strong style="font-size:12px">欄位完整度 Field Completeness: ${filled}/${total} (${pct}%)</strong>
-    <span class="badge ${badgeCls}">${pct>=50?'✓ 可以生成':pct+'% 已填寫（ETL欄位不計入）'}</span>
+    <strong style="font-size:12px">${lang==='zh'?'欄位完整度':'Field Completeness'}: ${filled}/${total} (${pct}%)</strong>
+    <span class="badge ${badgeCls}">${pct>=50?(lang==='zh'?'✓ 可以生成':'✓ Ready'):(pct+(lang==='zh'?'% 已填寫（ETL欄位不計入）':'% filled'))}</span>
   </div>
   <div class="completeness-bar"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width .3s;"></div></div>
-  <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(norm,f.p);
-    return`<div class="${ok?'field-filled':'field-missing'}">${ok?'✓':'✗'} ${f.l}${!ok?' <span class="text-muted fst-italic small"> — 資料源缺漏，待補 (Data source missing, pending upload)</span>':''}</div>`;
+  <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(norm,f.p);const fl=lang==='zh'?(f.lz||f.l):f.l;
+    return`<div class="${ok?'field-filled':'field-missing'}">${ok?'✓':'✗'} ${fl}${!ok?` <span class="text-muted fst-italic small"> — ${lang==='zh'?'資料源缺漏，待補':'Data source missing'}</span>`:''}</div>`;
   }).join('')}</div>`;
 }
 
@@ -3036,33 +3038,33 @@ function renderQualityReport(){
     <div class="row g-3 mb-3">
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${inputReady===10?'#00703C':'#dc2626'}">${inputReady}/10</div>
-        <div class="small text-muted">已輸入資料的段落</div>
-        <div class="small ${inputReady===10?'text-success':'text-danger'}">欄位缺漏率：${missingInputRate}%</div>
+        <div class="small text-muted">${tl('Sections with input','已輸入資料的段落')}</div>
+        <div class="small ${inputReady===10?'text-success':'text-danger'}">${tl('Missing input rate','欄位缺漏率')}：${missingInputRate}%</div>
       </div>
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${outputDone===10?'#00703C':'#f59e0b'}">${outputDone}/10</div>
-        <div class="small text-muted">已生成的段落</div>
-        <div class="small ${outputDone===10?'text-success':'text-warning'}">輸出缺漏率：${missingOutputRate}%</div>
+        <div class="small text-muted">${tl('Sections generated','已生成的段落')}</div>
+        <div class="small ${outputDone===10?'text-success':'text-warning'}">${tl('Missing output rate','輸出缺漏率')}：${missingOutputRate}%</div>
       </div>
       <div class="col-sm-4 text-center">
         <div class="fw-bold" style="font-size:2rem;color:${dangerCount===0?'#00703C':'#dc2626'}">${dangerCount}</div>
-        <div class="small text-muted">紅隊審核發現的問題</div>
-        <div class="small ${dangerCount===0?'text-success':'text-danger'}">${dangerCount===0?'未發現幻覺內容':'匯出前需修正'}</div>
+        <div class="small text-muted">${tl('Red-team issues found','紅隊審核發現的問題')}</div>
+        <div class="small ${dangerCount===0?'text-success':'text-danger'}">${dangerCount===0?tl('No hallucinations found','未發現幻覺內容'):tl('Fix before export','匯出前需修正')}</div>
       </div>
     </div>
     <table class="table table-sm table-bordered mb-0">
       <thead class="table-light"><tr>
-        <th class="ps-2" style="width:36px">§</th><th>段落名稱</th>
-        <th class="text-center" style="width:52px">輸入</th>
-        <th class="text-center" style="width:60px">完整度</th>
-        <th class="text-center" style="width:60px">輸出</th>
-        <th>紅隊審核</th>
+        <th class="ps-2" style="width:36px">§</th><th>${tl('Section','段落名稱')}</th>
+        <th class="text-center" style="width:52px">${tl('Input','輸入')}</th>
+        <th class="text-center" style="width:60px">${tl('Complete','完整度')}</th>
+        <th class="text-center" style="width:60px">${tl('Output','輸出')}</th>
+        <th>${tl('Red-team','紅隊審核')}</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${dangerCount>0
-      ?`<div class="alert alert-danger mt-3 mb-0 small"><strong>⚠ 紅隊審核 — 需要處理：</strong> 發現 ${dangerCount} 個問題。請在匯出前修正所有<strong>危險</strong>項目：修正輸入資料、重新生成受影響段落，並驗證輸出內容中的數字與名稱是否與輸入 JSON 一致。</div>`
-      :'<div class="alert alert-success mt-3 mb-0 small"><strong>✓ 紅隊審核通過</strong> — 未發現幻覺內容、佔位符文字或數據錨定錯誤。報告已可匯出。</div>'}
+      ?`<div class="alert alert-danger mt-3 mb-0 small"><strong>⚠ ${tl('Red-team — action required','紅隊審核 — 需要處理')}:</strong> ${tl(`${dangerCount} issue(s) found. Fix all <strong>danger</strong> items before export — correct input data, regenerate affected sections, and verify numbers and names match input JSON.`,`發現 ${dangerCount} 個問題。請在匯出前修正所有<strong>危險</strong>項目：修正輸入資料、重新生成受影響段落，並驗證輸出內容中的數字與名稱是否與輸入 JSON 一致。`)}</div>`
+      :`<div class="alert alert-success mt-3 mb-0 small"><strong>✓ ${tl('Red-team passed','紅隊審核通過')}</strong> — ${tl('No hallucinations, placeholder text, or data anchoring errors found. Report is ready to export.','未發現幻覺內容、佔位符文字或數據錨定錯誤。報告已可匯出。')}</div>`}
   `;
   container.style.display='block';
 }
@@ -3905,41 +3907,41 @@ function openConflictsModal(){
 function renderConflicts(){
   const body=document.getElementById('conflictsModalBody');
   if(!_conflicts.length){
-    body.innerHTML='<div class="alert alert-success">No open conflicts — all facts are consistent.</div>';
+    body.innerHTML=`<div class="alert alert-success">${tl('No open conflicts — all facts are consistent.','無待處理衝突 — 所有事實均一致。')}</div>`;
     return;
   }
   body.innerHTML=_conflicts.map(c=>`
     <div class="card mb-3 border-warning" id="conflict-card-${c.id}">
       <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
         <span class="fw-bold">${esc(c.metric_name)} &nbsp;·&nbsp; ${esc(c.entity||'')} &nbsp;·&nbsp; ${esc(c.period||'')}</span>
-        <span class="badge bg-warning text-dark">open</span>
+        <span class="badge bg-warning text-dark">${tl('open','待處理')}</span>
       </div>
       <div class="card-body">
         <div class="row g-3">
           <div class="col-md-6">
             <div class="card h-100 border-primary">
-              <div class="card-header small fw-bold" style="background:#e8f0fe">Source A: ${esc(c.source_a||'')}</div>
+              <div class="card-header small fw-bold" style="background:#e8f0fe">${tl('Source A','來源A')}：${esc(c.source_a||'')}</div>
               <div class="card-body text-center py-3">
                 <div class="fs-4 fw-bold">${esc(c.value_a||'—')}</div>
               </div>
               <div class="card-footer">
                 <button class="btn btn-primary btn-sm w-100"
                   onclick="resolveConflict('${c.id}','${c.fact_a_id}','${c.fact_b_id}')">
-                  Choose Source A
+                  ${tl('Choose Source A','選擇來源A')}
                 </button>
               </div>
             </div>
           </div>
           <div class="col-md-6">
             <div class="card h-100 border-success">
-              <div class="card-header small fw-bold" style="background:#e8f5ee">Source B: ${esc(c.source_b||'')}</div>
+              <div class="card-header small fw-bold" style="background:#e8f5ee">${tl('Source B','來源B')}：${esc(c.source_b||'')}</div>
               <div class="card-body text-center py-3">
                 <div class="fs-4 fw-bold">${esc(c.value_b||'—')}</div>
               </div>
               <div class="card-footer">
                 <button class="btn btn-success btn-sm w-100"
                   onclick="resolveConflict('${c.id}','${c.fact_b_id}','${c.fact_a_id}')">
-                  Choose Source B
+                  ${tl('Choose Source B','選擇來源B')}
                 </button>
               </div>
             </div>
@@ -3947,7 +3949,7 @@ function renderConflicts(){
         </div>
         <div class="mt-2">
           <input type="text" id="reason-${c.id}" class="form-control form-control-sm"
-            placeholder="Resolution reason (optional)">
+            placeholder="${tl('Resolution reason (optional)','解決原因（選填）')}">
         </div>
       </div>
     </div>`).join('');

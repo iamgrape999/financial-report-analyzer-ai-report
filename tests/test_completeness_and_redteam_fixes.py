@@ -204,7 +204,8 @@ class TestChineseTranslations:
         return bool(self.CHINESE_RE.search(text))
 
     def test_table_header_input_chinese(self):
-        assert ">輸入<" in HTML or "輸入</th>" in HTML, (
+        # Accept both literal HTML pattern (old) and tl() bilingual call (new)
+        assert ">輸入<" in HTML or "輸入</th>" in HTML or "'輸入'" in HTML, (
             "Input column header must be in Chinese: 輸入"
         )
 
@@ -212,7 +213,8 @@ class TestChineseTranslations:
         assert "完整度" in HTML, "Complete column header must be: 完整度"
 
     def test_table_header_output_chinese(self):
-        assert ">輸出<" in HTML or "輸出</th>" in HTML, (
+        # Accept both literal HTML pattern (old) and tl() bilingual call (new)
+        assert ">輸出<" in HTML or "輸出</th>" in HTML or "'輸出'" in HTML, (
             "Output column header must be in Chinese: 輸出"
         )
 
