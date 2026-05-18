@@ -705,6 +705,43 @@ const DOC_TYPE_LABELS={
   other:'其他 / Other',
 };
 
+// Chinese display labels for select field option values
+const OPTS_ZH={
+  'new_deal':'新交易','annual_review':'年度審查','new_deal_and_annual_review':'新交易暨年度審查',
+  'Compliant':'合規','Non-Compliant':'不合規','Conditional Compliant':'條件合規',
+  'APPROVE':'核准','DECLINE':'拒絕','CONDITIONAL APPROVAL':'條件核准','APPROVE WITH CONDITIONS':'附條件核准',
+  'High':'高','Medium':'中','Low':'低',
+  'PASS':'正常','SPECIAL MENTION':'特別關注','SUBSTANDARD':'次級','DOUBTFUL':'可疑','LOSS':'損失',
+  "Moody's":'穆迪','Fitch':'惠譽',
+  'English law':'英國法','Singapore law':'新加坡法','Korean law':'韓國法','New York law':'紐約法',
+  'Completed':'已完成','Pending':'待辦','Overdue':'逾期',
+  'millions':'百萬','billions':'十億',
+  'Unqualified':'無保留意見','Qualified':'保留意見','Adverse':'否定意見','Disclaimer':'無法表示意見',
+  'US GAAP':'美國會計準則','Singapore FRS':'新加坡財務報告準則','Taiwan IFRS':'臺灣IFRS',
+  'singapore_incorporated':'新加坡法人','not_applicable':'不適用',
+  'Clear':'清白','Hit — see remarks':'命中 — 請見備註','N/A':'不適用',
+  'Standalone':'單一實體','Consolidated':'合併',
+};
+const DOC_TYPE_OPTIONS=[
+  {v:'annual_report',       en:'📋 Annual Report',               zh:'📋 年報'},
+  {v:'financial_statement', en:'💹 Financial Statement (Audited)',zh:'💹 財務報告'},
+  {v:'analyst_presentation',en:'🎤 Analyst Presentation',        zh:'🎤 法說會'},
+  {v:'interim_report',      en:'📊 Interim Report',              zh:'📊 半年報'},
+  {v:'valuation_report',    en:'🚢 Vessel Valuation Report',     zh:'🚢 估值報告'},
+  {v:'charter_agreement',   en:'📄 Charter Agreement',           zh:'📄 租船合約'},
+  {v:'shipbuilding_contract',en:'⚓ Shipbuilding Contract',      zh:'⚓ 造船合約'},
+  {v:'kyc_document',        en:'🔍 KYC Document',                zh:'🔍 KYC文件'},
+  {v:'legal_document',      en:'⚖️ Legal Document',              zh:'⚖️ 法律文件'},
+  {v:'external_report',     en:'📰 External Report',             zh:'📰 外部報告'},
+  {v:'other',               en:'📁 Other',                       zh:'📁 其他'},
+];
+function renderDocTypeSelect(){
+  const sel=document.getElementById('docType');if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML=DOC_TYPE_OPTIONS.map(o=>`<option value="${o.v}">${lang==='zh'?o.zh:o.en}</option>`).join('');
+  if(cur)sel.value=cur;
+}
+
 const TRANSLATIONS={
   en:{
     'app.title':'🏦 Financial Report Analyzer',
@@ -1009,8 +1046,21 @@ function setLang(l){
   document.querySelectorAll('[data-i18n]').forEach(el=>el.innerHTML=t(el.getAttribute('data-i18n')));
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>el.placeholder=t(el.getAttribute('data-i18n-placeholder')));
   document.querySelectorAll('[data-i18n-title]').forEach(el=>el.title=t(el.getAttribute('data-i18n-title')));
+  renderDocTypeSelect();
   try{if(typeof renderSectionsTable==='function')renderSectionsTable();}catch(e){}
   try{if(document.getElementById('viewReview')?.classList.contains('active')&&typeof renderReview==='function')renderReview();}catch(e){}
+  // Re-render open section form panel so labels and selects update to new language
+  try{
+    const panel=document.getElementById('secPanel');
+    if(panel&&panel.style.display!=='none'&&currentPanelSec){
+      const container=document.getElementById('formFields');
+      if(container&&container.innerHTML.trim()){
+        container.innerHTML=renderFieldForm(currentPanelSec);
+        const cached=sectionInputDataMap[currentPanelSec];
+        if(cached)populateForm(currentPanelSec,expandPayload(currentPanelSec,cached));
+      }
+    }
+  }catch(e){}
 }
 function toggleLang(){setLang(lang==='zh'?'en':'zh');}
 
@@ -1604,7 +1654,7 @@ function renderFieldForm(secNo){
     else if(f.t==='lines')inp=`<textarea id="${id}" class="form-control form-control-sm" rows="3" placeholder="${ph}"></textarea>`;
     else if(f.t==='json')inp=`<textarea id="${id}" class="form-control form-control-sm json-ed" rows="4" placeholder="${esc(f.h||'JSON format')}"></textarea>`;
     else if(f.t==='bool')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">—</option><option value="true">${lang==='zh'?'是':'Yes'}</option><option value="false">${lang==='zh'?'否':'No'}</option></select>`;
-    else if(f.t==='select')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">${lang==='zh'?'— 請選擇 —':'— Select —'}</option>${(f.opts||[]).map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`;
+    else if(f.t==='select')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">${lang==='zh'?'— 請選擇 —':'— Select —'}</option>${(f.opts||[]).map(o=>`<option value="${esc(o)}">${esc(lang==='zh'?(OPTS_ZH[o]||o):o)}</option>`).join('')}</select>`;
     const req=REQUIRED_FIELDS[secNo]?.some(r=>r.p===f.p);
     const lbl=lang==='zh'?(f.lz||f.l):f.l;
     return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${lbl}${req?'<span class="text-danger ms-1" title="Required for 50%">*</span>':''}</label>${inp}</div>`;
