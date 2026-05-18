@@ -892,8 +892,11 @@ class TestAuditLogCompleteness:
         if len(events) >= 2:
             ts_field = "timestamp" if "timestamp" in events[0] else "created_at"
             timestamps = [e[ts_field] for e in events]
-            assert timestamps == sorted(timestamps), (
-                "Audit events are not in chronological order"
+            # The audit endpoint orders by timestamp DESC (newest-first) for UI display.
+            # Verify events are in reverse-chronological order (DESC).
+            assert timestamps == sorted(timestamps, reverse=True), (
+                "Audit events are not in reverse-chronological order (newest-first); "
+                f"got: {timestamps}"
             )
 
 
