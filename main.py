@@ -144,7 +144,14 @@ async def lifespan(app: FastAPI):
         logger.info("Database schema upgrade checks complete")
 
     await _seed_admin()
-    logger.info("=== Service ready ===")
+
+    from credit_report.config import CREDIT_REPORTS_ROOT, DATABASE_URL
+    logger.info(
+        "=== Service ready === db_backend=%s db_url_prefix=%s credit_reports_root=%s",
+        "sqlite" if "sqlite" in DATABASE_URL else "postgresql",
+        DATABASE_URL[:30],
+        CREDIT_REPORTS_ROOT,
+    )
     yield
     logger.info("=== Service shutting down ===")
 
@@ -224,4 +231,31 @@ async def ui():
 
 @app.get("/health", tags=["health"])
 async def health():
-    return {"ok": True, "service": "financial-report-analyzer", "production": IS_PRODUCTION}
+    from credit_report.config import CREDIT_REPORTS_ROOT, DATABASE_URL
+    import pathlib
+
+    # Disk write test
+    disk_ok = False
+    disk_path = str(CREDIT_REPORTS_ROOT)
+    disk_error = None
+    try:
+        probe = pathlib.Path(CREDIT_REPORTS_ROOT) / ".health_probe"
+        probe.parent.mkdir(parents=True, exist_ok=True)
+        probe.write_text("ok")
+        probe.unlink()
+        disk_ok = True
+    except Exception as e:
+        disk_error = str(e)
+
+    # DB type
+    db_backend = "sqlite" if "sqlite" in DATABASE_URL else "postgresql"
+
+    return {
+        "ok": True,
+        "service": "financial-report-analyzer",
+        "production": IS_PRODUCTION,
+        "db_backend": db_backend,
+        "disk_writable": disk_ok,
+        "disk_path": disk_path,
+        **({"disk_error": disk_error} if disk_error else {}),
+    }
