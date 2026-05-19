@@ -65,7 +65,7 @@ async def _seed_report(db, rid: str, owner_id: str | None = None):
 
 EXPECTED_FIELD_COUNTS = {
     1: 73, 2: 48, 3: 26, 4: 32, 5: 77,
-    6: 57, 7: 91, 8: 22, 9: 20, 10: 36, 11: 12,
+    6: 57, 7: 129, 8: 22, 9: 20, 10: 36, 11: 12,
 }
 
 EXPECTED_REQUIRED_COUNTS = {

@@ -1513,6 +1513,8 @@ const FIELD_DEFS={
     {p:'7A_borrower_financials.net_income_fy2023',l:'7A — Net Income FY2023',lz:'7A — 淨利 FY2023',t:'number',h:'e.g. 1300',hz:'例：1,300'},
     {p:'7A_borrower_financials.revenue_fy2024',l:'7A — Revenue FY2024',lz:'7A — 收入 FY2024',t:'number',h:'e.g. 4250',hz:'例：4,250'},
     {p:'7A_borrower_financials.ebitda_fy2024',l:'7A — EBITDA FY2024',lz:'7A — EBITDA FY2024',t:'number',h:'e.g. 1860',hz:'例：1,860'},
+    {p:'7A_borrower_financials.depreciation_fy2022',l:'7A — Depreciation & Amortisation FY2022',lz:'7A — 折舊及攤銷 FY2022',t:'number',h:'e.g. 230',hz:'例：230'},
+    {p:'7A_borrower_financials.depreciation_fy2023',l:'7A — Depreciation & Amortisation FY2023',lz:'7A — 折舊及攤銷 FY2023',t:'number',h:'e.g. 250',hz:'例：250'},
     {p:'7A_borrower_financials.depreciation_fy2024',l:'7A — Depreciation & Amortisation FY2024',lz:'7A — 折舊及攤銷 FY2024',t:'number',h:'e.g. 350',hz:'例：350'},
     {p:'7A_borrower_financials.op_profit_fy2024',l:'7A — Operating Profit FY2024',lz:'7A — 營業利潤 FY2024',t:'number',h:'e.g. 1510',hz:'例：1,510'},
     {p:'7A_borrower_financials.interest_expense_fy2024',l:'7A — Interest Expense FY2024',lz:'7A — 利息費用 FY2024',t:'number',h:'e.g. 124',hz:'例：124'},
@@ -1562,6 +1564,42 @@ const FIELD_DEFS={
     {p:'7B_key_ratios.fy2024_dscr',l:'7B — DSCR FY2024 (x)',lz:'7B — 債務服務覆蓋率 FY2024 (倍)',t:'number',h:'e.g. 2.1',hz:'例：2.1'},
     {p:'7B_key_ratios.fy2024_current_ratio',l:'7B — Current Ratio FY2024 (x)',lz:'7B — 流動比率 FY2024 (倍)',t:'number',h:'e.g. 1.9',hz:'例：1.9'},
     {p:'7B_key_ratios.fy2024_net_margin_pct',l:'7B — Net Margin FY2024 (%)',lz:'7B — 淨利率 FY2024 (%)',t:'number',h:'e.g. 32.7',hz:'例：32.7'},
+    {p:'7B_key_ratios.fy2022_gross_margin_pct',l:'7B — Gross Margin FY2022 (%)',lz:'7B — 毛利率 FY2022 (%)',t:'number',h:'e.g. 35.1',hz:'例：35.1'},
+    {p:'7B_key_ratios.fy2023_gross_margin_pct',l:'7B — Gross Margin FY2023 (%)',lz:'7B — 毛利率 FY2023 (%)',t:'number',h:'e.g. 34.1',hz:'例：34.1'},
+    {p:'7B_key_ratios.fy2024_gross_margin_pct',l:'7B — Gross Margin FY2024 (%)',lz:'7B — 毛利率 FY2024 (%)',t:'number',h:'e.g. 34.1',hz:'例：34.1'},
+    {p:'7B_key_ratios.fy2022_ebitda_margin_pct',l:'7B — EBITDA Margin FY2022 (%)',lz:'7B — EBITDA利潤率 FY2022 (%)',t:'number',h:'e.g. 42.9',hz:'例：42.9'},
+    {p:'7B_key_ratios.fy2023_ebitda_margin_pct',l:'7B — EBITDA Margin FY2023 (%)',lz:'7B — EBITDA利潤率 FY2023 (%)',t:'number',h:'e.g. 42.7',hz:'例：42.7'},
+    {p:'7B_key_ratios.fy2024_ebitda_margin_pct',l:'7B — EBITDA Margin FY2024 (%)',lz:'7B — EBITDA利潤率 FY2024 (%)',t:'number',h:'e.g. 43.8',hz:'例：43.8'},
+    {p:'7B_key_ratios.fy2022_op_margin_pct',l:'7B — Operating Margin FY2022 (%)',lz:'7B — 營業利潤率 FY2022 (%)',t:'number',h:'e.g. 36.9',hz:'例：36.9'},
+    {p:'7B_key_ratios.fy2023_op_margin_pct',l:'7B — Operating Margin FY2023 (%)',lz:'7B — 營業利潤率 FY2023 (%)',t:'number',h:'e.g. 36.6',hz:'例：36.6'},
+    {p:'7B_key_ratios.fy2024_op_margin_pct',l:'7B — Operating Margin FY2024 (%)',lz:'7B — 營業利潤率 FY2024 (%)',t:'number',h:'e.g. 35.5',hz:'例：35.5'},
+    {p:'7B_key_ratios.fy2022_roa_pct',l:'7B — ROA FY2022 (%)',lz:'7B — 資產報酬率 FY2022 (%)',t:'number',h:'e.g. 11.4',hz:'例：11.4'},
+    {p:'7B_key_ratios.fy2023_roa_pct',l:'7B — ROA FY2023 (%)',lz:'7B — 資產報酬率 FY2023 (%)',t:'number',h:'e.g. 11.8',hz:'例：11.8'},
+    {p:'7B_key_ratios.fy2024_roa_pct',l:'7B — ROA FY2024 (%)',lz:'7B — 資產報酬率 FY2024 (%)',t:'number',h:'e.g. 11.9',hz:'例：11.9'},
+    {p:'7B_key_ratios.fy2022_roe_pct',l:'7B — ROE FY2022 (%)',lz:'7B — 股東權益報酬率 FY2022 (%)',t:'number',h:'e.g. 42.9',hz:'例：42.9'},
+    {p:'7B_key_ratios.fy2023_roe_pct',l:'7B — ROE FY2023 (%)',lz:'7B — 股東權益報酬率 FY2023 (%)',t:'number',h:'e.g. 43.3',hz:'例：43.3'},
+    {p:'7B_key_ratios.fy2024_roe_pct',l:'7B — ROE FY2024 (%)',lz:'7B — 股東權益報酬率 FY2024 (%)',t:'number',h:'e.g. 43.4',hz:'例：43.4'},
+    {p:'7B_key_ratios.fy2022_debt_equity',l:'7B — Debt/Equity FY2022 (x)',lz:'7B — 負債╱股東權益 FY2022 (倍)',t:'number',h:'e.g. 1.82',hz:'例：1.82'},
+    {p:'7B_key_ratios.fy2023_debt_equity',l:'7B — Debt/Equity FY2023 (x)',lz:'7B — 負債╱股東權益 FY2023 (倍)',t:'number',h:'e.g. 1.60',hz:'例：1.60'},
+    {p:'7B_key_ratios.fy2024_debt_equity',l:'7B — Debt/Equity FY2024 (x)',lz:'7B — 負債╱股東權益 FY2024 (倍)',t:'number',h:'e.g. 1.59',hz:'例：1.59'},
+    {p:'7B_key_ratios.fy2022_net_debt',l:'7B — Net Debt FY2022 (same unit as financials)',lz:'7B — 淨負債 FY2022（與財務報表同單位）',t:'number',h:'e.g. 3250',hz:'例：3,250'},
+    {p:'7B_key_ratios.fy2023_net_debt',l:'7B — Net Debt FY2023 (same unit as financials)',lz:'7B — 淨負債 FY2023（與財務報表同單位）',t:'number',h:'e.g. 2800',hz:'例：2,800'},
+    {p:'7B_key_ratios.fy2024_net_debt',l:'7B — Net Debt FY2024 (same unit as financials)',lz:'7B — 淨負債 FY2024（與財務報表同單位）',t:'number',h:'e.g. 2900',hz:'例：2,900'},
+    {p:'7B_key_ratios.fy2022_ocf_total_debt',l:'7B — OCF / Total Debt FY2022 (x)',lz:'7B — 營業現金流╱有息負債 FY2022 (倍)',t:'number',h:'e.g. 0.33',hz:'例：0.33'},
+    {p:'7B_key_ratios.fy2023_ocf_total_debt',l:'7B — OCF / Total Debt FY2023 (x)',lz:'7B — 營業現金流╱有息負債 FY2023 (倍)',t:'number',h:'e.g. 0.38',hz:'例：0.38'},
+    {p:'7B_key_ratios.fy2024_ocf_total_debt',l:'7B — OCF / Total Debt FY2024 (x)',lz:'7B — 營業現金流╱有息負債 FY2024 (倍)',t:'number',h:'e.g. 0.38',hz:'例：0.38'},
+    {p:'7B_key_ratios.fy2022_ocf_interest',l:'7B — OCF / Interest FY2022 (x)',lz:'7B — 營業現金流╱利息費用 FY2022 (倍)',t:'number',h:'e.g. 17.9',hz:'例：17.9'},
+    {p:'7B_key_ratios.fy2023_ocf_interest',l:'7B — OCF / Interest FY2023 (x)',lz:'7B — 營業現金流╱利息費用 FY2023 (倍)',t:'number',h:'e.g. 16.4',hz:'例：16.4'},
+    {p:'7B_key_ratios.fy2024_ocf_interest',l:'7B — OCF / Interest FY2024 (x)',lz:'7B — 營業現金流╱利息費用 FY2024 (倍)',t:'number',h:'e.g. 15.7',hz:'例：15.7'},
+    {p:'7B_key_ratios.fy2022_ar_days',l:'7B — AR Days FY2022 (days)',lz:'7B — 應收帳款天數 FY2022 (天)',t:'number',h:'e.g. 57',hz:'例：57'},
+    {p:'7B_key_ratios.fy2023_ar_days',l:'7B — AR Days FY2023 (days)',lz:'7B — 應收帳款天數 FY2023 (天)',t:'number',h:'e.g. 58',hz:'例：58'},
+    {p:'7B_key_ratios.fy2024_ar_days',l:'7B — AR Days FY2024 (days)',lz:'7B — 應收帳款天數 FY2024 (天)',t:'number',h:'e.g. 60',hz:'例：60'},
+    {p:'7B_key_ratios.fy2022_ap_days',l:'7B — AP Days FY2022 (days)',lz:'7B — 應付帳款天數 FY2022 (天)',t:'number',h:'e.g. 43',hz:'例：43'},
+    {p:'7B_key_ratios.fy2023_ap_days',l:'7B — AP Days FY2023 (days)',lz:'7B — 應付帳款天數 FY2023 (天)',t:'number',h:'e.g. 45',hz:'例：45'},
+    {p:'7B_key_ratios.fy2024_ap_days',l:'7B — AP Days FY2024 (days)',lz:'7B — 應付帳款天數 FY2024 (天)',t:'number',h:'e.g. 47',hz:'例：47'},
+    {p:'7B_key_ratios.fy2022_inventory_days',l:'7B — Inventory Days FY2022 (days, if applicable)',lz:'7B — 存貨天數 FY2022（天，如適用）',t:'number',h:'e.g. 12',hz:'例：12'},
+    {p:'7B_key_ratios.fy2023_inventory_days',l:'7B — Inventory Days FY2023 (days, if applicable)',lz:'7B — 存貨天數 FY2023（天，如適用）',t:'number',h:'e.g. 11',hz:'例：11'},
+    {p:'7B_key_ratios.fy2024_inventory_days',l:'7B — Inventory Days FY2024 (days, if applicable)',lz:'7B — 存貨天數 FY2024（天，如適用）',t:'number',h:'e.g. 10',hz:'例：10'},
     {p:'7C_guarantor_financials.applicable',l:'7C — Guarantor Financial Analysis Applicable?',lz:'7C — 保證人財務分析適用？',t:'bool'},
     {p:'7C_guarantor_financials.reporting_currency',l:'7C — Guarantor Reporting Currency',lz:'7C — 保證人申報幣別',t:'text',h:'e.g. NTD',hz:'例：NTD'},
     {p:'7C_guarantor_financials.revenue_fy2024',l:'7C — Guarantor Revenue FY2024',lz:'7C — 保證人收入 FY2024',t:'number',h:'e.g. 240300',hz:'例：240,300'},
@@ -1836,7 +1874,7 @@ function finalizePayload(secNo,data){
     const fa=d['7A_borrower_financials']||{};
     // Income statement — 3 years including COGS
     const is={};
-    for(const yr of['fy2022','fy2023','fy2024']){const yk=yr==='fy2022'?'FY2022':yr==='fy2023'?'FY2023':'FY2024';const yf=yr==='fy2024'?['revenue','ebitda','depreciation','op_profit','interest_expense','net_income']:['revenue','ebitda','op_profit','interest_expense','net_income'];const yd={};for(const f of yf){if(fa[f+'_'+yr]!=null)yd[f]=fa[f+'_'+yr];}if(fa['cogs_'+yr]!=null)yd['cogs']=fa['cogs_'+yr];if(Object.keys(yd).length)is[yk]=yd;}
+    for(const yr of['fy2022','fy2023','fy2024']){const yk=yr==='fy2022'?'FY2022':yr==='fy2023'?'FY2023':'FY2024';const yf=['revenue','ebitda','depreciation','op_profit','interest_expense','net_income'];const yd={};for(const f of yf){if(fa[f+'_'+yr]!=null)yd[f]=fa[f+'_'+yr];}if(fa['cogs_'+yr]!=null)yd['cogs']=fa['cogs_'+yr];if(Object.keys(yd).length)is[yk]=yd;}
     // Balance sheet — 3 years
     const bm={bs_cash:'cash',bs_total_ca:'total_ca',bs_total_nca:'total_nca',bs_total_assets:'total_assets',bs_total_cl:'total_cl',bs_total_ncl:'total_ncl',bs_total_liabilities:'total_liabilities',bs_total_equity:'total_equity'};
     const bs={};
@@ -1856,7 +1894,7 @@ function finalizePayload(secNo,data){
     d['7A_borrower_financials']={reporting_currency:fa.reporting_currency,unit:fa.unit,reporting_entity:fa.reporting_entity,auditor:fa.auditor,audit_opinion:fa.audit_opinion,accounting_standard:fa.accounting_standard,fiscal_year_end:fa.fiscal_year_end,income_statement:is,balance_sheet:bs,cash_flow:cf,...(plRows?{full_income_statement:plRows}:{}),...(bsRows?{full_balance_sheet:bsRows}:{}),...(cfRows?{full_cash_flow:cfRows}:{})};
     // Key ratios — FY2022, FY2023, FY2024
     const kr=d['7B_key_ratios']||{};const kro={};
-    for(const yr of['fy2022','fy2023','fy2024']){const yk=yr==='fy2022'?'FY2022':yr==='fy2023'?'FY2023':'FY2024';const yd={};for(const m of['debt_ebitda','interest_coverage','dscr','current_ratio','net_margin_pct']){if(kr[yr+'_'+m]!=null)yd[m]=kr[yr+'_'+m];}if(Object.keys(yd).length)kro[yk]=yd;}d['7B_key_ratios']=kro;
+    for(const yr of['fy2022','fy2023','fy2024']){const yk=yr==='fy2022'?'FY2022':yr==='fy2023'?'FY2023':'FY2024';const yd={};for(const m of['debt_ebitda','interest_coverage','dscr','current_ratio','net_margin_pct','gross_margin_pct','ebitda_margin_pct','op_margin_pct','roa_pct','roe_pct','debt_equity','net_debt','ocf_total_debt','ocf_interest','ar_days','ap_days','inventory_days']){if(kr[yr+'_'+m]!=null)yd[m]=kr[yr+'_'+m];}if(Object.keys(yd).length)kro[yk]=yd;}d['7B_key_ratios']=kro;
     // Guarantor financials
     const gc=d['7C_guarantor_financials']||{};if(gc.applicable!=null){const gco={applicable:gc.applicable,reporting_currency:gc.reporting_currency||'NTD',unit:'billions',income_statement:{FY2024:{}},balance_sheet:{FY2024:{}},cash_flow:{FY2024:{}}};if(gc.revenue_fy2024!=null)gco.income_statement.FY2024.revenue=gc.revenue_fy2024;if(gc.ebitda_fy2024!=null)gco.income_statement.FY2024.ebitda=gc.ebitda_fy2024;if(gc.net_income_fy2024!=null)gco.income_statement.FY2024.net_income=gc.net_income_fy2024;if(gc.cash_fy2024!=null)gco.balance_sheet.FY2024.cash=gc.cash_fy2024;if(gc.total_assets_fy2024!=null)gco.balance_sheet.FY2024.total_assets=gc.total_assets_fy2024;if(gc.total_equity_fy2024!=null)gco.balance_sheet.FY2024.total_equity=gc.total_equity_fy2024;if(gc.ocf_fy2024!=null)gco.cash_flow.FY2024.ocf=gc.ocf_fy2024;d['7C_guarantor_financials']=gco;}
     // 7E base case: parse key_assumptions pipe rows
