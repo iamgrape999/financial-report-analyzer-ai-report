@@ -371,7 +371,7 @@ def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -
                 genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 genai_types.Part.from_text(_OCR_PROMPT),
             ],
-            config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+            config=genai_types.GenerateContentConfig(max_output_tokens=32768, thinking_config=genai_types.ThinkingConfig(thinking_budget=0)),
         )
         elapsed = (time.perf_counter() - t0) * 1000
         result = response.text or ""
@@ -464,7 +464,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
                     genai_types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
                     genai_types.Part.from_text(_OCR_PROMPT),
                 ],
-                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768, thinking_config=genai_types.ThinkingConfig(thinking_budget=0)),
             )
             result = response.text or ""
             elapsed = (time.perf_counter() - t0) * 1000
@@ -499,7 +499,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
                     genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
                     genai_types.Part.from_text(_OCR_PROMPT),
                 ],
-                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768, thinking_config=genai_types.ThinkingConfig(thinking_budget=0)),
             )
             return response.text or ""
 
@@ -518,7 +518,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
                         genai_types.Part.from_bytes(data=page_blob, mime_type="application/pdf"),
                         genai_types.Part.from_text(_OCR_PROMPT),
                     ],
-                    config=genai_types.GenerateContentConfig(max_output_tokens=8192),
+                    config=genai_types.GenerateContentConfig(max_output_tokens=8192, thinking_config=genai_types.ThinkingConfig(thinking_budget=0)),
                 )
                 page_text = page_response.text or ""
                 page_texts.append(page_text)
@@ -592,7 +592,7 @@ async def extract_text_from_scanned_pdf_vision_async(
                     genai_types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
                     genai_types.Part.from_text(_OCR_PROMPT),
                 ],
-                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768, thinking_config=genai_types.ThinkingConfig(thinking_budget=0)),
             )
             result = response.text or ""
             if on_progress:
@@ -614,7 +614,7 @@ async def extract_text_from_scanned_pdf_vision_async(
                     genai_types.Part.from_bytes(data=data, mime_type="application/pdf"),
                     genai_types.Part.from_text(_OCR_PROMPT),
                 ],
-                config=genai_types.GenerateContentConfig(max_output_tokens=32768),
+                config=genai_types.GenerateContentConfig(max_output_tokens=32768, thinking_config=genai_types.ThinkingConfig(thinking_budget=0)),
             )
             return response.text or ""
         except Exception as e:
@@ -635,7 +635,7 @@ async def extract_text_from_scanned_pdf_vision_async(
                     genai_types.Part.from_bytes(data=blob, mime_type="application/pdf"),
                     genai_types.Part.from_text(_OCR_PROMPT),
                 ],
-                config=genai_types.GenerateContentConfig(max_output_tokens=8192),
+                config=genai_types.GenerateContentConfig(max_output_tokens=8192, thinking_config=genai_types.ThinkingConfig(thinking_budget=0)),
             )
             page_text = response.text or ""
             page_texts.append(page_text)

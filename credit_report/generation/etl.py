@@ -1266,6 +1266,7 @@ async def _call_gemini_etl_once(
         config=genai_types.GenerateContentConfig(
             system_instruction=system_prompt,
             max_output_tokens=65536,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
         ),
     )
     gemini_ms = (time.perf_counter() - t_gemini) * 1000

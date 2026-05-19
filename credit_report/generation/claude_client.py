@@ -64,6 +64,7 @@ async def call_gemini_raw(
     cfg = genai_types.GenerateContentConfig(
         system_instruction=system_prompt,
         max_output_tokens=max_tokens,
+        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
     )
     try:
         response = await asyncio.wait_for(
@@ -134,6 +135,7 @@ async def generate_section_markdown(
         cfg = genai_types.GenerateContentConfig(
             system_instruction=system_prompt,
             max_output_tokens=max_tokens,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
         )
         try:
             response = await asyncio.wait_for(
