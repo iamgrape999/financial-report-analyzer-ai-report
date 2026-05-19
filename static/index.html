@@ -1863,6 +1863,60 @@ function finalizePayload(secNo,data){
   return d;
 }
 
+// ── Section 1: normalise 1A_/1B_ prefixed keys → flat aliases expected by prompt builder ──
+// Supports analyst templates that use numbered-letter prefixes (1A_, 1B_, etc.)
+// while the system internally uses flat keys (facility_summary, terms_and_conditions, etc.).
+// Called in expandPayload (form load), saveSectionInput, and _dsChooseJson (raw save + generate).
+function _normalizeSec1Aliases(d){
+  if(!d||typeof d!=='object') return d;
+  // 1. Map prefixed keys → flat aliases (add flat key if absent; preserve originals)
+  [['1A_facility_summary','facility_summary'],
+   ['1B_regulatory_compliance','regulatory_compliance'],
+   ['1C_purpose_and_recommendation','purpose_and_recommendation'],
+   ['1D_terms_and_conditions','terms_and_conditions'],
+   ['1E_psr_tcs','psr_tcs'],
+   ['1F_account_strategy','account_strategy'],
+   ['1G_waiver_amendment','waiver_amendment'],
+  ].forEach(([src,dst])=>{if(d[src]!=null&&d[dst]==null)d[dst]=d[src];});
+  // 2. facility_summary: alias facility_items → rows; flatten nested collateral {pre_delivery, post_delivery}
+  const fs=d.facility_summary;
+  if(fs&&!fs.rows&&Array.isArray(fs.facility_items)){
+    fs.rows=fs.facility_items.map(item=>{
+      if(item.collateral&&typeof item.collateral==='object'){
+        if(!item.collateral_pre_delivery) item.collateral_pre_delivery=item.collateral.pre_delivery||'';
+        if(!item.collateral_post_delivery) item.collateral_post_delivery=item.collateral.post_delivery||'';
+      }
+      return item;
+    });
+  }
+  // 3. terms_and_conditions: unwrap {applicable, comparables:[...]} → flat array for expandPayload
+  const tc=d.terms_and_conditions;
+  if(tc&&!Array.isArray(tc.deal_comparison)&&tc.deal_comparison&&Array.isArray(tc.deal_comparison.comparables)){
+    tc.deal_comparison=tc.deal_comparison.comparables;
+  }
+  // 4. Auto-extract sll_kpi_performance (drives T&C Field 20 Actual vs Target table)
+  // Source: terms_and_conditions.salient_tcs.sll_kpis (nested analyst format)
+  if(!d.sll_kpi_performance){
+    const src=tc&&tc.salient_tcs&&tc.salient_tcs.sll_kpis;
+    if(src&&Array.isArray(src.kpis)&&src.kpis.length){
+      const k0=src.kpis[0];
+      const tK=Object.keys(k0).find(k=>k.endsWith('_target'))||'';
+      const period=tK?'FY'+tK.replace(/^fy/i,'').replace(/_target$/i,'').toUpperCase():'';
+      const maxBps=src.margin_ratchet_max_bps||0;
+      d.sll_kpi_performance={kpis:src.kpis.map(k=>{
+        const t=Object.keys(k).find(x=>x.endsWith('_target'))||'';
+        const a=Object.keys(k).find(x=>x.endsWith('_actual'))||'';
+        const c=Object.keys(k).find(x=>x.endsWith('_compliance'))||'';
+        const out={kpi_name:k.kpi||k.kpi_name||'',target_value:t?k[t]:'',actual_value:a?k[a]:'',
+                   period,on_track:c?(k[c]==='Met'||k[c]===true):false,ratchet_bps:maxBps};
+        if(k.non_compliance_note) out.non_compliance_note=k.non_compliance_note;
+        return out;
+      })};
+    }
+  }
+  return d;
+}
+
 // ── expandPayload: reverse finalizePayload for form loading ──
 function expandPayload(secNo,data){
   if(!data)return data;const d=JSON.parse(JSON.stringify(data));
@@ -1973,6 +2027,7 @@ function expandPayload(secNo,data){
     }
   }
   if(secNo===1){
+    _normalizeSec1Aliases(d);
     const fs=d['facility_summary'];
     if(fs&&Array.isArray(fs.rows)&&fs.rows.length&&typeof fs.rows[0]==='object'){
       fs.rows=fs.rows.map(r=>[
@@ -2453,6 +2508,7 @@ async function saveSectionInput(){
   let parsed;
   try{parsed=JSON.parse(raw);}catch(e){toast(tl('Invalid JSON: ','無效的JSON：')+e.message,'danger');return;}
   if(typeof parsed!=='object'||Array.isArray(parsed)){toast(tl('Input must be a JSON object {}','輸入必須為JSON物件 {}'),'warning');return;}
+  if(sec===1) _normalizeSec1Aliases(parsed);
   const{pct}=getCompleteness(sec,parsed);
   renderCompleteness(sec,parsed);
   try{
@@ -2567,6 +2623,7 @@ async function _dsChooseJson(){
   const raw=document.getElementById('jsonEd').value.trim();
   let parsed;
   try{parsed=JSON.parse(raw);}catch(e){toast(tl('Invalid JSON: ','無效的JSON：')+e.message,'danger');return;}
+  if(sec===1) _normalizeSec1Aliases(parsed);
   try{
     const res=await fetch(API+'/reports/'+currentRid+'/inputs/'+sec,{method:'PUT',headers:HJ(),body:JSON.stringify({section_no:sec,input_json:parsed})});
     if(!res.ok)throw new Error((await res.json()).detail||tl('Save failed','儲存失敗'));
