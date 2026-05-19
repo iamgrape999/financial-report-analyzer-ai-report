@@ -1057,9 +1057,16 @@ function setLang(l){
     if(panel&&panel.style.display!=='none'&&currentPanelSec){
       const container=document.getElementById('formFields');
       if(container&&container.innerHTML.trim()){
+        // Snapshot live form data BEFORE wiping the DOM
+        const liveData=collectFormData(currentPanelSec);
         container.innerHTML=renderFieldForm(currentPanelSec);
-        const cached=sectionInputDataMap[currentPanelSec];
-        if(cached)populateForm(currentPanelSec,expandPayload(currentPanelSec,cached));
+        // Restore: live unsaved data takes priority over server-cached data
+        if(Object.keys(liveData).length>0){
+          populateForm(currentPanelSec,liveData);
+        }else{
+          const cached=sectionInputDataMap[currentPanelSec];
+          if(cached)populateForm(currentPanelSec,expandPayload(currentPanelSec,cached));
+        }
       }
     }
   }catch(e){}
@@ -1160,6 +1167,7 @@ const FIELD_DEFS={
     {p:'facility_summary.rows',l:'1A — Facility Rows (one per line or separated by 。: ItemNo|BorrowerName|BookingLoc|ProposedUSD M|IsNew|Currency|Tenor|FacilityType|CollateralPre|CollateralPost|Guarantor)',lz:'1A — 授信項目列表（每行或以「。」分隔一項，接受｜或|分隔符，可含「欄位名稱=值」格式：項次｜借款人全名｜預訂地點｜提議金額USD M｜是否新增｜幣別｜期限｜授信類型｜交船前擔保品｜交船後擔保品｜保證人）',t:'lines',h:'1|EMA Pte Ltd|SG|178.5|Yes|USD|11 years|Term Loan (SLL)|RG (KDB)|Vessel mortgage|EMC\n2|EMA Pte Ltd|SG|50|No|USD|3 years|RCF|NIL|NIL|EMC',hz:'1|EMA私人有限公司|SG|178.5|Yes|USD|11年|定期貸款（SLL）|退款保證（KDB）|船舶抵押|EMC\n2|EMA私人有限公司|SG|50|No|USD|3年|循環信貸|無|無|EMC'},
     {p:'facility_summary.totals.total_credit_limit_usd_m',l:'1A — Total Credit Limit (USD m)',lz:'1A — 授信總額度 (USD m)',t:'number',h:'e.g. 178.5',hz:'例：178.5'},
     {p:'facility_summary.totals.psr_spot_limit_usd_m',l:'1A — PSR Spot Limit (USD m)',lz:'1A — PSR 即期限額 (USD m)',t:'number',h:'e.g. 178.5',hz:'例：178.5'},
+    {p:'facility_summary.outstanding_as_at_date',l:'1A — Outstanding Balance "As at" Date',lz:'1A — 未償還餘額截止日期',t:'text',h:'e.g. end Oct 2025',hz:'例：2025年10月底'},
     {p:'facility_summary.footnotes',l:'1A — Footnotes (one per line: [Symbol] Text)',lz:'1A — 腳注（每行一條：[符號] 說明文字）',t:'lines',h:'[1] Expected Vessel Delivery Date 30 Jun 2028 with 180 days grace period.\n[2] Facility to be cancelled if vessel not delivered by Latest Delivery Date.',hz:'[1] 預計船舶交付日期為2028年6月30日，含180天寬限期。\n[2] 若船舶未於最晚交付日期前交付，融資將被取消。'},
     {p:'facility_summary.appendix_ref',l:'1A — Appendix Reference',lz:'1A — 附錄參考',t:'text',h:'e.g. Please refer to Appendix I for total CUB exposure to Evergreen Group.',hz:'例：請參閱附錄一了解國泰聯行對長榮集團的整體風險敞口。'},
     {p:'regulatory_compliance.bank_net_worth_twd_bn',l:'1B — Bank Net Worth (TWD bn)',lz:'1B — 銀行淨值 (TWD bn)',t:'number',h:'e.g. 3,200',hz:'例：3,200'},
@@ -1180,10 +1188,12 @@ const FIELD_DEFS={
     {p:'terms_and_conditions.borrower',l:'1D — Borrower',lz:'1D — 借款人',t:'text',h:'e.g. Evergreen Marine (Asia) Pte. Ltd. (EMA)',hz:'例：長榮海運（亞洲）私人有限公司（EMA）'},
     {p:'terms_and_conditions.guarantors',l:'1D — Guarantors (one per line)',lz:'1D — 保證人（每行一位）',t:'lines',h:'One guarantor per line\ne.g. Evergreen Marine Corp (EMC)',hz:'每行一位保證人\n例：長榮海運股份有限公司 (EMC)'},
     {p:'terms_and_conditions.lender',l:'1D — Lender',lz:'1D — 貸款人',t:'text',h:'e.g. Cathay United Bank Singapore Branch (CUB SG)',hz:'例：國泰聯行新加坡分行（CUB SG）'},
+    {p:'terms_and_conditions.vessel',l:'1D — Vessel (T&C Row 4)',lz:'1D — 船舶（條款第4項）',t:'text',h:'e.g. One 20,000 TEU dual-fuel (LNG, Diesel) containership (Hull No. 2891), under construction at Samsung Heavy Industries, South Korea',hz:'例：一艘20,000 TEU雙燃料（LNG、柴油）貨櫃船（船殼號 2891），韓國三星重工建造中'},
     {p:'terms_and_conditions.facility_type',l:'1D — Facility Type',lz:'1D — 授信類型',t:'text',h:'e.g. Committed Bilateral Term Loan (SLL)',hz:'例：承諾雙邊定期貸款（永續連結貸款）'},
     {p:'terms_and_conditions.facility_amount_usd_m',l:'1D — Facility Amount (USD M)',lz:'1D — 授信金額 (USD M)',t:'number',h:'e.g. 178.5',hz:'例：178.5'},
     {p:'terms_and_conditions.facility_amount_formula',l:'1D — Facility Amount Formula',lz:'1D — 授信金額公式',t:'text',h:'e.g. Lesser of USD178.5m and 80% of Initial Market Value',hz:'例：USD1.785億與初始市值80%兩者中較低者'},
     {p:'terms_and_conditions.ltc_percent',l:'1D — LTC / Advance Rate (%)',lz:'1D — 貸款成本比 / 預付率 (%)',t:'number',h:'e.g. 80',hz:'例：80'},
+    {p:'terms_and_conditions.availability_period',l:'1D — Availability Period (T&C Row 8)',lz:'1D — 動用期間（條款第8項）',t:'text',h:'e.g. Till 6 months from vessel delivery date; undrawn limits automatically cancelled',hz:'例：至船舶交付日後6個月止；未動用額度自動取消'},
     {p:'terms_and_conditions.tenor_years',l:'1D — Tenor (years)',lz:'1D — 年期（年）',t:'number',h:'e.g. 11',hz:'例：11'},
     {p:'terms_and_conditions.tenor_structure',l:'1D — Tenor Structure',lz:'1D — 年期結構',t:'text',h:'e.g. 4+7 (pre-delivery + post-delivery)',hz:'例：4+7（交船前+交船後）'},
     {p:'terms_and_conditions.purpose',l:'1D — Purpose of Facility',lz:'1D — 授信目的',t:'textarea',h:'e.g. To part-finance the pre- and post-delivery costs of one 20,000 TEU newbuild containership',hz:'例：部份融資一艘20,000 TEU新造貨櫃船的交船前後費用'},
@@ -1210,6 +1220,7 @@ const FIELD_DEFS={
     {p:'terms_and_conditions.drawdown_conditions.per_drawdown_cap_pct_of_cost',l:'1D — Drawdown: Cap per Drawdown (% of Cost)',lz:'1D — 提款：每次上限（成本百分比）',t:'number',h:'e.g. 80',hz:'例：80'},
     {p:'terms_and_conditions.drawdown_conditions.aggregate_cap_usd_m',l:'1D — Drawdown: Aggregate Cap (USD m)',lz:'1D — 提款：總上限 (USD m)',t:'number',h:'e.g. 178.5',hz:'例：178.5'},
     {p:'terms_and_conditions.drawdown_conditions.pre_delivery_cap_usd_m',l:'1D — Drawdown: Pre-Delivery Cap (USD m)',lz:'1D — 提款：交船前上限 (USD m)',t:'number',h:'e.g. 71.4',hz:'例：71.4'},
+    {p:'terms_and_conditions.drawdown_conditions.commitment_termination_date',l:'1D — Commitment Termination Date',lz:'1D — 承諾終止日',t:'text',h:'e.g. 31 Dec 2028 (Latest Delivery Date + 6 months)',hz:'例：2028年12月31日（最晚交付日後6個月）'},
     {p:'terms_and_conditions.conditions_precedent',l:'1D — Conditions Precedent',lz:'1D — 前提條件',t:'lines',h:'One condition per line',hz:'每行一項前提條件'},
     {p:'terms_and_conditions.other_conditions',l:'1D — Other Conditions (one per line)',lz:'1D — 其他條件（每行一條）',t:'lines',h:'e.g. EMC to remain listed throughout the loan facility',hz:'例：EMC於貸款存續期間須維持上市地位'},
     {p:'terms_and_conditions.governing_law',l:'1D — Governing Law',lz:'1D — 適用法律',t:'text',h:'e.g. Singapore law',hz:'例：新加坡法律'},
@@ -1223,6 +1234,7 @@ const FIELD_DEFS={
     {p:'account_strategy.future_opportunities',l:'1F — Future Opportunities',lz:'1F — 未來業務機會',t:'textarea',h:'e.g. Refinancing of existing vessel portfolio (2026-2028); potential green bond issuance',hz:'例：現有船隊再融資（2026-2028）；潛在綠色債券發行'},
     {p:'account_strategy.other_opportunities',l:'1F — Other Opportunities',lz:'1F — 其他業務機會',t:'textarea',h:'e.g. FX hedging; interest rate swap; deposit services',hz:'例：外匯避險；利率交換；存款業務'},
     {p:'sll_kpi_performance.applicable',l:'1G — SLL KPI Performance: Applicable?',lz:'1G — 永續連結貸款KPI績效：適用？',t:'bool'},
+    {p:'sll_kpi_performance.as_of_date',l:'1G — SLL KPI Performance: As-of Date',lz:'1G — 永續連結貸款KPI績效：截至日期',t:'text',h:'e.g. 31 Dec 2024',hz:'例：2024年12月31日'},
     {p:'sll_kpi_performance.kpis',l:'1G — SLL KPI Table (one per line: KPI Name|Target|Actual|Period|OnTrack|Ratchet bps)',lz:'1G — 永續連結貸款KPI表格（每行一項：KPI名稱｜目標｜實際｜期間｜是否達標｜棘輪bps）',t:'lines',h:'CO2 Intensity (gCO2/dwt-nm)|<=8.5|7.2|2024|Yes|-5\nMSCI ESG Rating|AA|AA|2024|Yes|-5\nDJSI Inclusion|Yes|Yes|2024|Yes|-5',hz:'CO2強度（gCO2/dwt-nm）|<=8.5|7.2|2024|Yes|-5\nMSCI ESG評級|AA|AA|2024|Yes|-5\nDJSI入選|Yes|Yes|2024|Yes|-5'}
   ],
   2:[
@@ -3699,7 +3711,7 @@ function sbadge(s){
   const lbl={draft:tl('Draft','草稿'),validated:tl('Validated','已驗證'),review_in_progress:tl('In Review','審核中'),approved:tl('Approved','已核准')};
   return`<span class="badge bg-${m[s]||'secondary'}">${lbl[s]||s}</span>`;
 }
-function fd(iso){if(!iso)return'—';return new Date(iso).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+function fd(iso){if(!iso)return'—';const s=/[Z+\-]\d{2}:?\d{2}$/.test(iso)?iso:iso+'Z';return new Date(s).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
 function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function toast(msg,type='info'){
