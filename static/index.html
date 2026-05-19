@@ -1516,11 +1516,35 @@ const FIELD_DEFS={
     {p:'7A_borrower_financials.cf_ocf',l:'7A — Operating Cash Flow FY2024',lz:'7A — 營業現金流 FY2024',t:'number',h:'e.g. 1950',hz:'例：1,950'},
     {p:'7A_borrower_financials.cf_capex',l:'7A — Capital Expenditure FY2024',lz:'7A — 資本支出 FY2024',t:'number',h:'e.g. 680',hz:'例：680'},
     {p:'7A_borrower_financials.cf_fcf',l:'7A — Free Cash Flow FY2024',lz:'7A — 自由現金流 FY2024',t:'number',h:'e.g. 1270',hz:'例：1,270'},
+    {p:'7A_borrower_financials.cogs_fy2022',l:'7A — Cost of Sales / Operating Expenses FY2022',lz:'7A — 銷貨成本╱營業費用 FY2022',t:'number',h:'e.g. 2500',hz:'例：2,500'},
+    {p:'7A_borrower_financials.cogs_fy2023',l:'7A — Cost of Sales / Operating Expenses FY2023',lz:'7A — 銷貨成本╱營業費用 FY2023',t:'number',h:'e.g. 2700',hz:'例：2,700'},
+    {p:'7A_borrower_financials.cogs_fy2024',l:'7A — Cost of Sales / Operating Expenses FY2024',lz:'7A — 銷貨成本╱營業費用 FY2024',t:'number',h:'e.g. 2800',hz:'例：2,800'},
+    {p:'7A_borrower_financials.total_debt_fy2022',l:'7A — Total Debt FY2022 (ST+LT borrowings+lease)',lz:'7A — 有息負債合計 FY2022（短+長期借款+租賃）',t:'number',h:'e.g. 5100',hz:'例：5,100'},
+    {p:'7A_borrower_financials.total_debt_fy2023',l:'7A — Total Debt FY2023',lz:'7A — 有息負債合計 FY2023',t:'number',h:'e.g. 4800',hz:'例：4,800'},
+    {p:'7A_borrower_financials.total_debt_fy2024',l:'7A — Total Debt FY2024',lz:'7A — 有息負債合計 FY2024',t:'number',h:'e.g. 5100',hz:'例：5,100'},
+    {p:'7A_borrower_financials.bs_cash_fy2022',l:'7A — Cash & Equivalents FY2022',lz:'7A — 現金及等價物 FY2022',t:'number',h:'e.g. 1850',hz:'例：1,850'},
+    {p:'7A_borrower_financials.bs_total_assets_fy2022',l:'7A — Total Assets FY2022',lz:'7A — 資產總計 FY2022',t:'number',h:'e.g. 10500',hz:'例：10,500'},
+    {p:'7A_borrower_financials.bs_total_equity_fy2022',l:'7A — Total Equity FY2022',lz:'7A — 股東權益合計 FY2022',t:'number',h:'e.g. 2800',hz:'例：2,800'},
+    {p:'7A_borrower_financials.cf_ocf_fy2022',l:'7A — Operating Cash Flow FY2022',lz:'7A — 營業現金流 FY2022',t:'number',h:'e.g. 1700',hz:'例：1,700'},
+    {p:'7A_borrower_financials.cf_fcf_fy2022',l:'7A — Free Cash Flow FY2022',lz:'7A — 自由現金流 FY2022',t:'number',h:'e.g. 1100',hz:'例：1,100'},
+    {p:'7A_borrower_financials.bs_cash_fy2023',l:'7A — Cash & Equivalents FY2023',lz:'7A — 現金及等價物 FY2023',t:'number',h:'e.g. 2000',hz:'例：2,000'},
+    {p:'7A_borrower_financials.bs_total_assets_fy2023',l:'7A — Total Assets FY2023',lz:'7A — 資產總計 FY2023',t:'number',h:'e.g. 11000',hz:'例：11,000'},
+    {p:'7A_borrower_financials.bs_total_equity_fy2023',l:'7A — Total Equity FY2023',lz:'7A — 股東權益合計 FY2023',t:'number',h:'e.g. 3000',hz:'例：3,000'},
+    {p:'7A_borrower_financials.cf_ocf_fy2023',l:'7A — Operating Cash Flow FY2023',lz:'7A — 營業現金流 FY2023',t:'number',h:'e.g. 1800',hz:'例：1,800'},
+    {p:'7A_borrower_financials.cf_fcf_fy2023',l:'7A — Free Cash Flow FY2023',lz:'7A — 自由現金流 FY2023',t:'number',h:'e.g. 1200',hz:'例：1,200'},
+    {p:'7A_borrower_financials.full_pl',l:'7A — Full P&L Statement (one row per line: Item|FY2022|FY2023|FY2024) — optional, enables complete 12-row table',lz:'7A — 完整損益表（每行一項：項目｜FY2022｜FY2023｜FY2024）— 選填，用於完整12行表格',t:'lines',h:'Revenue|3850|4100|4250\nCOGS|(2500)|(2700)|(2800)\nGross Profit|1350|1400|1450\nEBITDA|1650|1750|1860\nD&A|(230)|(250)|(350)\nOp Profit|1420|1500|1510\nFinance Income|50|60|70\nFinance Cost|(95)|(110)|(124)\nPBT|1375|1450|1456\nTax|(175)|(150)|(66)\nNet Income|1200|1300|1390',hz:'收入|3850|4100|4250\n銷貨成本|(2500)|(2700)|(2800)\n毛利|1350|1400|1450\nEBITDA|1650|1750|1860\n折舊及攤銷|(230)|(250)|(350)\n營業利潤|1420|1500|1510\n財務收益|50|60|70\n財務費用|(95)|(110)|(124)\n稅前利潤|1375|1450|1456\n所得稅|(175)|(150)|(66)\n淨利|1200|1300|1390'},
+    {p:'7A_borrower_financials.full_bs',l:'7A — Full Balance Sheet (one row per line: Item|FY2022|FY2023|FY2024) — optional, enables complete 20-row table',lz:'7A — 完整資產負債表（每行一項：項目｜FY2022｜FY2023｜FY2024）— 選填，用於完整20行表格',t:'lines',h:'Cash & Equivalents|1850|2000|2200\nTrade Receivables|600|650|700\nOther CA|200|250|300\nTotal CA|2650|2900|3200\nVessels/PPE|7500|7800|8000\nOther NCA|350|300|200\nTotal NCA|7850|8100|8200\nTotal Assets|10500|11000|11700\nST Borrowings|400|500|500\nOther CL|700|700|800\nTotal CL|1100|1200|1300\nLT Borrowings|4500|4200|4500\nOther NCL|700|700|700\nTotal NCL|5200|4900|5200\nTotal Liabilities|6300|6100|6500\nRetained Earnings|2800|2900|3200\nTotal Equity|2800|3000|3200',hz:'現金及等價物|1850|2000|2200\n貿易應收款|600|650|700\n其他流動資產|200|250|300\n流動資產合計|2650|2900|3200\n船舶╱固定資產|7500|7800|8000\n其他非流動資產|350|300|200\n非流動資產合計|7850|8100|8200\n資產總計|10500|11000|11700\n短期借款|400|500|500\n其他流動負債|700|700|800\n流動負債合計|1100|1200|1300\n長期借款|4500|4200|4500\n其他非流動負債|700|700|700\n非流動負債合計|5200|4900|5200\n負債總計|6300|6100|6500\n保留盈餘|2800|2900|3200\n股東權益合計|2800|3000|3200'},
+    {p:'7A_borrower_financials.full_cf',l:'7A — Full Cash Flow Statement (one row per line: Item|FY2022|FY2023|FY2024) — optional, enables complete 7-row table',lz:'7A — 完整現金流量表（每行一項：項目｜FY2022｜FY2023｜FY2024）— 選填，用於完整7行表格',t:'lines',h:'OCF|1700|1800|1950\nICF|(600)|(650)|(680)\nFCF|1100|1150|1270\nDebt Repayment|(800)|(900)|(950)\nNet Change in Cash|300|250|320\nOpening Cash|1550|1850|2000\nFX Effect|0|0|(120)\nClosing Cash|1850|2000|2200',hz:'營業活動現金流|1700|1800|1950\n投資活動現金流|(600)|(650)|(680)\n自由現金流|1100|1150|1270\n償債|(800)|(900)|(950)\n現金淨變動|300|250|320\n期初現金|1550|1850|2000\n匯率影響|0|0|(120)\n期末現金|1850|2000|2200'},
     {p:'7B_key_ratios.fy2022_debt_ebitda',l:'7B — Debt/EBITDA FY2022 (x)',lz:'7B — 負債/EBITDA FY2022 (倍)',t:'number',h:'e.g. 3.1',hz:'例：3.1'},
     {p:'7B_key_ratios.fy2022_interest_coverage',l:'7B — Interest Coverage FY2022 (x)',lz:'7B — 利息覆蓋率 FY2022 (倍)',t:'number',h:'e.g. 14.2',hz:'例：14.2'},
     {p:'7B_key_ratios.fy2022_dscr',l:'7B — DSCR FY2022 (x)',lz:'7B — 債務服務覆蓋率 FY2022 (倍)',t:'number',h:'e.g. 1.8',hz:'例：1.8'},
     {p:'7B_key_ratios.fy2022_current_ratio',l:'7B — Current Ratio FY2022 (x)',lz:'7B — 流動比率 FY2022 (倍)',t:'number',h:'e.g. 1.9',hz:'例：1.9'},
     {p:'7B_key_ratios.fy2022_net_margin_pct',l:'7B — Net Margin FY2022 (%)',lz:'7B — 淨利率 FY2022 (%)',t:'number',h:'e.g. 31.2',hz:'例：31.2'},
+    {p:'7B_key_ratios.fy2023_debt_ebitda',l:'7B — Debt/EBITDA FY2023 (x)',lz:'7B — 負債/EBITDA FY2023 (倍)',t:'number',h:'e.g. 2.9',hz:'例：2.9'},
+    {p:'7B_key_ratios.fy2023_interest_coverage',l:'7B — Interest Coverage FY2023 (x)',lz:'7B — 利息覆蓋率 FY2023 (倍)',t:'number',h:'e.g. 15.9',hz:'例：15.9'},
+    {p:'7B_key_ratios.fy2023_dscr',l:'7B — DSCR FY2023 (x)',lz:'7B — 債務服務覆蓋率 FY2023 (倍)',t:'number',h:'e.g. 2.0',hz:'例：2.0'},
+    {p:'7B_key_ratios.fy2023_current_ratio',l:'7B — Current Ratio FY2023 (x)',lz:'7B — 流動比率 FY2023 (倍)',t:'number',h:'e.g. 2.0',hz:'例：2.0'},
+    {p:'7B_key_ratios.fy2023_net_margin_pct',l:'7B — Net Margin FY2023 (%)',lz:'7B — 淨利率 FY2023 (%)',t:'number',h:'e.g. 31.7',hz:'例：31.7'},
     {p:'7B_key_ratios.fy2024_debt_ebitda',l:'7B — Debt/EBITDA FY2024 (x)',lz:'7B — 負債/EBITDA FY2024 (倍)',t:'number',h:'e.g. 2.74',hz:'例：2.74'},
     {p:'7B_key_ratios.fy2024_interest_coverage',l:'7B — Interest Coverage FY2024 (x)',lz:'7B — 利息覆蓋率 FY2024 (倍)',t:'number',h:'e.g. 15.0',hz:'例：15.0'},
     {p:'7B_key_ratios.fy2024_dscr',l:'7B — DSCR FY2024 (x)',lz:'7B — 債務服務覆蓋率 FY2024 (倍)',t:'number',h:'e.g. 2.1',hz:'例：2.1'},
@@ -1540,7 +1564,9 @@ const FIELD_DEFS={
     {p:'7E_base_case.min_dscr',l:'7E — Minimum Base Case DSCR (x)',lz:'7E — 基本情境最低DSCR (倍)',t:'number',h:'e.g. 1.5',hz:'例：1.5'},
     {p:'7E_base_case.conclusion',l:'7E — Base Case Conclusion (verbatim)',lz:'7E — 基本情境結論（逐字）',t:'textarea',h:'e.g. Under the base case, the vessel generates sufficient cash flow to service debt with minimum DSCR of 1.5x throughout the loan tenor.',hz:'例：在基本情境下，船舶產生足夠現金流以償還債務，貸款年期內最低DSCR達1.5倍。'},
     {p:'7F_worse_case.applicable',l:'7F — Worse Case Projections Applicable?',lz:'7F — 壓力情境預測適用？',t:'bool'},
-    {p:'7F_worse_case.stressed_min_dscr',l:'7F — Stressed Minimum DSCR (x)',lz:'7F — 壓力情境最低DSCR (倍)',t:'number',h:'e.g. 0.9',hz:'例：0.9'}
+    {p:'7F_worse_case.stressed_min_dscr',l:'7F — Stressed Minimum DSCR (x)',lz:'7F — 壓力情境最低DSCR (倍)',t:'number',h:'e.g. 0.9',hz:'例：0.9'},
+    {p:'7F_worse_case.key_stress_assumptions',l:'7F — Key Stress Assumptions (one per line: Assumption|Base Case|Stressed)',lz:'7F — 主要壓力假設（每行一項：假設｜基本情境｜壓力情境）',t:'lines',h:'Freight rate|USD28,000/day|USD20,000/day (-28%)\nCharter utilization|85%|70%\nInterest rate|SOFR + 0.85%|SOFR + 0.85% + 200bps',hz:'運費|USD28,000/天|USD20,000/天 (-28%)\n租船利用率|85%|70%\n利率|SOFR + 0.85%|SOFR + 0.85% + 200bps'},
+    {p:'7F_worse_case.conclusion',l:'7F — Worse Case Conclusion (verbatim)',lz:'7F — 壓力情境結論（逐字）',t:'textarea',h:'e.g. Under the stressed scenario, DSCR falls to 1.1x, above the 1.0x floor, confirming the deal remains viable even under adverse conditions.',hz:'例：在壓力情境下，DSCR降至1.1倍，仍高於1.0倍下限，確認即使在不利條件下本案仍具可行性。'}
   ],
   8:[
     {p:'8A_acra_banking_charges.section_applicability',l:'8A — Applicability',lz:'8A — 適用性',t:'select',opts:['singapore_incorporated','not_applicable']},
@@ -1795,15 +1821,36 @@ function finalizePayload(secNo,data){
   if(secNo===7){
     const ent=d['entities_to_analyze']||{};
     if(ent.borrower_name){const arr=[{name:ent.borrower_name,role:'Borrower',currency:ent.borrower_currency||'USD',unit:ent.borrower_unit||'millions',guarantor_exists:ent.guarantor_exists||false,depth:'FULL'}];if(ent.guarantor_name)arr.push({name:ent.guarantor_name,role:'Guarantor',currency:ent.guarantor_currency||'NTD',unit:'billions',guarantor_exists:false,depth:'FULL'});d['entities_to_analyze']=arr;}
-    const fa=d['7A_borrower_financials']||{};const is={};
-    for(const yr of['fy2022','fy2023','fy2024']){const yk=yr==='fy2022'?'FY2022':yr==='fy2023'?'FY2023':'FY2024';const yf=yr==='fy2024'?['revenue','ebitda','depreciation','op_profit','interest_expense','net_income']:['revenue','ebitda','op_profit','interest_expense','net_income'];const yd={};for(const f of yf){if(fa[f+'_'+yr]!=null)yd[f]=fa[f+'_'+yr];}if(Object.keys(yd).length)is[yk]=yd;}
+    const fa=d['7A_borrower_financials']||{};
+    // Income statement — 3 years including COGS
+    const is={};
+    for(const yr of['fy2022','fy2023','fy2024']){const yk=yr==='fy2022'?'FY2022':yr==='fy2023'?'FY2023':'FY2024';const yf=yr==='fy2024'?['revenue','ebitda','depreciation','op_profit','interest_expense','net_income']:['revenue','ebitda','op_profit','interest_expense','net_income'];const yd={};for(const f of yf){if(fa[f+'_'+yr]!=null)yd[f]=fa[f+'_'+yr];}if(fa['cogs_'+yr]!=null)yd['cogs']=fa['cogs_'+yr];if(Object.keys(yd).length)is[yk]=yd;}
+    // Balance sheet — 3 years
     const bm={bs_cash:'cash',bs_total_ca:'total_ca',bs_total_nca:'total_nca',bs_total_assets:'total_assets',bs_total_cl:'total_cl',bs_total_ncl:'total_ncl',bs_total_liabilities:'total_liabilities',bs_total_equity:'total_equity'};
-    const bs={};for(const k of Object.keys(bm)){if(fa[k]!=null)bs[bm[k]]=fa[k];}
-    const cf={};if(fa.cf_ocf!=null)cf.ocf=fa.cf_ocf;if(fa.cf_capex!=null)cf.capex=fa.cf_capex;if(fa.cf_fcf!=null)cf.fcf=fa.cf_fcf;
-    d['7A_borrower_financials']={reporting_currency:fa.reporting_currency,unit:fa.unit,reporting_entity:fa.reporting_entity,auditor:fa.auditor,audit_opinion:fa.audit_opinion,accounting_standard:fa.accounting_standard,fiscal_year_end:fa.fiscal_year_end,income_statement:is,balance_sheet:Object.keys(bs).length?{FY2024:bs}:{},cash_flow:Object.keys(cf).length?{FY2024:cf}:{}};
+    const bs={};
+    const bs24={};for(const k of Object.keys(bm)){if(fa[k]!=null)bs24[bm[k]]=fa[k];}if(fa.total_debt_fy2024!=null)bs24.total_debt=fa.total_debt_fy2024;if(Object.keys(bs24).length)bs['FY2024']=bs24;
+    const bs23={};if(fa.bs_cash_fy2023!=null)bs23.cash=fa.bs_cash_fy2023;if(fa.bs_total_assets_fy2023!=null)bs23.total_assets=fa.bs_total_assets_fy2023;if(fa.bs_total_equity_fy2023!=null)bs23.total_equity=fa.bs_total_equity_fy2023;if(fa.total_debt_fy2023!=null)bs23.total_debt=fa.total_debt_fy2023;if(Object.keys(bs23).length)bs['FY2023']=bs23;
+    const bs22={};if(fa.bs_cash_fy2022!=null)bs22.cash=fa.bs_cash_fy2022;if(fa.bs_total_assets_fy2022!=null)bs22.total_assets=fa.bs_total_assets_fy2022;if(fa.bs_total_equity_fy2022!=null)bs22.total_equity=fa.bs_total_equity_fy2022;if(fa.total_debt_fy2022!=null)bs22.total_debt=fa.total_debt_fy2022;if(Object.keys(bs22).length)bs['FY2022']=bs22;
+    // Cash flow — 3 years
+    const cf={};
+    const cf24={};if(fa.cf_ocf!=null)cf24.ocf=fa.cf_ocf;if(fa.cf_capex!=null)cf24.capex=fa.cf_capex;if(fa.cf_fcf!=null)cf24.fcf=fa.cf_fcf;if(Object.keys(cf24).length)cf['FY2024']=cf24;
+    const cf23={};if(fa.cf_ocf_fy2023!=null)cf23.ocf=fa.cf_ocf_fy2023;if(fa.cf_fcf_fy2023!=null)cf23.fcf=fa.cf_fcf_fy2023;if(Object.keys(cf23).length)cf['FY2023']=cf23;
+    const cf22={};if(fa.cf_ocf_fy2022!=null)cf22.ocf=fa.cf_ocf_fy2022;if(fa.cf_fcf_fy2022!=null)cf22.fcf=fa.cf_fcf_fy2022;if(Object.keys(cf22).length)cf['FY2022']=cf22;
+    // Full pipe-format statements
+    function _pr(arr,cols){if(!arr||!arr.length)return null;return arr.map(line=>{const p=line.replace(/｜/g,'|').split('|').map(s=>s.trim());const o={};cols.forEach((c,i)=>{if(p[i]!=null)o[c]=p[i];});return o;}).filter(r=>r[cols[0]]);}
+    const plRows=_pr(fa.full_pl,['item','FY2022','FY2023','FY2024']);
+    const bsRows=_pr(fa.full_bs,['item','FY2022','FY2023','FY2024']);
+    const cfRows=_pr(fa.full_cf,['item','FY2022','FY2023','FY2024']);
+    d['7A_borrower_financials']={reporting_currency:fa.reporting_currency,unit:fa.unit,reporting_entity:fa.reporting_entity,auditor:fa.auditor,audit_opinion:fa.audit_opinion,accounting_standard:fa.accounting_standard,fiscal_year_end:fa.fiscal_year_end,income_statement:is,balance_sheet:bs,cash_flow:cf,...(plRows?{full_income_statement:plRows}:{}),...(bsRows?{full_balance_sheet:bsRows}:{}),...(cfRows?{full_cash_flow:cfRows}:{})};
+    // Key ratios — FY2022, FY2023, FY2024
     const kr=d['7B_key_ratios']||{};const kro={};
-    for(const yr of['fy2022','fy2024']){const yk=yr==='fy2022'?'FY2022':'FY2024';const yd={};for(const m of['debt_ebitda','interest_coverage','dscr','current_ratio','net_margin_pct']){if(kr[yr+'_'+m]!=null)yd[m]=kr[yr+'_'+m];}if(Object.keys(yd).length)kro[yk]=yd;}d['7B_key_ratios']=kro;
+    for(const yr of['fy2022','fy2023','fy2024']){const yk=yr==='fy2022'?'FY2022':yr==='fy2023'?'FY2023':'FY2024';const yd={};for(const m of['debt_ebitda','interest_coverage','dscr','current_ratio','net_margin_pct']){if(kr[yr+'_'+m]!=null)yd[m]=kr[yr+'_'+m];}if(Object.keys(yd).length)kro[yk]=yd;}d['7B_key_ratios']=kro;
+    // Guarantor financials
     const gc=d['7C_guarantor_financials']||{};if(gc.applicable!=null){const gco={applicable:gc.applicable,reporting_currency:gc.reporting_currency||'NTD',unit:'billions',income_statement:{FY2024:{}},balance_sheet:{FY2024:{}},cash_flow:{FY2024:{}}};if(gc.revenue_fy2024!=null)gco.income_statement.FY2024.revenue=gc.revenue_fy2024;if(gc.ebitda_fy2024!=null)gco.income_statement.FY2024.ebitda=gc.ebitda_fy2024;if(gc.net_income_fy2024!=null)gco.income_statement.FY2024.net_income=gc.net_income_fy2024;if(gc.cash_fy2024!=null)gco.balance_sheet.FY2024.cash=gc.cash_fy2024;if(gc.total_assets_fy2024!=null)gco.balance_sheet.FY2024.total_assets=gc.total_assets_fy2024;if(gc.total_equity_fy2024!=null)gco.balance_sheet.FY2024.total_equity=gc.total_equity_fy2024;if(gc.ocf_fy2024!=null)gco.cash_flow.FY2024.ocf=gc.ocf_fy2024;d['7C_guarantor_financials']=gco;}
+    // 7E base case: parse key_assumptions pipe rows
+    const ec=d['7E_base_case']||{};if(ec.key_assumptions&&Array.isArray(ec.key_assumptions)){const rows=_pr(ec.key_assumptions,['assumption','value','source']);if(rows)ec.key_assumptions=rows;d['7E_base_case']=ec;}
+    // 7F worse case: parse key_stress_assumptions pipe rows
+    const fc=d['7F_worse_case']||{};if(fc.key_stress_assumptions&&Array.isArray(fc.key_stress_assumptions)){const rows=_pr(fc.key_stress_assumptions,['assumption','base_case','stressed']);if(rows)fc.key_stress_assumptions=rows;d['7F_worse_case']=fc;}
   }
   if(secNo===8){
     const a=d['8A_acra_banking_charges']||{};
@@ -2011,9 +2058,26 @@ function expandPayload(secNo,data){
   }
   if(secNo===7){
     const ent=d['entities_to_analyze'];if(Array.isArray(ent)){const bw=ent.find(e=>e.role==='Borrower');const gw=ent.find(e=>e.role==='Guarantor');const flat={};if(bw){flat.borrower_name=bw.name;flat.borrower_currency=bw.currency;flat.borrower_unit=bw.unit;flat.guarantor_exists=bw.guarantor_exists;}if(gw){flat.guarantor_name=gw.name;flat.guarantor_currency=gw.currency;}d['entities_to_analyze']=flat;}
-    const fa=d['7A_borrower_financials'];if(fa&&fa.income_statement){const flat={reporting_currency:fa.reporting_currency,unit:fa.unit,reporting_entity:fa.reporting_entity,auditor:fa.auditor,audit_opinion:fa.audit_opinion,accounting_standard:fa.accounting_standard,fiscal_year_end:fa.fiscal_year_end};const yrMap={'FY2022':'fy2022','FY2023':'fy2023','FY2024':'fy2024'};for(const[yk,yd]of Object.entries(fa.income_statement||{})){const yr=yrMap[yk]||yk.toLowerCase();for(const[f,v]of Object.entries(yd))flat[f+'_'+yr]=v;}const bm={cash:'bs_cash',total_ca:'bs_total_ca',total_nca:'bs_total_nca',total_assets:'bs_total_assets',total_cl:'bs_total_cl',total_ncl:'bs_total_ncl',total_liabilities:'bs_total_liabilities',total_equity:'bs_total_equity'};for(const[k,v]of Object.entries((fa.balance_sheet&&fa.balance_sheet.FY2024)||{})){if(bm[k])flat[bm[k]]=v;}const cf=(fa.cash_flow&&fa.cash_flow.FY2024)||{};if(cf.ocf!=null)flat.cf_ocf=cf.ocf;if(cf.capex!=null)flat.cf_capex=cf.capex;if(cf.fcf!=null)flat.cf_fcf=cf.fcf;d['7A_borrower_financials']=flat;}
-    const kr=d['7B_key_ratios'];if(kr&&!kr.fy2022_debt_ebitda){const flat={};const yrMap={'FY2022':'fy2022','FY2024':'fy2024'};for(const[yk,yd]of Object.entries(kr)){const yr=yrMap[yk]||yk.toLowerCase();for(const[m,v]of Object.entries(yd))flat[yr+'_'+m]=v;}d['7B_key_ratios']=flat;}
+    const fa=d['7A_borrower_financials'];if(fa&&fa.income_statement){
+      const flat={reporting_currency:fa.reporting_currency,unit:fa.unit,reporting_entity:fa.reporting_entity,auditor:fa.auditor,audit_opinion:fa.audit_opinion,accounting_standard:fa.accounting_standard,fiscal_year_end:fa.fiscal_year_end};
+      const yrMap={'FY2022':'fy2022','FY2023':'fy2023','FY2024':'fy2024'};
+      for(const[yk,yd]of Object.entries(fa.income_statement||{})){const yr=yrMap[yk]||yk.toLowerCase();for(const[f,v]of Object.entries(yd)){if(f==='cogs')flat['cogs_'+yr]=v;else flat[f+'_'+yr]=v;}}
+      const bm={cash:'bs_cash',total_ca:'bs_total_ca',total_nca:'bs_total_nca',total_assets:'bs_total_assets',total_cl:'bs_total_cl',total_ncl:'bs_total_ncl',total_liabilities:'bs_total_liabilities',total_equity:'bs_total_equity'};
+      for(const[k,v]of Object.entries((fa.balance_sheet&&fa.balance_sheet.FY2024)||{})){if(bm[k])flat[bm[k]]=v;else if(k==='total_debt')flat.total_debt_fy2024=v;}
+      for(const[k,v]of Object.entries((fa.balance_sheet&&fa.balance_sheet.FY2023)||{})){if(k==='cash')flat.bs_cash_fy2023=v;else if(k==='total_assets')flat.bs_total_assets_fy2023=v;else if(k==='total_equity')flat.bs_total_equity_fy2023=v;else if(k==='total_debt')flat.total_debt_fy2023=v;}
+      for(const[k,v]of Object.entries((fa.balance_sheet&&fa.balance_sheet.FY2022)||{})){if(k==='cash')flat.bs_cash_fy2022=v;else if(k==='total_assets')flat.bs_total_assets_fy2022=v;else if(k==='total_equity')flat.bs_total_equity_fy2022=v;else if(k==='total_debt')flat.total_debt_fy2022=v;}
+      const cf24=(fa.cash_flow&&fa.cash_flow.FY2024)||{};if(cf24.ocf!=null)flat.cf_ocf=cf24.ocf;if(cf24.capex!=null)flat.cf_capex=cf24.capex;if(cf24.fcf!=null)flat.cf_fcf=cf24.fcf;
+      const cf23=(fa.cash_flow&&fa.cash_flow.FY2023)||{};if(cf23.ocf!=null)flat.cf_ocf_fy2023=cf23.ocf;if(cf23.fcf!=null)flat.cf_fcf_fy2023=cf23.fcf;
+      const cf22=(fa.cash_flow&&fa.cash_flow.FY2022)||{};if(cf22.ocf!=null)flat.cf_ocf_fy2022=cf22.ocf;if(cf22.fcf!=null)flat.cf_fcf_fy2022=cf22.fcf;
+      if(Array.isArray(fa.full_income_statement))flat.full_pl=fa.full_income_statement.map(r=>[r.item,r.FY2022,r.FY2023,r.FY2024].filter(v=>v!=null).join('|'));
+      if(Array.isArray(fa.full_balance_sheet))flat.full_bs=fa.full_balance_sheet.map(r=>[r.item,r.FY2022,r.FY2023,r.FY2024].filter(v=>v!=null).join('|'));
+      if(Array.isArray(fa.full_cash_flow))flat.full_cf=fa.full_cash_flow.map(r=>[r.item,r.FY2022,r.FY2023,r.FY2024].filter(v=>v!=null).join('|'));
+      d['7A_borrower_financials']=flat;
+    }
+    const kr=d['7B_key_ratios'];if(kr&&!kr.fy2022_debt_ebitda){const flat={};const yrMap={'FY2022':'fy2022','FY2023':'fy2023','FY2024':'fy2024'};for(const[yk,yd]of Object.entries(kr)){const yr=yrMap[yk]||yk.toLowerCase();for(const[m,v]of Object.entries(yd))flat[yr+'_'+m]=v;}d['7B_key_ratios']=flat;}
     const gc=d['7C_guarantor_financials'];if(gc&&gc.income_statement){const flat={applicable:gc.applicable,reporting_currency:gc.reporting_currency};const fi=(gc.income_statement&&gc.income_statement.FY2024)||{};const bs=(gc.balance_sheet&&gc.balance_sheet.FY2024)||{};const cf=(gc.cash_flow&&gc.cash_flow.FY2024)||{};if(fi.revenue!=null)flat.revenue_fy2024=fi.revenue;if(fi.ebitda!=null)flat.ebitda_fy2024=fi.ebitda;if(fi.net_income!=null)flat.net_income_fy2024=fi.net_income;if(bs.cash!=null)flat.cash_fy2024=bs.cash;if(bs.total_assets!=null)flat.total_assets_fy2024=bs.total_assets;if(bs.total_equity!=null)flat.total_equity_fy2024=bs.total_equity;if(cf.ocf!=null)flat.ocf_fy2024=cf.ocf;d['7C_guarantor_financials']=flat;}
+    const ec=d['7E_base_case'];if(ec&&Array.isArray(ec.key_assumptions)){ec.key_assumptions=ec.key_assumptions.map(r=>typeof r==='object'?[r.assumption,r.value,r.source].filter(v=>v!=null).join('|'):r);d['7E_base_case']=ec;}
+    const fc=d['7F_worse_case'];if(fc&&Array.isArray(fc.key_stress_assumptions)){fc.key_stress_assumptions=fc.key_stress_assumptions.map(r=>typeof r==='object'?[r.assumption,r.base_case,r.stressed].filter(v=>v!=null).join('|'):r);d['7F_worse_case']=fc;}
   }
   if(secNo===8){
     const a=d['8A_acra_banking_charges'];if(a&&a.summary&&typeof a.summary==='object'){
