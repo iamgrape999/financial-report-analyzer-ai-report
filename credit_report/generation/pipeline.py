@@ -68,6 +68,41 @@ def _deduplicate_section1(markdown: str) -> str:
     return markdown
 
 
+def _deduplicate_section2(markdown: str) -> str:
+    """
+    Safety net for §2: 5-table structure. If 'Risk and Mitigants' (last table T5)
+    appears as a bold cell/heading more than once, truncate before the second occurrence.
+    """
+    pattern = re.compile(
+        r"(?:^\|[ \t]*\*?\*?Risk and Mitigants\*?\*?[ \t]*\||"
+        r"^[ \t]*(?:#{1,3}[ \t]+)?(?:\*{1,2})?Risk and Mitigants(?:\*{1,2})?[ \t]*$)",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    matches = list(pattern.finditer(markdown))
+    if len(matches) >= 2:
+        cut = matches[1].start()
+        logger.info("[Dedup] §2 duplicate 'Risk and Mitigants' removed at char pos=%d", cut)
+        return markdown[:cut].rstrip()
+    return markdown
+
+
+def _deduplicate_section3(markdown: str) -> str:
+    """
+    Safety net for §3: ESG is the last mandatory sub-section. If 'ESG' appears as a
+    standalone heading/bold marker more than once, truncate before the second occurrence.
+    """
+    pattern = re.compile(
+        r"^[ \t]*(?:#{1,3}[ \t]+)?(?:\*{1,2})?ESG(?:\*{1,2})?[ \t]*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    matches = list(pattern.finditer(markdown))
+    if len(matches) >= 2:
+        cut = matches[1].start()
+        logger.info("[Dedup] §3 duplicate 'ESG' heading removed at char pos=%d", cut)
+        return markdown[:cut].rstrip()
+    return markdown
+
+
 from credit_report.config import (
     CR_MAX_CONCURRENT_GENERATIONS,
     GEMINI_MODEL,
@@ -207,6 +242,10 @@ async def run_section_generation(
         markdown = _strip_qa_output(markdown)
         if section_no == 1:
             markdown = _deduplicate_section1(markdown)
+        elif section_no == 2:
+            markdown = _deduplicate_section2(markdown)
+        elif section_no == 3:
+            markdown = _deduplicate_section3(markdown)
 
         # Quality gate — guard against empty/trivial Gemini responses
         if not markdown or not markdown.strip():
@@ -268,6 +307,10 @@ async def run_section_generation(
                     markdown = _strip_qa_output(markdown)
                     if section_no == 1:
                         markdown = _deduplicate_section1(markdown)
+                    elif section_no == 2:
+                        markdown = _deduplicate_section2(markdown)
+                    elif section_no == 3:
+                        markdown = _deduplicate_section3(markdown)
                     tokens_used += fill_tokens
                     output.markdown = markdown
                     output.tokens_used = tokens_used
