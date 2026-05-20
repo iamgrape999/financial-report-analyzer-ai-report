@@ -47,6 +47,27 @@ def _strip_qa_output(markdown: str) -> str:
     # Only rstrip trailing whitespace when QA content was actually removed;
     # leave the original trailing whitespace intact when there is nothing to strip.
     return markdown.rstrip() if markdown != original else markdown
+
+
+def _deduplicate_section1(markdown: str) -> str:
+    """
+    Safety net for §1: Gemini sometimes self-corrects by re-appending T&C + Account
+    Strategy after the QA Gate fails.  If 'Account Strategy' (the last major §1
+    sub-section) appears as a heading/bold line more than once, truncate before the
+    second occurrence to eliminate the duplicate tail.
+    """
+    pattern = re.compile(
+        r"^[ \t]*(?:#{1,3}[ \t]+)?(?:\*{1,2})?account\s+strategy(?:\*{1,2})?[ \t]*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    matches = list(pattern.finditer(markdown))
+    if len(matches) >= 2:
+        cut = matches[1].start()
+        logger.info("[Dedup] §1 duplicate 'Account Strategy' removed at char pos=%d", cut)
+        return markdown[:cut].rstrip()
+    return markdown
+
+
 from credit_report.config import (
     CR_MAX_CONCURRENT_GENERATIONS,
     GEMINI_MODEL,
@@ -184,6 +205,8 @@ async def run_section_generation(
             )
 
         markdown = _strip_qa_output(markdown)
+        if section_no == 1:
+            markdown = _deduplicate_section1(markdown)
 
         # Quality gate — guard against empty/trivial Gemini responses
         if not markdown or not markdown.strip():
@@ -243,6 +266,8 @@ async def run_section_generation(
                     else:
                         markdown = markdown.rstrip() + "\n\n" + fill_text
                     markdown = _strip_qa_output(markdown)
+                    if section_no == 1:
+                        markdown = _deduplicate_section1(markdown)
                     tokens_used += fill_tokens
                     output.markdown = markdown
                     output.tokens_used = tokens_used
