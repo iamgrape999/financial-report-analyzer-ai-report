@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -269,19 +271,22 @@ async def recalculate(
 
 # ── LTV / ACR table ───────────────────────────────────────────────────────────────────────
 
+_FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
+
+
 class LTVScheduleEntry(BaseModel):
-    year: float
-    outstanding_pct: float
+    year: _FiniteFloat
+    outstanding_pct: _FiniteFloat
 
 
 class LTVACRIn(BaseModel):
-    facility_amount: float
-    initial_asset_value: float
+    facility_amount: _FiniteFloat
+    initial_asset_value: _FiniteFloat
     amortization_schedule: list[LTVScheduleEntry]
-    balloon_amount: Optional[float] = None
-    useful_life_25yr: float = 25.0
-    useful_life_20yr: float = 20.0
-    residual_pct: float = 5.0
+    balloon_amount: Optional[_FiniteFloat] = None
+    useful_life_25yr: _FiniteFloat = Field(default=25.0, gt=0)
+    useful_life_20yr: _FiniteFloat = Field(default=20.0, gt=0)
+    residual_pct: _FiniteFloat = 5.0
 
 
 class LTVRowOut(BaseModel):
@@ -330,6 +335,16 @@ async def compute_ltv_acr(
         for r in rows
     ]
 
+    # Guard against arithmetic overflow producing inf/nan — reject before DB write.
+    for row in rows_out:
+        for v in (row.loan_outstanding, row.asset_value_25yr, row.ltv_25yr_pct,
+                  row.asset_value_20yr, row.ltv_20yr_pct):
+            if not math.isfinite(v):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Calculation overflow: input magnitudes produce non-finite LTV values.",
+                )
+
     balloon = None
     if payload.balloon_amount is not None and rows:
         last = rows[-1]
@@ -338,10 +353,21 @@ async def compute_ltv_acr(
             last.asset_value_25yr,
             last.asset_value_20yr,
         )
+        if balloon and not all(
+            math.isfinite(balloon.get(k, 0.0))
+            for k in ("ltv_25yr_pct", "ltv_20yr_pct", "acr_25yr_pct", "acr_20yr_pct")
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Calculation overflow: balloon inputs produce non-finite values.",
+            )
 
     # ── Persist LTV rows to CalculationResult ────────────────────────────────
     for raw_row in rows:
-        yr_period = f"YR{int(raw_row.year)}"
+        try:
+            yr_period = f"YR{int(raw_row.year)}"
+        except (ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="year value is too large to store.")
         formula_base = (
             f"loan={raw_row.loan_outstanding:.2f} / asset25={raw_row.asset_value_25yr:.2f}"
         )
@@ -432,7 +458,14 @@ async def create_mapping_rule(
         db, report_id, payload.source_label, payload.canonical_metric,
         payload.category, current_user.id, payload.notes,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A mapping rule for this source_label already exists in this report.",
+        )
     await db.refresh(rule)
     return rule
 

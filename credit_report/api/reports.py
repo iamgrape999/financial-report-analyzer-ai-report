@@ -6,8 +6,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -98,8 +99,8 @@ async def create_report(
 
 @router.get("", response_model=list[ReportResponse])
 async def list_reports(
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0, le=2_147_483_647),
+    limit: int = Query(default=20, ge=0, le=500),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -237,6 +238,16 @@ async def save_section_input(
             saved_by=current_user.id,
         )
         db.add(si)
+
+    # Flush the INSERT/UPDATE immediately so concurrent writers get 409 rather than
+    # having the INSERT fail mid-savepoint (which would leave the session in a broken state).
+    try:
+        await db.flush()
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="Concurrent write conflict — another request saved this section. Please retry.",
+        )
 
     # Auto-extract facts from analyst JSON.
     # IMPORTANT: wrapped in begin_nested() (SAVEPOINT) so that any DB error raised by

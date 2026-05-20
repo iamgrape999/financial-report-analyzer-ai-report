@@ -639,20 +639,19 @@ class TestSectionOutputEdgeCases:
 class TestBug1MultipleResultsFix:
 
     async def test_generate_succeeds_with_duplicate_section_inputs(self, ac, hdrs, rid):
-        """If a report has two SectionInput rows for the same section (e.g. from a bug or
-        concurrent save), generate_full_report must NOT raise MultipleResultsFound.
-        It must return 202 using the most-recent row via scalars().first()."""
+        """generate_full_report must return 202 when section input exists.
+        (Duplicate rows are now prevented by the unique index on section_inputs(report_id, section_no),
+        so this test verifies the single-row path still works correctly.)"""
         from credit_report.database import AsyncSessionLocal
         from credit_report.models import SectionInput
 
         async with AsyncSessionLocal() as db:
-            for _ in range(2):
-                db.add(SectionInput(
-                    id=str(uuid.uuid4()),
-                    report_id=rid,
-                    section_no=1,
-                    input_json='{"facility_summary": {"rows": ["test"]}}',
-                ))
+            db.add(SectionInput(
+                id=str(uuid.uuid4()),
+                report_id=rid,
+                section_no=1,
+                input_json='{"facility_summary": {"rows": ["test"]}}',
+            ))
             await db.commit()
 
         with _mock_gemini("## §1\n\nContent."):
@@ -664,7 +663,9 @@ class TestBug1MultipleResultsFix:
         assert r.json()["status"] == "running"
 
     async def test_load_section_input_uses_latest_row(self):
-        """Unit-test _load_section_input directly: with 2 rows, it returns a row without crashing."""
+        """Unit-test _load_section_input directly: with a section input row, returns a non-empty dict.
+        (The unique index on section_inputs(report_id, section_no) prevents duplicate rows;
+        this test verifies scalars().first() pattern still works with a single row.)"""
         from credit_report.database import AsyncSessionLocal
         from credit_report.models import Report, SectionInput
         from credit_report.api.generate import _load_section_input
@@ -681,21 +682,20 @@ class TestBug1MultipleResultsFix:
                 created_by="test-user",
             ))
             await db.flush()
-            for payload in ('{"old": true}', '{"newer": true}'):
-                db.add(SectionInput(
-                    id=str(uuid.uuid4()),
-                    report_id=report_id,
-                    section_no=3,
-                    input_json=payload,
-                ))
+            db.add(SectionInput(
+                id=str(uuid.uuid4()),
+                report_id=report_id,
+                section_no=3,
+                input_json='{"data": "test"}',
+            ))
             await db.commit()
 
         async with AsyncSessionLocal() as db:
             result = await _load_section_input(db, report_id, 3)
 
-        # Must not raise; must return one of the two rows without MultipleResultsFound
+        # Must not raise; must return the row without MultipleResultsFound
         assert isinstance(result, dict)
-        assert result != {}, "Expected non-empty dict from duplicate rows"
+        assert result != {}, "Expected non-empty dict from section input"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

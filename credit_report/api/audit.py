@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +20,8 @@ router = APIRouter(prefix="/reports/{report_id}/audit", tags=["audit"])
 @router.get("", response_model=AuditListResponse)
 async def get_audit_trail(
     report_id: str,
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(default=0, ge=0, le=2_147_483_647),
+    limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
