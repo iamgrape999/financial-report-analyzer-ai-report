@@ -166,6 +166,15 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    result = await db.execute(select(User).order_by(User.created_at.asc()))
+    return list(result.scalars().all())
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     payload: RegisterRequest,

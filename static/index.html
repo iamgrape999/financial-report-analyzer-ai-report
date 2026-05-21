@@ -121,6 +121,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <div id="navUser" class="d-none text-white small d-flex align-items-center gap-2">
       <span id="navRole" class="badge bg-light text-dark"></span>
       <span id="navEmail"></span>
+      <button id="btnUserMgmt" class="btn btn-sm btn-outline-light d-none" onclick="openUserMgmt()" title="User Management / 使用者管理">👤 Users</button>
       <button class="btn btn-sm btn-outline-light" onclick="logout()" id="btnLogout" data-i18n="nav.logout">Logout</button>
     </div>
   </div>
@@ -632,6 +633,62 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <small class="text-muted fw-normal" data-i18n="ds.use_json_hint">JSON currently in the Raw JSON tab (will be saved first)</small>
       </button>
       <button class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.cancel">Cancel</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- ══════════ USER MANAGEMENT MODAL ══════════ -->
+<div class="modal fade" id="userMgmtModal" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header" style="background:#00703C;color:#fff;">
+      <h5 class="modal-title fw-bold">👤 使用者管理 / User Management</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Add new user form -->
+      <div class="card mb-4 border-success">
+        <div class="card-header bg-light fw-semibold">➕ 新增帳號 / Add New Account</div>
+        <div class="card-body">
+          <div class="row g-2">
+            <div class="col-sm-5">
+              <label class="form-label small fw-semibold">Email</label>
+              <input id="umEmail" type="email" class="form-control form-control-sm" placeholder="user@cathaybk.com.tw">
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label small fw-semibold">密碼 Password</label>
+              <input id="umPassword" type="password" class="form-control form-control-sm" placeholder="至少 8 字元">
+            </div>
+            <div class="col-sm-2">
+              <label class="form-label small fw-semibold">角色 Role</label>
+              <select id="umRole" class="form-select form-select-sm">
+                <option value="analyst">analyst</option>
+                <option value="reviewer">reviewer</option>
+                <option value="approver">approver</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <div class="col-sm-2 d-flex align-items-end">
+              <button class="btn btn-success btn-sm w-100" onclick="umAddUser()">
+                <span id="umAddSpin" class="spinner-border spinner-border-sm d-none me-1"></span>
+                新增
+              </button>
+            </div>
+          </div>
+          <div id="umAddErr" class="alert alert-danger py-1 px-2 mt-2 d-none small"></div>
+          <div id="umAddOk"  class="alert alert-success py-1 px-2 mt-2 d-none small"></div>
+        </div>
+      </div>
+
+      <!-- User list -->
+      <div class="fw-semibold mb-2">📋 現有帳號 / Existing Accounts</div>
+      <div id="umUserList">
+        <div class="text-center text-muted py-3">載入中…</div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-bs-dismiss="modal">關閉 Close</button>
     </div>
   </div></div>
 </div>
@@ -2431,6 +2488,7 @@ async function showDashboard(){
   document.getElementById('navUser').classList.remove('d-none');
   document.getElementById('navRole').textContent=currentRole;
   document.getElementById('navEmail').textContent=currentEmail;
+  document.getElementById('btnUserMgmt').classList.toggle('d-none', currentRole!=='admin');
   await loadReports();
 }
 
@@ -4384,6 +4442,102 @@ async function resolveConflict(conflictId, chosenId, rejectedId){
     status.textContent=tl('Error: ','錯誤：')+e.message;
     toast(tl('Resolve failed: ','解決失敗：')+e.message,'danger');
   }
+}
+
+// ── User Management ───────────────────────────────────────────────────────────
+const ROLE_BADGE={
+  admin:   'bg-danger',
+  approver:'bg-warning text-dark',
+  reviewer:'bg-info text-dark',
+  analyst: 'bg-secondary',
+};
+
+function openUserMgmt(){
+  document.getElementById('umAddErr').classList.add('d-none');
+  document.getElementById('umAddOk').classList.add('d-none');
+  document.getElementById('umEmail').value='';
+  document.getElementById('umPassword').value='';
+  umLoadUsers();
+  new bootstrap.Modal(document.getElementById('userMgmtModal')).show();
+}
+
+async function umLoadUsers(){
+  const wrap=document.getElementById('umUserList');
+  wrap.innerHTML='<div class="text-center text-muted py-3">載入中…</div>';
+  try{
+    const res=await fetch(API+'/auth/users',{headers:H()});
+    if(!res.ok)throw new Error(await res.text());
+    const users=await res.json();
+    if(!users.length){wrap.innerHTML='<p class="text-muted">尚無帳號</p>';return;}
+    wrap.innerHTML=`<table class="table table-sm table-bordered mb-0">
+      <thead class="table-light"><tr>
+        <th>Email</th><th>角色 Role</th><th>狀態</th><th style="width:230px">操作</th>
+      </tr></thead>
+      <tbody>${users.map(u=>`<tr id="umRow_${u.id}">
+        <td class="small">${esc(u.email)}</td>
+        <td><span class="badge ${ROLE_BADGE[u.role]||'bg-secondary'}">${esc(u.role)}</span></td>
+        <td>${u.is_active?'<span class="text-success">✓ 啟用</span>':'<span class="text-danger">停用</span>'}</td>
+        <td>
+          <select class="form-select form-select-sm d-inline-block w-auto me-1 um-role-sel">
+            ${['analyst','reviewer','approver','admin'].map(r=>`<option${r===u.role?' selected':''}>${r}</option>`).join('')}
+          </select>
+          <button class="btn btn-outline-primary btn-sm me-1" onclick="umChangeRole('${u.id}',this.closest('td').querySelector('.um-role-sel').value)">變更</button>
+          <button class="btn btn-outline-warning btn-sm" onclick="umResetPw('${u.id}','${esc(u.email)}')">重設密碼</button>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  }catch(e){wrap.innerHTML=`<div class="alert alert-danger">${esc(e.message)}</div>`;}
+}
+
+async function umAddUser(){
+  const email=document.getElementById('umEmail').value.trim();
+  const pw=document.getElementById('umPassword').value;
+  const role=document.getElementById('umRole').value;
+  const errEl=document.getElementById('umAddErr');
+  const okEl=document.getElementById('umAddOk');
+  errEl.classList.add('d-none');okEl.classList.add('d-none');
+  if(!email){errEl.textContent='請輸入 Email';errEl.classList.remove('d-none');return;}
+  if(pw.length<8){errEl.textContent='密碼至少 8 個字元';errEl.classList.remove('d-none');return;}
+  const spin=document.getElementById('umAddSpin');
+  spin.classList.remove('d-none');
+  try{
+    const res=await fetch(API+'/auth/register',{
+      method:'POST',headers:{...H(),'Content-Type':'application/json'},
+      body:JSON.stringify({email,password:pw,role})
+    });
+    if(!res.ok){const d=await res.json();throw new Error(d.detail||res.statusText);}
+    okEl.textContent=`✓ 帳號 ${email} 建立成功（角色：${role}）`;
+    okEl.classList.remove('d-none');
+    document.getElementById('umEmail').value='';
+    document.getElementById('umPassword').value='';
+    umLoadUsers();
+  }catch(e){errEl.textContent='錯誤：'+e.message;errEl.classList.remove('d-none');}
+  finally{spin.classList.add('d-none');}
+}
+
+async function umChangeRole(userId, newRole){
+  try{
+    const res=await fetch(API+'/auth/users/'+userId+'/role?role='+newRole,{
+      method:'PATCH',headers:H()
+    });
+    if(!res.ok){const d=await res.json();throw new Error(d.detail||res.statusText);}
+    toast('角色已更新為 '+newRole,'success');
+    umLoadUsers();
+  }catch(e){toast('更新失敗：'+e.message,'danger');}
+}
+
+async function umResetPw(userId, email){
+  const newPw=prompt(`重設 ${email} 的密碼\n（至少 8 字元）`);
+  if(!newPw)return;
+  if(newPw.length<8){toast('密碼至少 8 字元','warning');return;}
+  try{
+    const res=await fetch(API+'/auth/users/'+userId+'/reset-password',{
+      method:'POST',headers:{...H(),'Content-Type':'application/json'},
+      body:JSON.stringify({new_password:newPw})
+    });
+    if(!res.ok){const d=await res.json();throw new Error(d.detail||res.statusText);}
+    toast(`${email} 密碼已重設 ✓`,'success');
+  }catch(e){toast('重設失敗：'+e.message,'danger');}
 }
 </script>
 </body>
