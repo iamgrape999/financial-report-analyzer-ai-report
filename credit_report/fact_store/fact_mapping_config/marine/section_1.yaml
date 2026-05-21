@@ -1,6 +1,10 @@
 # Section 1 — Credit Facility & Case Details: fact extraction mappings
+# IMPORTANT: Form stores data WITHOUT section prefix (e.g. "facility_summary.*",
+# "regulatory_compliance.*"), not "1A_facility_summary.*" etc.
+# The entries marked [LEGACY] below use incorrect prefixed paths kept for
+# test-compatibility only — they never find real data in the form JSON.
 facts:
-  # Facility totals
+  # ── [LEGACY] entries — wrong paths kept for test compatibility ───────────
   - id_template: "FAC-TOTAL-CREDIT-PROPOSED-CURRENT"
     path: "1A_facility_summary.totals.total_credit_proposed_usd_m"
     metric: "total_credit_proposed"
@@ -25,7 +29,6 @@ facts:
     currency: "USD"
     unit: "million"
 
-  # Regulatory compliance — Banking Act 33-3
   - id_template: "REG-BA33-LIMIT-USD-CURRENT"
     path: "1B_regulatory_compliance.banking_act_33_3.limit_usd_m"
     metric: "ba33_limit"
@@ -42,7 +45,6 @@ facts:
     currency: "TWD"
     unit: "billion"
 
-  # Unsecured exposure
   - id_template: "FAC-UNSECURED-TOTAL-USD-CURRENT"
     path: "1B_regulatory_compliance.unsecured_exposure_analysis.total_unsecured_usd_m"
     metric: "total_unsecured_exposure"
@@ -54,6 +56,134 @@ facts:
   - id_template: "FAC-SECURED-TOTAL-USD-CURRENT"
     path: "1B_regulatory_compliance.unsecured_exposure_analysis.total_secured_usd_m"
     metric: "total_secured_exposure"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  # ── Correct mappings (match actual form FIELD_DEFS paths) ─────────────────
+
+  # Facility summary totals
+  - id_template: "FAC-CREDIT-LIMIT-{entity}-{period}"
+    path: "facility_summary.totals.total_credit_limit_usd_m"
+    metric: "credit_limit_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-PSR-LIMIT-{entity}-{period}"
+    path: "facility_summary.totals.psr_spot_limit_usd_m"
+    metric: "psr_spot_limit_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  # Regulatory compliance
+  - id_template: "REG-BANK-NW-TWD-{entity}-{period}"
+    path: "regulatory_compliance.bank_net_worth_twd_bn"
+    metric: "bank_nw_twd_bn"
+    entity: "CUB"
+    period: "CURRENT"
+    currency: "TWD"
+    unit: "billion"
+
+  - id_template: "REG-SINGLE-BORROWER-LIMIT-PCT-{entity}-{period}"
+    path: "regulatory_compliance.single_borrower_limit_pct"
+    metric: "single_borrower_limit_pct"
+    entity: "CUB"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "REG-BA33-USD-EQUIV-{entity}-{period}"
+    path: "regulatory_compliance.usd_equivalent_usd_m"
+    metric: "ba33_limit_usd_m"
+    entity: "CUB"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "REG-UNSECURED-CAP-PCT-{entity}-{period}"
+    path: "regulatory_compliance.unsecured_drawdown_cap_pct"
+    metric: "unsecured_cap_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "REG-UNSECURED-CAP-USD-{entity}-{period}"
+    path: "regulatory_compliance.unsecured_drawdown_cap_usd_m"
+    metric: "unsecured_cap_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-GROUP-LIMIT-APPROVED-{entity}-{period}"
+    path: "regulatory_compliance.group_limit.approved_group_limit_usd_m"
+    metric: "group_limit_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "FAC-GROUP-UTILIZATION-{entity}-{period}"
+    path: "regulatory_compliance.group_limit.total_proposed_group_utilization_usd_m"
+    metric: "group_utilization_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  # Purpose and recommendation
+  - id_template: "FAC-AMOUNT-PURPOSE-{entity}-{period}"
+    path: "purpose_and_recommendation.facility_amount_usd_m"
+    metric: "facility_amount_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "RATIO-LTC-PURPOSE-{entity}-{period}"
+    path: "purpose_and_recommendation.ltc_pct"
+    metric: "ltc_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "RATIO-ACR-PURPOSE-{entity}-{period}"
+    path: "purpose_and_recommendation.acr_pct"
+    metric: "acr_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"
+
+  # Terms and conditions
+  - id_template: "FAC-TENOR-YEARS-{entity}-{period}"
+    path: "terms_and_conditions.tenor_years"
+    metric: "tenor_years"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "years"
+
+  - id_template: "FAC-MARGIN-BPS-{entity}-{period}"
+    path: "terms_and_conditions.margin_bps"
+    metric: "margin_bps"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "bps"
+
+  - id_template: "RATIO-LTC-TC-{entity}-{period}"
+    path: "terms_and_conditions.ltc_percent"
+    metric: "ltc_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"
+
+  # Account strategy
+  - id_template: "FAC-NII-{entity}-{period}"
+    path: "account_strategy.nii_usd_m"
+    metric: "nii_usd_m"
     entity: "FACILITY"
     period: "CURRENT"
     currency: "USD"

@@ -1375,6 +1375,8 @@ async def _etl_document_chunked(
     total_ms = (time.perf_counter() - t_start) * 1000
     logger.info("[ETL] chunked ETL complete: chunks=%d sections=%s total_ms=%.0f",
                 n_chunks, list(merged.keys()), total_ms)
+    if 5 in merged and isinstance(merged[5], dict):
+        merged[5] = _flatten_section5(merged[5])
     if 6 in merged and isinstance(merged[6], dict):
         merged[6] = _flatten_section6(merged[6])
     return merged
@@ -1441,6 +1443,8 @@ async def etl_document(
             text_chunk=text,
             target_sections=target_sections,
         )
+        if 5 in result and isinstance(result[5], dict):
+            result[5] = _flatten_section5(result[5])
         if 6 in result and isinstance(result[6], dict):
             result[6] = _flatten_section6(result[6])
         total_ms = (time.perf_counter() - t_start) * 1000
@@ -1550,6 +1554,62 @@ def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
 # (section_no, sub_key, field_dotted_path, metric_name, unit)
 # Dotted paths (e.g. "deal_dscr.dscr_value") are supported for nested fields.
 # Only scalar-numeric fields meaningful as standalone facts are included here.
+def _flatten_section5(sec5: dict) -> dict:
+    """Flatten §5 array structures to flat key-value form expected by the form.
+
+    1. 5B_refund_guarantee.milestones[] → m1_name/m1_date/m1_rg_usd_m/m1_coverage_pct
+    2. 5F_corporate_guarantee.guarantor_financials[] → cash_twd_bn/total_debt_twd_bn/etc.
+    """
+    result = dict(sec5)
+
+    # 5B: flatten RG milestones array
+    rg = result.get("5B_refund_guarantee") or {}
+    milestones = rg.get("milestones") or []
+    if isinstance(milestones, list) and milestones:
+        flat_rg: dict = {k: v for k, v in rg.items() if k != "milestones"}
+        for i, ms in enumerate(milestones[:4], 1):
+            if not isinstance(ms, dict):
+                continue
+            def _set_rg(key: str, val, _i=i, _flat=flat_rg):
+                if val is not None:
+                    _flat[f"m{_i}_{key}"] = val
+            _set_rg("name",         ms.get("milestone"))
+            _set_rg("date",         ms.get("sched_date"))
+            _set_rg("rg_usd_m",     ms.get("rg_amount_usd_m"))
+            _set_rg("coverage_pct", ms.get("coverage_pct"))
+            _set_rg("status",       ms.get("status"))
+        result["5B_refund_guarantee"] = flat_rg
+
+    # 5F: flatten guarantor_financials[{metric, fy_current_twd_bn, fy_current_usd_bn}]
+    cguar = result.get("5F_corporate_guarantee") or {}
+    guar_fins = cguar.get("guarantor_financials") or []
+    if isinstance(guar_fins, list) and guar_fins:
+        _GF_MAP: dict[str, tuple[str, str]] = {
+            "cash":           ("cash_twd_bn",       "cash_usd_bn"),
+            "cash_equivalents":("cash_twd_bn",      "cash_usd_bn"),
+            "total_debt":     ("total_debt_twd_bn",  "total_debt_usd_bn"),
+            "net_worth":      ("net_worth_twd_bn",   "net_worth_usd_bn"),
+            "total_equity":   ("net_worth_twd_bn",   "net_worth_usd_bn"),
+            "equity":         ("net_worth_twd_bn",   "net_worth_usd_bn"),
+            "revenue":        ("revenue_twd_bn",     "revenue_usd_bn"),
+            "ebitda":         ("ebitda_twd_bn",      "ebitda_usd_bn"),
+            "net_income":     ("net_income_twd_bn",  "net_income_usd_bn"),
+        }
+        flat_cguar: dict = {k: v for k, v in cguar.items() if k != "guarantor_financials"}
+        for row in guar_fins:
+            if not isinstance(row, dict):
+                continue
+            metric_raw = str(row.get("metric") or "").lower().strip()
+            twd_key, usd_key = _GF_MAP.get(metric_raw, (None, None))
+            if twd_key and row.get("fy_current_twd_bn") is not None:
+                flat_cguar[twd_key] = row["fy_current_twd_bn"]
+            if usd_key and row.get("fy_current_usd_bn") is not None:
+                flat_cguar[usd_key] = row["fy_current_usd_bn"]
+        result["5F_corporate_guarantee"] = flat_cguar
+
+    return result
+
+
 def _flatten_section6(sec6: dict) -> dict:
     """Convert 6D_milestones.milestones[] array → flat m1_*/m2_*/m3_*/m4_* keys.
 
@@ -1606,10 +1666,33 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (4, "4F_fleet",    "total_fleet_teu",              "total_fleet_teu",           None),
     (4, "4F_fleet",    "total_vessels",                "total_vessels",             None),
 
-    # §5 — Collateral / Guarantor
-    (5, "5B_refund_guarantee", "lag_time_days",        "rg_lag_time_days",          None),
-    (5, "5C_vessel_mortgage",  "contract_price_usd_m", "contract_price_usd_m",      "mn"),
-    (5, "5C_vessel_mortgage",  "loan_amount_usd_m",    "loan_amount_usd_m",         "mn"),
+    # §5 — Collateral / Guarantor (5B milestones flattened by _flatten_section5)
+    (5, "5B_refund_guarantee", "lag_time_days",          "rg_lag_time_days",              None),
+    (5, "5B_refund_guarantee", "m1_rg_usd_m",            "rg_milestone_1_usd_m",         "mn"),
+    (5, "5B_refund_guarantee", "m1_coverage_pct",        "rg_milestone_1_coverage_pct",   None),
+    (5, "5B_refund_guarantee", "m2_rg_usd_m",            "rg_milestone_2_usd_m",         "mn"),
+    (5, "5B_refund_guarantee", "m2_coverage_pct",        "rg_milestone_2_coverage_pct",   None),
+    (5, "5B_refund_guarantee", "m3_rg_usd_m",            "rg_milestone_3_usd_m",         "mn"),
+    (5, "5B_refund_guarantee", "m3_coverage_pct",        "rg_milestone_3_coverage_pct",   None),
+    (5, "5B_refund_guarantee", "m4_rg_usd_m",            "rg_milestone_4_usd_m",         "mn"),
+    (5, "5B_refund_guarantee", "m4_coverage_pct",        "rg_milestone_4_coverage_pct",   None),
+    (5, "5C_vessel_mortgage",  "contract_price_usd_m",   "contract_price_usd_m",          "mn"),
+    (5, "5C_vessel_mortgage",  "loan_amount_usd_m",      "loan_amount_usd_m",             "mn"),
+    (5, "5C_vessel_mortgage",  "ltc_pct",                "ltc_pct",                       None),
+    (5, "5C_vessel_mortgage",  "acr_at_delivery_pct",    "acr_at_delivery_pct",           None),
+    (5, "5C_vessel_mortgage",  "ltv_at_maturity_pct",    "ltv_at_maturity_pct",           None),
+    (5, "5C_vessel_mortgage",  "market_value_usd_m",     "vessel_market_value_usd_m",     "mn"),
+    (5, "5E_value_maintenance_clause", "acr_covenant_pct",        "acr_minimum_pct",      None),
+    (5, "5E_value_maintenance_clause", "ltv_covenant_pct",        "ltv_maximum_pct",      None),
+    (5, "5E_value_maintenance_clause", "cure_period_banking_days","vmc_cure_period_days", None),
+    (5, "5F_corporate_guarantee", "fx_rate_to_usd",      "fx_rate_twd_usd",               None),
+    (5, "5F_corporate_guarantee", "cash_twd_bn",          "guarantor_cash_twd_bn",        "bn"),
+    (5, "5F_corporate_guarantee", "cash_usd_bn",          "guarantor_cash_usd_bn",        "bn"),
+    (5, "5F_corporate_guarantee", "total_debt_twd_bn",    "guarantor_total_debt_twd_bn",  "bn"),
+    (5, "5F_corporate_guarantee", "net_worth_twd_bn",     "guarantor_net_worth_twd",      "bn"),
+    (5, "5F_corporate_guarantee", "revenue_twd_bn",       "guarantor_revenue_twd",        "bn"),
+    (5, "5F_corporate_guarantee", "ebitda_twd_bn",        "guarantor_ebitda_twd",         "bn"),
+    (5, "5F_corporate_guarantee", "interest_coverage",    "guarantor_interest_coverage",   None),
 
     # §6 — Ship Finance / Project Analysis
     (6, "6A_project",    "contract_price_usd_m",         "contract_price_usd_m",      "mn"),
@@ -1930,6 +2013,37 @@ def _extract_section7_facts(
             _push_guar_ratio("debt_to_equity",    yr.get("debt_equity") or yr.get("gearing_ratio"),        p)
             _push_guar_ratio("current_ratio",     yr.get("current_ratio"),                                 p)
             _push_guar_ratio("interest_coverage", yr.get("ebitda_interest") or yr.get("interest_coverage"), p)
+
+    # ── 7E Base case DSCR projections ────────────────────────────────────────
+    base_case = sec7.get("7E_base_case") or {}
+    if isinstance(base_case, dict) and base_case.get("applicable") is not False:
+        for row in base_case.get("dscr_table") or []:
+            if not isinstance(row, dict):
+                continue
+            period_raw = str(row.get("period") or "")
+            p = _normalise_year_key(period_raw) if period_raw else None
+            if p:
+                _push("dscr_base_case", row.get("dscr"), p, unit="")
+        proj = base_case.get("projected_financials") or {}
+        if isinstance(proj, dict):
+            for year_key, yr in proj.items():
+                if not isinstance(yr, dict):
+                    continue
+                p = _normalise_year_key(year_key)
+                _push("revenue_base_case", yr.get("revenue"), p)
+                _push("ocf_base_case",     yr.get("ocf"),     p)
+
+    # ── 7F Worse case DSCR projections ───────────────────────────────────────
+    worse_case = sec7.get("7F_worse_case") or {}
+    if isinstance(worse_case, dict) and worse_case.get("applicable") is not False:
+        stressed = worse_case.get("stressed_summary") or {}
+        if isinstance(stressed, dict):
+            for year_key, yr in stressed.items():
+                if not isinstance(yr, dict):
+                    continue
+                p = _normalise_year_key(year_key)
+                _push("dscr_stress_case",    yr.get("dscr"),    p, unit="")
+                _push("revenue_stress_case", yr.get("revenue"), p)
 
     logger.debug(
         "[ETL] _extract_section7_facts: entity=%r facts=%d (inc. guarantor)", entity, len(facts)

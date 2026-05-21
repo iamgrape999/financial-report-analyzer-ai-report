@@ -217,3 +217,48 @@ facts:
     metric: "debt_ebitda"
     entity_path: "7C_guarantor_financials.guarantor_name"
     unit: "x"
+
+  - id_template: "RATIO-CURRENT-GUAR-{entity}-{period}"
+    iterate_path: "7D_guarantor_ratios"
+    field: "current_ratio"
+    metric: "current_ratio"
+    entity_path: "7C_guarantor_financials.guarantor_name"
+    unit: "x"
+
+  - id_template: "RATIO-ICR-GUAR-7D-{entity}-{period}"
+    iterate_path: "7D_guarantor_ratios"
+    field: "ebitda_interest"
+    metric: "interest_coverage"
+    entity_path: "7C_guarantor_financials.guarantor_name"
+    unit: "x"
+
+  # ── Guarantor: Balance Sheet — total_equity (missing from 7C mapping) ─────
+  - id_template: "FIN-TOTAL-EQUITY-GUAR-{entity}-{period}"
+    iterate_path: "7C_guarantor_financials.balance_sheet"
+    field: "total_equity"
+    metric: "total_equity"
+    entity_path: "7C_guarantor_financials.guarantor_name"
+    currency_path: "7C_guarantor_financials.reporting_currency"
+    unit_path: "7C_guarantor_financials.unit"
+
+  # ── Borrower: Key ratio metrics not yet mapped ─────────────────────────────
+  - id_template: "RATIO-ICR-7B-{entity}-{period}"
+    iterate_path: "7B_key_ratios"
+    field: "ebitda_interest"
+    metric: "interest_coverage"
+    entity: "BORROWER"
+    unit: "x"
+
+  - id_template: "RATIO-GROSS-MARGIN-{entity}-{period}"
+    iterate_path: "7B_key_ratios"
+    field: "gross_margin_pct"
+    metric: "gross_margin_pct"
+    entity: "BORROWER"
+    unit: "percent"
+
+  - id_template: "RATIO-NET-MARGIN-{entity}-{period}"
+    iterate_path: "7B_key_ratios"
+    field: "ni_margin_pct"
+    metric: "net_margin_pct"
+    entity: "BORROWER"
+    unit: "percent"
