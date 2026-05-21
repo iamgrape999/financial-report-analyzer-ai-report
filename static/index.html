@@ -3867,10 +3867,34 @@ async function fsmApply(){
 
     // Summary
     let msg=tl(`Applied ${result.applied_count}`,`已套用 ${result.applied_count}`);
-    if(result.skipped_count)msg+=tl(`, skipped ${result.skipped_count}`,`, 略過 ${result.skipped_count}`);
     if(result.conflict_count)msg+=tl(`, ${result.conflict_count} conflict(s) blocked`,`, ${result.conflict_count} 個衝突已阻擋`);
     document.getElementById('fsmStatus').textContent=msg+' ✓';
     toast(msg,'success');
+
+    // Explain skipped fields so analyst knows why nothing changed for those paths
+    if(result.skipped_count>0){
+      const applyMode=document.querySelector('input[name="fsmApplyMode"]:checked')?.value||'only_empty';
+      const whyMsg=applyMode==='only_empty'
+        ?tl(
+          `${result.skipped_count} field(s) were skipped because they already contain a value. Switch to "Overwrite" mode to replace existing values.`,
+          `${result.skipped_count} 個欄位已有值，故略過。若要覆蓋現有值，請改選「覆蓋」模式。`
+        )
+        :tl(
+          `${result.skipped_count} field(s) were skipped (fact no longer exists or suggestion ID mismatch).`,
+          `${result.skipped_count} 個欄位略過（事實已不存在或建議 ID 不符）。`
+        );
+      const skippedDiv=document.createElement('div');
+      skippedDiv.className='alert alert-warning alert-sm mt-2 py-1 px-2';
+      skippedDiv.style.fontSize='0.85em';
+      skippedDiv.textContent='⚠ '+whyMsg;
+      // Insert below status line if space allows, else just show as separate toast
+      const statusEl=document.getElementById('fsmStatus');
+      if(statusEl&&statusEl.parentElement){
+        statusEl.parentElement.appendChild(skippedDiv);
+        setTimeout(()=>skippedDiv.remove(),8000);
+      }
+      toast(whyMsg,'warning');
+    }
 
     sectionInputMap[secNo]={has_data:true};
     renderSectionsTable();

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+try:
+    import yaml as _yaml
+    _YAML_AVAILABLE = True
+except ImportError:
+    _yaml = None  # type: ignore[assignment]
+    _YAML_AVAILABLE = False
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -555,14 +564,28 @@ async def get_review_progress(
 # ── Field Suggestion helpers ──────────────────────────────────────────────────
 
 def _resolve_path_safe(obj: Any, path: str) -> Any:
-    """Walk dot-notation path into a nested dict; return None if any segment missing."""
-    parts = path.split(".")
+    """Walk dot-notation path (with optional bracket indices) into a nested dict/list.
+
+    Supports 'rows[0].field' notation so entity_path entries from YAML configs
+    that reference list elements (Section 3, 7) resolve correctly.
+    """
     cur = obj
-    for p in parts:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(p)
+    for part in re.split(r"\.", path.lstrip("$.")):
         if cur is None:
+            return None
+        idx_match = re.match(r"^(.+)\[(\d+)\]$", part)
+        if idx_match:
+            key, idx = idx_match.group(1), int(idx_match.group(2))
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(key)
+            if isinstance(cur, list) and 0 <= idx < len(cur):
+                cur = cur[idx]
+            else:
+                return None
+        elif isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
             return None
     return cur
 
@@ -580,7 +603,6 @@ def _values_equal(a: Any, b: Any) -> bool:
 
 
 def _make_suggestion_id(report_id: str, section_no: int, field_path: str, fact_id: str) -> str:
-    import hashlib
     raw = f"{report_id}:{section_no}:{field_path}:{fact_id}"
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
@@ -590,9 +612,8 @@ def _humanize_path(path: str) -> str:
     parts = path.split(".")
     cleaned = []
     for p in parts:
-        # Strip leading section prefix like "7A_", "2B_"
-        import re
-        p = re.sub(r"^\d+[A-Z]_", "", p)
+        # Strip leading section prefix like "7A_", "2B_", "7a_" (case-insensitive)
+        p = re.sub(r"^\d+[A-Za-z]_", "", p)
         p = p.replace("_", " ").title()
         cleaned.append(p)
     return " › ".join(cleaned)
@@ -725,10 +746,15 @@ async def get_field_suggestions(
             total_facts_checked=len(active_facts), suggestions=[],
         )
 
+    if not _YAML_AVAILABLE:
+        logger.warning("get_field_suggestions: yaml module not available")
+        return FieldSuggestionsResponse(
+            report_id=report_id, section_no=section_no,
+            total_facts_checked=len(active_facts), suggestions=[],
+        )
     try:
-        import yaml
         with config_path.open(encoding="utf-8") as fh:
-            yaml_config = yaml.safe_load(fh) or {}
+            yaml_config = _yaml.safe_load(fh) or {}
     except Exception as exc:
         logger.warning("get_field_suggestions: YAML load failed section=%d: %s", section_no, exc)
         return FieldSuggestionsResponse(
@@ -750,9 +776,17 @@ async def get_field_suggestions(
 
     for mapping in yaml_config.get("facts", []):
         metric = mapping.get("metric", "").lower()
-        entity_key = (mapping.get("entity") or "").upper()
         if not metric:
             continue
+
+        # Resolve entity: static 'entity:' key takes precedence;
+        # 'entity_path:' reads the entity name from the current section input
+        # (used in Section 3 ratings and Section 7 guarantor mappings).
+        if "entity_path" in mapping:
+            entity_raw = _resolve_path_safe(current_input, mapping["entity_path"])
+            entity_key = str(entity_raw or "").upper()
+        else:
+            entity_key = (mapping.get("entity") or "").upper()
 
         if "iterate_path" in mapping:
             # Iterate mapping: one suggestion per fiscal-year period
@@ -877,6 +911,8 @@ async def apply_field_suggestions(
         raise HTTPException(status_code=400, detail="apply_mode must be 'only_empty' or 'overwrite'")
     if not payload.items:
         raise HTTPException(status_code=400, detail="No items to apply")
+    if len(payload.items) > 500:
+        raise HTTPException(status_code=400, detail="Too many items: max 500 per apply request")
 
     report_result = await db.execute(
         select(Report).where(Report.id == report_id, Report.is_deleted == False)
