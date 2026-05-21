@@ -168,10 +168,14 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/users", response_model=list[UserResponse])
 async def list_users(
+    skip: int = 0,
+    limit: int = 200,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    result = await db.execute(select(User).order_by(User.created_at.asc()))
+    result = await db.execute(
+        select(User).order_by(User.created_at.asc()).offset(skip).limit(limit)
+    )
     return list(result.scalars().all())
 
 
@@ -187,6 +191,9 @@ async def register(
     result = await db.execute(select(User).where(User.email == payload.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
+
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
     new_user = User(
         id=str(uuid.uuid4()),
