@@ -1625,8 +1625,11 @@ def _extract_section7_facts(
     raw_ccy = str(fin.get("reporting_currency") or "").strip().upper()
     currency = raw_ccy if raw_ccy and len(raw_ccy) == 3 else (default_currency or "USD")
 
-    raw_entity = str(fin.get("reporting_entity") or "").strip()
-    entity = raw_entity or default_entity or "borrower"
+    # Always use the abstract "BORROWER" entity key for §7A borrower facts.
+    # YAML mappings (section_7.yaml) key on "BORROWER"; storing the actual company
+    # name (from reporting_entity or default_entity) causes full_index lookups to miss.
+    # The actual company name is already available in the section 7 input JSON.
+    entity = "BORROWER"
 
     def _push(metric: str, raw_val, period: str, unit: str = "mn") -> None:
         dedup = f"{metric}|{entity}|{period}"

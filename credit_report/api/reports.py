@@ -798,6 +798,12 @@ async def get_field_suggestions(
                 if f.metric_name.lower() == metric
                 and (not entity_key or (f.entity or "").upper() == entity_key)
             ]
+            # When entity_key is the abstract BORROWER and no exact match found,
+            # ETL facts may carry the real company name instead of the abstract key.
+            # Fall back to metric-only to surface these facts as suggestions.
+            if not candidates and entity_key == "BORROWER":
+                candidates = [f for f in active_facts if f.metric_name.lower() == metric
+                              and (f.entity or "").upper() not in {"FACILITY", "MARKET"}]
             for fact in candidates:
                 full_path = f"{iterate_path}.{fact.period}.{field}"
                 suggested_val = fact.value if fact.value is not None else fact.value_text

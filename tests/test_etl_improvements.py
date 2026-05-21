@@ -220,7 +220,8 @@ class TestBuildCanonicalFactsFromETL:
         assert build_canonical_facts_from_etl("r1", "d1", {}) == []
 
     def test_custom_entity_and_period_override(self):
-        """When no §4 company name is present, entity/period/currency defaults apply."""
+        """§7 borrower facts always use the abstract BORROWER entity key;
+        period and currency still fall back to the passed-in parameters."""
         extracted = {7: {"7A_borrower_financials": {
             "income_statement": {"2025": {"revenue": 500.0}}
         }}}
@@ -228,8 +229,9 @@ class TestBuildCanonicalFactsFromETL:
             "r1", "d1", extracted,
             entity="TestCo", period="FY2025", currency="TWD",
         )
+        # §7 borrower facts always store "BORROWER" so YAML entity: "BORROWER" lookups hit
+        assert facts[0]["entity"] == "BORROWER"
         # period comes from the year key "2025" → normalised to "FY2025"
-        assert facts[0]["entity"] == "TestCo"
         assert facts[0]["period"] == "FY2025"
         # Currency comes from reporting_currency in 7A (missing here) → falls back to param
         assert facts[0]["currency"] == "TWD"
