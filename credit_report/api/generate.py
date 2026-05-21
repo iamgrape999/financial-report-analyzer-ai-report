@@ -376,7 +376,17 @@ async def upload_document(
     doc_id = str(uuid.uuid4())
     logger.info("upload_document: extracting text file=%r type=%s bytes=%d doc=%s report=%s", fname, document_type, len(file_bytes), doc_id, report_id)
     loop = asyncio.get_event_loop()
-    text, detected_fmt = await loop.run_in_executor(None, partial(extract_text_from_file, file_bytes, fname))
+    try:
+        text, detected_fmt = await asyncio.wait_for(
+            loop.run_in_executor(None, partial(extract_text_from_file, file_bytes, fname)),
+            timeout=180.0,
+        )
+    except asyncio.TimeoutError:
+        logger.error("upload_document: text extraction timed out file=%r bytes=%d doc=%s", fname, len(file_bytes), doc_id)
+        raise HTTPException(
+            status_code=408,
+            detail="Document text extraction timed out. Try compressing the PDF or uploading a smaller portion.",
+        )
     save_document_text(report_id, doc_id, text)
     save_document_binary(report_id, doc_id, file_bytes, fname)
     logger.info("upload_document: saved doc=%s fmt=%s chars=%d report=%s user=%s", doc_id, detected_fmt, len(text), report_id, current_user.id)

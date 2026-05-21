@@ -8,8 +8,10 @@ Flow:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import random
 import time
 from typing import Optional
 
@@ -1250,26 +1252,48 @@ async def _call_gemini_etl_once(
     text_chunk: str,
     target_sections: list[int],
     chunk_info: str = "",
+    _max_retries: int = 3,
 ) -> dict[int, dict]:
-    """Single Gemini ETL call — returns {section_no: data}. Used by chunked and non-chunked paths."""
+    """Single Gemini ETL call with exponential-backoff retry on transient errors.
+
+    Retries up to _max_retries times on any exception (rate-limit, network, 5xx).
+    Returns {section_no: data}. Used by chunked and non-chunked paths.
+    """
     from google import genai
     from google.genai import types as genai_types
     from credit_report.config import GEMINI_API_KEY, GEMINI_ETL_MODEL
 
     system_prompt, user_prompt = _build_etl_prompt(document_type, text_chunk, target_sections, chunk_info)
-
     client = genai.Client(api_key=GEMINI_API_KEY)
-    t_gemini = time.perf_counter()
-    response = await client.aio.models.generate_content(
-        model=GEMINI_ETL_MODEL,
-        contents=user_prompt,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=65536,
-            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
-        ),
-    )
-    gemini_ms = (time.perf_counter() - t_gemini) * 1000
+
+    last_exc: Exception | None = None
+    for attempt in range(_max_retries):
+        try:
+            t_gemini = time.perf_counter()
+            response = await client.aio.models.generate_content(
+                model=GEMINI_ETL_MODEL,
+                contents=user_prompt,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=65536,
+                    thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                ),
+            )
+            gemini_ms = (time.perf_counter() - t_gemini) * 1000
+            break  # success — exit retry loop
+        except Exception as exc:
+            last_exc = exc
+            if attempt < _max_retries - 1:
+                wait = (2 ** attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "[ETL] Gemini ETL attempt %d/%d failed chunk=%r: %s — retrying in %.1fs",
+                    attempt + 1, _max_retries, chunk_info, exc, wait,
+                )
+                await asyncio.sleep(wait)
+    else:
+        logger.error("[ETL] Gemini ETL all %d attempts failed chunk=%r: %s", _max_retries, chunk_info, last_exc)
+        raise last_exc  # type: ignore[misc]
+
     raw = (response.text or "").strip()
 
     finish_reason = "unknown"
@@ -1535,7 +1559,9 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (2, "2B_solvency", "ema.op_ebitda_bn_usd",           "ema_ebitda_usd_bn",     "bn"),
     (2, "2B_solvency", "ema.total_debt_bn_usd",          "ema_total_debt_usd_bn", "bn"),
     (2, "2C_guarantor", "cash_usd_bn",                   "guarantor_cash_usd_bn",      "bn"),
+    (2, "2C_guarantor", "cash_twd_bn",                   "guarantor_cash_twd_bn",      "bn"),
     (2, "2C_guarantor", "total_debt_usd_bn",             "guarantor_total_debt_usd_bn","bn"),
+    (2, "2C_guarantor", "total_debt_twd_bn",             "guarantor_total_debt_twd_bn","bn"),
     (2, "2C_guarantor", "interest_coverage",             "guarantor_interest_coverage", None),
 
     # §4 — Corporate History
@@ -1734,8 +1760,128 @@ def _extract_section7_facts(
             _push("current_ratio",     yr.get("current_ratio"),     p, unit="")
             _push("ocf_interest",      yr.get("ocf_interest"),      p, unit="")
 
+    # ── 7C Guarantor financials (income_statement / balance_sheet / cash_flow) ─
+    guar_fin = sec7.get("7C_guarantor_financials") or {}
+    if isinstance(guar_fin, dict) and guar_fin.get("applicable") is not False:
+        guar_entity_raw = str(guar_fin.get("guarantor_name") or "").strip()
+        guar_entity = guar_entity_raw.upper() if guar_entity_raw else "GUARANTOR"
+        guar_ccy_raw = str(guar_fin.get("reporting_currency") or "").strip().upper()
+        guar_currency = guar_ccy_raw if guar_ccy_raw and len(guar_ccy_raw) == 3 else default_currency
+
+        def _push_guar(metric: str, raw_val, period: str, unit: str = "mn") -> None:
+            dedup = f"{metric}|{guar_entity}|{period}"
+            if dedup in seen or raw_val is None:
+                return
+            num_val = _try_float(raw_val)
+            if num_val is None:
+                return
+            seen.add(dedup)
+            facts.append({
+                "report_id": report_id,
+                "metric_name": metric,
+                "entity": guar_entity,
+                "period": period,
+                "value": num_val,
+                "value_text": str(raw_val),
+                "currency": guar_currency,
+                "unit": unit or "",
+                "source_type": "pdf_extraction",
+                "source_priority": 3,
+                "source_evidence_id": doc_id,
+                "source_section_no": 7,
+                "state": "extracted",
+            })
+
+        g_income = guar_fin.get("income_statement") or {}
+        if isinstance(g_income, dict):
+            for year_key, yr in g_income.items():
+                if not isinstance(yr, dict):
+                    continue
+                p = _normalise_year_key(year_key)
+                _push_guar("revenue",    yr.get("revenue"),    p)
+                _push_guar("ebitda",     yr.get("ebitda"),     p)
+                _push_guar("net_income", yr.get("net_income"), p)
+                _push_guar("gross_profit", yr.get("gross_profit"), p)
+
+        g_bal = guar_fin.get("balance_sheet") or {}
+        if isinstance(g_bal, dict):
+            for year_key, yr in g_bal.items():
+                if not isinstance(yr, dict):
+                    continue
+                p = _normalise_year_key(year_key)
+                _push_guar("total_assets", yr.get("total_assets"), p)
+                _push_guar("total_equity", yr.get("total_equity"), p)
+                # total_debt: use explicit field first, then derive from st+lt
+                td = yr.get("total_debt")
+                if td is not None:
+                    _push_guar("total_debt", td, p)
+                else:
+                    st = _try_float(yr.get("st_borrowings"))
+                    lt = _try_float(yr.get("lt_borrowings"))
+                    if st is not None and lt is not None:
+                        dedup = f"total_debt|{guar_entity}|{p}"
+                        if dedup not in seen:
+                            seen.add(dedup)
+                            facts.append({
+                                "report_id": report_id, "metric_name": "total_debt",
+                                "entity": guar_entity, "period": p,
+                                "value": round(st + lt, 4), "value_text": f"st={st}+lt={lt}",
+                                "currency": guar_currency, "unit": "mn",
+                                "source_type": "pdf_extraction", "source_priority": 3,
+                                "source_evidence_id": doc_id, "source_section_no": 7,
+                                "state": "extracted",
+                            })
+
+        g_cf = guar_fin.get("cash_flow") or {}
+        if isinstance(g_cf, dict):
+            for year_key, yr in g_cf.items():
+                if not isinstance(yr, dict):
+                    continue
+                p = _normalise_year_key(year_key)
+                _push_guar("cash_flow_from_operations", yr.get("ocf"),   p)
+                _push_guar("free_cash_flow",            yr.get("fcf"),   p)
+                _push_guar("capex",                     yr.get("capex"), p)
+
+    # ── 7D Guarantor ratios (FY_YYYY nested) ──────────────────────────────────
+    guar_ratios = sec7.get("7D_guarantor_ratios") or {}
+    if isinstance(guar_ratios, dict):
+        # Resolve guarantor entity name (reuse from 7C block if already set)
+        guar_fin_d = sec7.get("7C_guarantor_financials") or {}
+        ge_raw_d = str(guar_fin_d.get("guarantor_name") or "").strip()
+        guar_entity_d = ge_raw_d.upper() if ge_raw_d else "GUARANTOR"
+
+        def _push_guar_ratio(metric: str, raw_val, period: str) -> None:
+            if raw_val is None:
+                return
+            dedup = f"{metric}|{guar_entity_d}|{period}"
+            if dedup in seen:
+                return
+            num_val = _try_float(raw_val)
+            if num_val is None:
+                return
+            seen.add(dedup)
+            facts.append({
+                "report_id": report_id, "metric_name": metric,
+                "entity": guar_entity_d, "period": period,
+                "value": num_val, "value_text": str(raw_val),
+                "currency": None, "unit": "",
+                "source_type": "pdf_extraction", "source_priority": 3,
+                "source_evidence_id": doc_id, "source_section_no": 7,
+                "state": "extracted",
+            })
+
+        for year_key, yr in guar_ratios.items():
+            if not isinstance(yr, dict):
+                continue
+            p = _normalise_year_key(year_key)
+            _push_guar_ratio("dscr",              yr.get("dscr"),                                          p)
+            _push_guar_ratio("debt_ebitda",       yr.get("debt_ebitda") or yr.get("net_debt_ebitda"),      p)
+            _push_guar_ratio("debt_to_equity",    yr.get("debt_equity") or yr.get("gearing_ratio"),        p)
+            _push_guar_ratio("current_ratio",     yr.get("current_ratio"),                                 p)
+            _push_guar_ratio("interest_coverage", yr.get("ebitda_interest") or yr.get("interest_coverage"), p)
+
     logger.debug(
-        "[ETL] _extract_section7_facts: entity=%r facts=%d", entity, len(facts)
+        "[ETL] _extract_section7_facts: entity=%r facts=%d (inc. guarantor)", entity, len(facts)
     )
     return facts
 

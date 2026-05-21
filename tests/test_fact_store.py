@@ -295,30 +295,50 @@ def test_input_extractor_graceful_when_no_config():
 
 
 def test_input_extractor_with_section_2():
+    # The form uses 2B_solvency.ema.* and 2C_guarantor.* paths
+    # (confirmed from static/index.html FIELD_DEFS for section 2).
     from credit_report.fact_store.input_extractor import InputFactExtractor
     extractor = InputFactExtractor(section_no=2)
     sample_input = {
         "2B_solvency": {
-            "borrower_metrics": {
-                "entity": 'Evergreen Marine (Asia) Pte. Ltd. ("EMA")',
-                "reference_period": "FYE 31 Dec 2024",
-                "cash_balance_usd_m": 2791,
-                "total_debt_usd_m": 2488,
-                "op_ebitda_usd_m": 3878,
-                "total_debt_to_ebitda": 0.64,
-                "interest_coverage_ebitda_to_interest": 44.8,
-            }
-        }
+            "deal_dscr": {"dscr_value": 1.5, "period_label": "FY2024"},
+            "ema": {
+                "period": "FY2024",
+                "cash_bn_usd": 2.20,
+                "total_debt_bn_usd": 1.95,
+                "op_ebitda_bn_usd": 3.05,
+                "debt_ebitda_ratio": 0.64,
+                "interest_coverage": 44.8,
+            },
+        },
+        "2C_guarantor": {
+            "guarantor_name_abbrev": "EMC",
+            "period": "FY2024",
+            "cash_usd_bn": 6.2,
+            "cash_twd_bn": 195.0,
+            "total_debt_usd_bn": 4.1,
+            "total_debt_twd_bn": 128.0,
+            "interest_coverage": 31.2,
+        },
     }
     facts = extractor.extract("RPT-001", sample_input)
     fact_metrics = {f["metric_name"] for f in facts}
-    assert "cash_balance" in fact_metrics
-    assert "total_debt" in fact_metrics
-    assert "op_ebitda" in fact_metrics
+    # Borrower metrics
+    assert "dscr" in fact_metrics
+    assert "debt_ebitda" in fact_metrics
+    assert "interest_coverage" in fact_metrics
+    assert "ema_ebitda_usd_bn" in fact_metrics
+    assert "ema_total_debt_usd_bn" in fact_metrics
+    # Guarantor metrics
+    assert "guarantor_cash_usd_bn" in fact_metrics
+    assert "guarantor_interest_coverage" in fact_metrics
 
-    cash_fact = next(f for f in facts if f["metric_name"] == "cash_balance")
-    assert cash_fact["entity"] == "EMA"
-    assert cash_fact["period"] == "FY2024"
-    assert cash_fact["value"] == 2791.0
-    assert cash_fact["source_type"] == "analyst_input_json"
-    assert cash_fact["source_priority"] == 1
+    ebitda_fact = next(f for f in facts if f["metric_name"] == "ema_ebitda_usd_bn")
+    assert ebitda_fact["value"] == 3.05
+    assert ebitda_fact["source_type"] == "analyst_input_json"
+    assert ebitda_fact["source_priority"] == 1
+
+    guar_fact = next(f for f in facts if f["metric_name"] == "guarantor_cash_usd_bn")
+    assert guar_fact["entity"] == "EMC"
+    assert guar_fact["period"] == "FY2024"
+    assert guar_fact["value"] == 6.2

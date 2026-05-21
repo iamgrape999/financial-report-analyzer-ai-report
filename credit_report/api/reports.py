@@ -741,6 +741,10 @@ async def get_field_suggestions(
     industry = report.industry or "marine"
     config_path = CONFIG_DIR / industry / f"section_{section_no}.yaml"
     if not config_path.exists():
+        logger.warning(
+            "get_field_suggestions: no YAML config for section=%d industry=%r path=%s — suggestions empty",
+            section_no, industry, config_path,
+        )
         return FieldSuggestionsResponse(
             report_id=report_id, section_no=section_no,
             total_facts_checked=len(active_facts), suggestions=[],
@@ -805,6 +809,12 @@ async def get_field_suggestions(
                 candidates = [f for f in active_facts if f.metric_name.lower() == metric
                               and (f.entity or "").upper() not in {"FACILITY", "MARKET"}]
             for fact in candidates:
+                if not fact.period:
+                    logger.debug(
+                        "field-suggestions: skipping fact with no period metric=%s entity=%s fact_id=%s",
+                        fact.metric_name, fact.entity, fact.id,
+                    )
+                    continue
                 full_path = f"{iterate_path}.{fact.period}.{field}"
                 suggested_val = fact.value if fact.value is not None else fact.value_text
                 if suggested_val is None:
