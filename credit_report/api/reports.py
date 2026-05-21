@@ -834,16 +834,29 @@ async def get_field_suggestions(
             path = mapping.get("path", "")
             if not path:
                 continue
-            # Prefer exact (metric, entity) match; fallback to metric-only
-            fact = full_index.get((metric, entity_key, mapping.get("period", "").upper()))
+            # Resolve period: 'period:' is static; 'period_path:' reads from current input.
+            # Section 4 financial fields use period_path so the period comes from whatever
+            # fiscal_year the analyst typed — without resolving this, full_index always misses.
+            if "period_path" in mapping:
+                period_raw = _resolve_path_safe(current_input, mapping["period_path"])
+                lookup_period = str(period_raw or "").upper()
+            else:
+                lookup_period = (mapping.get("period") or "").upper()
+
+            # Prefer exact (metric, entity, period) match; then (metric, entity); then metric-only
+            fact = full_index.get((metric, entity_key, lookup_period))
             if fact is None:
                 fact = me_index.get((metric, entity_key))
-            if fact is None and entity_key:
-                # Relax entity constraint as last resort
-                fact = next(
-                    (f for f in active_facts if f.metric_name.lower() == metric),
-                    None,
-                )
+            if fact is None:
+                # Entity mismatch fallback: ETL stores facts with the actual company name
+                # while YAML uses the abstract "BORROWER" entity.  Pick the best-priority
+                # fact for this metric, preferring the resolved period when available.
+                candidates = [f for f in active_facts if f.metric_name.lower() == metric]
+                if lookup_period:
+                    period_match = [f for f in candidates
+                                    if (f.period or "").upper() == lookup_period]
+                    candidates = period_match or candidates
+                fact = min(candidates, key=lambda f: f.source_priority, default=None)
             if fact is None:
                 continue
             suggested_val = fact.value if fact.value is not None else fact.value_text

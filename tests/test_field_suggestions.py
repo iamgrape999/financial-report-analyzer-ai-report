@@ -483,6 +483,59 @@ class TestApplyFieldSuggestions:
         )
 
 
+class TestPeriodPathResolution:
+    """Section 4 financial fields use period_path instead of a static period."""
+
+    @pytest.mark.asyncio
+    async def test_period_path_resolves_from_current_input(self, ac, admin_hdrs, report):
+        rid = report["id"]
+        # Pre-fill section 4 fiscal year so period_path can be resolved
+        await _save_input(ac, admin_hdrs, rid, 4, {
+            "4E_financials": {
+                "fiscal_year": "FY2024",
+                "revenue": None,
+                "currency": "TWD",
+            }
+        })
+        # Seed a fact that should match via period_path resolution
+        fact_id = await _seed_fact(
+            rid, "revenue", "BORROWER", "FY2024", value=392108.0,
+            currency="TWD", source_type="pdf_extraction", source_priority=3,
+        )
+        r = await ac.get(f"{RPTS}/{rid}/sections/4/field-suggestions", headers=admin_hdrs)
+        assert r.status_code == 200
+        body = r.json()
+        fact_ids = [s["fact_id"] for s in body["suggestions"]]
+        assert fact_id in fact_ids, (
+            "period_path='4E_financials.fiscal_year' should resolve to 'FY2024' "
+            f"and match the seeded fact; got suggestions: {body['suggestions']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_period_path_prefers_resolved_period_in_entity_fallback(self, ac, admin_hdrs, report):
+        rid = report["id"]
+        # Analyst has set fiscal_year to FY2025
+        await _save_input(ac, admin_hdrs, rid, 4, {
+            "4E_financials": {"fiscal_year": "FY2025", "revenue": None}
+        })
+        # Seed two facts with different periods for the same metric
+        fact_fy2022 = await _seed_fact(
+            rid, "revenue", "EVERGREEN MARINE CORP.", "FY2022", value=379069.0,
+        )
+        fact_fy2025 = await _seed_fact(
+            rid, "revenue", "EVERGREEN MARINE CORP.", "FY2025", value=450000.0,
+        )
+        r = await ac.get(f"{RPTS}/{rid}/sections/4/field-suggestions", headers=admin_hdrs)
+        assert r.status_code == 200
+        matched = [s for s in r.json()["suggestions"]
+                   if s["metric_name"].lower() == "revenue"]
+        assert matched, "Should find at least one revenue suggestion"
+        # The FY2025 fact should be preferred over FY2022
+        assert matched[0]["fact_id"] == fact_fy2025, (
+            "Entity-fallback should prefer the period that matches period_path resolution (FY2025)"
+        )
+
+
 class TestHelperLogic:
     """Unit-level tests for _resolve_path_safe and _values_equal via the GET endpoint."""
 
