@@ -60,6 +60,8 @@ class DocumentOut(BaseModel):
     document_type: Optional[str] = None
     file_format: Optional[str] = None
     etl_status: Optional[str] = None
+    text_chars: Optional[int] = None
+    extraction_quality: Optional[str] = None  # "good" | "low" | "empty"
 
     model_config = {"from_attributes": True}
 
@@ -389,7 +391,30 @@ async def upload_document(
         )
     save_document_text(report_id, doc_id, text)
     save_document_binary(report_id, doc_id, file_bytes, fname)
-    logger.info("upload_document: saved doc=%s fmt=%s chars=%d report=%s user=%s", doc_id, detected_fmt, len(text), report_id, current_user.id)
+
+    text_chars = len(text.strip())
+    from credit_report.generation.evidence import _text_quality_ok
+    if text_chars == 0:
+        extraction_quality = "empty"
+        logger.warning(
+            "upload_document: EMPTY text after extraction file=%r doc=%s report=%s "
+            "— ETL will receive no data; try a different file format or re-scan",
+            fname, doc_id, report_id,
+        )
+    elif not _text_quality_ok(text):
+        extraction_quality = "low"
+        logger.warning(
+            "upload_document: LOW QUALITY text file=%r chars=%d doc=%s report=%s "
+            "— Vision OCR was attempted but content may be degraded",
+            fname, text_chars, doc_id, report_id,
+        )
+    else:
+        extraction_quality = "good"
+
+    logger.info(
+        "upload_document: saved doc=%s fmt=%s chars=%d quality=%s report=%s user=%s",
+        doc_id, detected_fmt, text_chars, extraction_quality, report_id, current_user.id,
+    )
 
     doc = SectionDocument(
         id=doc_id,
@@ -403,7 +428,16 @@ async def upload_document(
     )
     db.add(doc)
     await db.flush()
-    return doc
+    return DocumentOut(
+        id=doc.id,
+        original_filename=doc.original_filename,
+        file_size_bytes=doc.file_size_bytes,
+        document_type=doc.document_type,
+        file_format=doc.file_format,
+        etl_status=doc.etl_status,
+        text_chars=text_chars,
+        extraction_quality=extraction_quality,
+    )
 
 
 @router.get("/documents", response_model=list[DocumentOut])

@@ -303,18 +303,29 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
         return ""
 
 
+_PPTX_MAX_IMAGE_OCR = 20      # max Vision OCR calls per PPTX file
+_PPTX_MIN_IMAGE_BYTES = 10 * 1024  # skip tiny images < 10 KB (icons/logos)
+
+
 def extract_text_from_pptx(file_bytes: bytes) -> str:
-    """Extract plain text from PPTX bytes using python-pptx."""
+    """Extract plain text from PPTX bytes using python-pptx.
+
+    Text shapes and tables are extracted via python-pptx.  Image shapes
+    (charts rendered as pictures, scanned slides, infographic slides) are
+    sent to Gemini Vision OCR so embedded financial data is not lost.
+    """
     logger.info("[OCR] extract_text_from_pptx: start bytes=%dKB", len(file_bytes) // 1024)
     try:
         import io
         from pptx import Presentation
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
 
         t0 = time.perf_counter()
         prs = Presentation(io.BytesIO(file_bytes))
         parts: list[str] = []
         slide_count = len(prs.slides)
         shape_count = 0
+        images_ocr_count = 0
         for slide_no, slide in enumerate(prs.slides, 1):
             slide_parts = [f"[Slide {slide_no}]"]
             for shape in slide.shapes:
@@ -328,6 +339,24 @@ def extract_text_from_pptx(file_bytes: bytes) -> str:
                         )
                         if row_text:
                             slide_parts.append(row_text)
+                # Vision OCR for embedded image shapes (charts, scanned slides, infographics)
+                if (
+                    shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+                    and images_ocr_count < _PPTX_MAX_IMAGE_OCR
+                ):
+                    try:
+                        img_blob = shape.image.blob
+                        if len(img_blob) >= _PPTX_MIN_IMAGE_BYTES:
+                            img_mime = shape.image.content_type or "image/jpeg"
+                            img_text = extract_text_from_image(img_blob, img_mime)
+                            if img_text.strip():
+                                slide_parts.append(f"[Image OCR]\n{img_text.strip()}")
+                                images_ocr_count += 1
+                    except Exception as _img_err:
+                        logger.debug(
+                            "[OCR] pptx: image OCR failed slide=%d shape=%r: %s",
+                            slide_no, getattr(shape, "name", "?"), _img_err,
+                        )
             if len(slide_parts) > 1:
                 parts.append("\n".join(slide_parts))
         result = "\n\n".join(parts)
@@ -335,8 +364,8 @@ def extract_text_from_pptx(file_bytes: bytes) -> str:
         stats = _quality_stats(result)
         logger.info(
             "[OCR] extract_text_from_pptx: elapsed=%.0fms slides=%d shapes=%d "
-            "non_empty_slides=%d chars=%d ratio=%.1f%% sample=%r",
-            elapsed, slide_count, shape_count, len(parts),
+            "non_empty_slides=%d images_ocr=%d chars=%d ratio=%.1f%% sample=%r",
+            elapsed, slide_count, shape_count, len(parts), images_ocr_count,
             stats["chars"], stats["ratio_pct"], stats["sample"],
         )
         return result
@@ -712,6 +741,12 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
             rows = list(ws.iter_rows(values_only=True))
             if not rows:
                 continue
+            if len(rows) > 201:
+                logger.warning(
+                    "[OCR] xlsx: sheet=%r has %d data rows — only first 200 extracted "
+                    "(%d rows truncated); re-save with fewer rows or split the sheet",
+                    sheet_name, len(rows) - 1, len(rows) - 201,
+                )
             parts.append(f"\n## Sheet: {sheet_name}\n")
             headers = [str(c) if c is not None else "" for c in rows[0]]
             n_cols = len(headers)

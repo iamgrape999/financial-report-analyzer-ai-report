@@ -2624,11 +2624,12 @@ async function loadReportDetail(rid){
       const fmtColor={PDF:'danger',DOCX:'primary',PPTX:'warning',TXT:'secondary',JPG:'success',PNG:'success',IMG:'success'}[fmt]||'secondary';
       const typeLabel=DOC_TYPE_LABELS[d.document_type]||d.document_type||'Other';
       const etlBadge=d.etl_status==='done'?'<span class="badge bg-success ms-1" style="font-size:9px">ETL✓</span>':d.etl_status==='error'?'<span class="badge bg-danger ms-1" style="font-size:9px">ETL!</span>':'';
+      const qBadge=d.extraction_quality==='empty'?'<span class="badge bg-danger ms-1" style="font-size:9px" title="No text extracted — Vision OCR failed">OCR✗</span>':d.extraction_quality==='low'?'<span class="badge bg-warning text-dark ms-1" style="font-size:9px" title="Low-quality text extracted">OCR⚠</span>':'';
       return`<div class="border rounded p-1 mb-1" style="font-size:11px;">
         <div class="d-flex align-items-center gap-1 flex-wrap">
           <span class="badge bg-${fmtColor}" style="font-size:9px">${esc(fmt)}</span>
           <span class="fw-semibold text-truncate" style="max-width:140px" title="${esc(d.original_filename)}">${esc(d.original_filename)}</span>
-          <span class="text-muted">${fb(d.file_size_bytes)}</span>${etlBadge}
+          <span class="text-muted">${fb(d.file_size_bytes)}</span>${etlBadge}${qBadge}
         </div>
         <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
         <div class="d-flex gap-1 mt-1">
@@ -3374,7 +3375,15 @@ async function uploadPDF(){
     const res=await fetch(API+'/reports/'+currentRid+'/documents',{method:'POST',headers:H(),body:form});
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||tl('Upload failed','上傳失敗'));
-    toast(tl(`✓ Uploaded: ${file.name}`,`✓ 已上傳：${file.name}`),'success');inp.value='';
+    // Surface text extraction quality to the analyst immediately
+    if(d.extraction_quality==='empty'){
+      toast(tl(`⚠️ Uploaded: ${file.name} — text extraction returned EMPTY. The document may be a scanned image that Vision OCR could not read. Try a higher-resolution scan or a text-based PDF.`,`⚠️ 已上傳：${file.name} — 文字萃取結果為空。文件可能是 Vision OCR 無法讀取的掃描圖像，請嘗試更高解析度或可選字文字的 PDF。`),'warning');
+    }else if(d.extraction_quality==='low'){
+      toast(tl(`⚠️ Uploaded: ${file.name} — low-quality text extracted (${(d.text_chars||0).toLocaleString()} chars). Some data may be missing; consider re-uploading a cleaner copy.`,`⚠️ 已上傳：${file.name} — 萃取文字品質偏低（${(d.text_chars||0).toLocaleString()} 字元），部分資料可能遺失，建議重新上傳更清晰的版本。`),'warning');
+    }else{
+      toast(tl(`✓ Uploaded: ${file.name} (${(d.text_chars||0).toLocaleString()} chars extracted)`,`✓ 已上傳：${file.name}（已萃取 ${(d.text_chars||0).toLocaleString()} 字元）`),'success');
+    }
+    inp.value='';
     await loadReportDetail(currentRid);
   }catch(e){toast(e.message,'danger');}
 }

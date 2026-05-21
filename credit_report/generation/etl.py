@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 
 # Which sections are relevant for each document type
 DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
-    "annual_report":         [4, 7, 3, 2, 10],      # no §1 — credit facility not in annual reports
-    "financial_statement":   [7, 4, 2, 10],          # no §1/§5 — collateral not in financial statements
-    "analyst_presentation":  [4, 7, 3, 10],          # company IR — no §1/§2 (bank-internal sections)
+    "annual_report":         [4, 7, 3, 2, 10, 5],   # §5 added — annual reports often describe existing security
+    "financial_statement":   [7, 4, 2, 10],
+    "analyst_presentation":  [4, 7, 3, 10, 2],       # §2 added — IR decks discuss solvency/guarantor
     "interim_report":        [7, 4, 2, 3],
     "valuation_report":      [5, 10, 6],
     "charter_agreement":     [1, 6, 5],
     "shipbuilding_contract": [6, 1, 5],
-    "kyc_document":          [9, 1, 4],
+    "kyc_document":          [9, 1, 4, 8],           # §8 added — KYC docs may include ACRA charge searches
     "legal_document":        [8, 1, 9],
-    "external_report":       [11, 4, 7],             # broker research — §11 first; no §2/§3 (bank-internal)
-    "other":                 [4, 7, 1],
+    "external_report":       [11, 4, 7, 3],          # §3 added — broker research contains external ratings
+    "other":                 [4, 7, 1, 8],           # §8 added — generic uploads may include charge summaries
 }
 
 ETL_SYSTEM_PROMPT = """\
@@ -1375,6 +1375,8 @@ async def _etl_document_chunked(
     total_ms = (time.perf_counter() - t_start) * 1000
     logger.info("[ETL] chunked ETL complete: chunks=%d sections=%s total_ms=%.0f",
                 n_chunks, list(merged.keys()), total_ms)
+    if 6 in merged and isinstance(merged[6], dict):
+        merged[6] = _flatten_section6(merged[6])
     return merged
 
 
@@ -1439,6 +1441,8 @@ async def etl_document(
             text_chunk=text,
             target_sections=target_sections,
         )
+        if 6 in result and isinstance(result[6], dict):
+            result[6] = _flatten_section6(result[6])
         total_ms = (time.perf_counter() - t_start) * 1000
         logger.info(
             "[ETL] etl_document: COMPLETE doc_type=%s total_elapsed=%.0fms "
@@ -1546,6 +1550,35 @@ def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
 # (section_no, sub_key, field_dotted_path, metric_name, unit)
 # Dotted paths (e.g. "deal_dscr.dscr_value") are supported for nested fields.
 # Only scalar-numeric fields meaningful as standalone facts are included here.
+def _flatten_section6(sec6: dict) -> dict:
+    """Convert 6D_milestones.milestones[] array → flat m1_*/m2_*/m3_*/m4_* keys.
+
+    The ETL prompt returns milestones as a list of dicts; the form stores them as
+    numbered flat fields (m1_name, m1_date, m1_pct, m1_amount_usd_m, …).  This
+    transform makes the ETL output directly usable for SectionInput auto-populate
+    and CanonicalFact extraction via _ETL_FACT_MAP.
+    """
+    ms_container = sec6.get("6D_milestones") or {}
+    milestones = ms_container.get("milestones") or []
+    if not isinstance(milestones, list) or not milestones:
+        return sec6
+
+    sec6 = dict(sec6)
+    flat: dict = {k: v for k, v in ms_container.items() if k != "milestones"}
+    for i, ms in enumerate(milestones[:4], 1):
+        if not isinstance(ms, dict):
+            continue
+        def _set(key: str, val):
+            if val is not None:
+                flat[f"m{i}_{key}"] = val
+        _set("name",         ms.get("milestone") or ms.get("name"))
+        _set("date",         ms.get("expected_date") or ms.get("actual_date"))
+        _set("pct",          ms.get("pct_of_contract"))
+        _set("amount_usd_m", ms.get("amount_usd_m"))
+    sec6["6D_milestones"] = flat
+    return sec6
+
+
 _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     # §1 — Credit Facility
     (1, "facility_summary", "totals.total_credit_limit_usd_m", "credit_limit_usd_m",   "mn"),
@@ -1579,12 +1612,26 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (5, "5C_vessel_mortgage",  "loan_amount_usd_m",    "loan_amount_usd_m",         "mn"),
 
     # §6 — Ship Finance / Project Analysis
-    (6, "6A_project", "contract_price_usd_m", "contract_price_usd_m", "mn"),
-    (6, "6A_project", "loan_amount_usd_m",    "loan_amount_usd_m",    "mn"),
-    (6, "6A_project", "ltc_pct",              "ltc_pct",              None),
-    (6, "6A_project", "teu",                  "vessel_teu",           None),
-    (6, "6A_project", "dwt",                  "vessel_dwt",           None),
-    (6, "6B_builder", "ontime_delivery_pct",  "builder_ontime_pct",   None),
+    (6, "6A_project",    "contract_price_usd_m",         "contract_price_usd_m",      "mn"),
+    (6, "6A_project",    "loan_amount_usd_m",             "loan_amount_usd_m",         "mn"),
+    (6, "6A_project",    "ltc_pct",                       "ltc_pct",                   None),
+    (6, "6A_project",    "teu",                           "vessel_teu",                None),
+    (6, "6A_project",    "dwt",                           "vessel_dwt",                None),
+    (6, "6A_project",    "loa_m",                         "vessel_loa_m",              None),
+    (6, "6A_project",    "beam_m",                        "vessel_beam_m",             None),
+    (6, "6A_project",    "speed_knots",                   "vessel_speed_knots",        None),
+    (6, "6A_project",    "grace_period_days",             "vessel_grace_period_days",  None),
+    (6, "6B_builder",    "ontime_delivery_pct",           "builder_ontime_pct",        None),
+    # Milestone amounts & pcts (6D_milestones flattened to m1_*/m2_* keys by _flatten_section6)
+    (6, "6D_milestones", "m1_amount_usd_m",               "milestone_1_amount_usd_m", "mn"),
+    (6, "6D_milestones", "m1_pct",                         "milestone_1_pct",          None),
+    (6, "6D_milestones", "m2_amount_usd_m",               "milestone_2_amount_usd_m", "mn"),
+    (6, "6D_milestones", "m2_pct",                         "milestone_2_pct",          None),
+    (6, "6D_milestones", "m3_amount_usd_m",               "milestone_3_amount_usd_m", "mn"),
+    (6, "6D_milestones", "m3_pct",                         "milestone_3_pct",          None),
+    (6, "6D_milestones", "m4_amount_usd_m",               "milestone_4_amount_usd_m", "mn"),
+    (6, "6D_milestones", "m4_pct",                         "milestone_4_pct",          None),
+    (6, "6E_rg_mechanism", "coverage_summary_min_pct",    "rg_coverage_min_pct",       None),
 
     # §7 — handled by _extract_section7_facts() due to dynamic FY_YYYY nesting
 
@@ -1764,7 +1811,10 @@ def _extract_section7_facts(
     guar_fin = sec7.get("7C_guarantor_financials") or {}
     if isinstance(guar_fin, dict) and guar_fin.get("applicable") is not False:
         guar_entity_raw = str(guar_fin.get("guarantor_name") or "").strip()
-        guar_entity = guar_entity_raw.upper() if guar_entity_raw else "GUARANTOR"
+        guar_abbrev = str(guar_fin.get("guarantor_name_abbrev") or "").strip().upper()
+        # Use abbreviation (e.g. "EMC") if available so it matches YAML entity keys;
+        # fall back to full-name uppercase, then to sentinel "GUARANTOR".
+        guar_entity = guar_abbrev or (guar_entity_raw.upper() if guar_entity_raw else "GUARANTOR")
         guar_ccy_raw = str(guar_fin.get("reporting_currency") or "").strip().upper()
         guar_currency = guar_ccy_raw if guar_ccy_raw and len(guar_ccy_raw) == 3 else default_currency
 
@@ -1848,7 +1898,8 @@ def _extract_section7_facts(
         # Resolve guarantor entity name (reuse from 7C block if already set)
         guar_fin_d = sec7.get("7C_guarantor_financials") or {}
         ge_raw_d = str(guar_fin_d.get("guarantor_name") or "").strip()
-        guar_entity_d = ge_raw_d.upper() if ge_raw_d else "GUARANTOR"
+        ge_abbrev_d = str(guar_fin_d.get("guarantor_name_abbrev") or "").strip().upper()
+        guar_entity_d = ge_abbrev_d or (ge_raw_d.upper() if ge_raw_d else "GUARANTOR")
 
         def _push_guar_ratio(metric: str, raw_val, period: str) -> None:
             if raw_val is None:

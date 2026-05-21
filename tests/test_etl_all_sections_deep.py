@@ -126,17 +126,17 @@ class TestDocumentTypeSectionRouting:
         assert not missing, f"Document types missing from DOCUMENT_SECTION_MAP: {missing}"
 
     @pytest.mark.parametrize("doc_type,expected_sections", [
-        ("annual_report",        [4, 7, 3, 2, 10]),
+        ("annual_report",        [4, 7, 3, 2, 10, 5]),
         ("financial_statement",  [7, 4, 2, 10]),
-        ("analyst_presentation", [4, 7, 3, 10]),
+        ("analyst_presentation", [4, 7, 3, 10, 2]),
         ("interim_report",       [7, 4, 2, 3]),
         ("valuation_report",     [5, 10, 6]),
         ("charter_agreement",    [1, 6, 5]),
         ("shipbuilding_contract",[6, 1, 5]),
-        ("kyc_document",         [9, 1, 4]),
+        ("kyc_document",         [9, 1, 4, 8]),
         ("legal_document",       [8, 1, 9]),
-        ("external_report",      [11, 4, 7]),
-        ("other",                [4, 7, 1]),
+        ("external_report",      [11, 4, 7, 3]),
+        ("other",                [4, 7, 1, 8]),
     ])
     def test_document_type_maps_to_correct_sections(self, doc_type, expected_sections):
         doc_map = self._load_map()
