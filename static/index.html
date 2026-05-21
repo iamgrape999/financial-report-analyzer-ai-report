@@ -300,6 +300,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <button class="btn btn-outline-info btn-sm" onclick="syncJsonToForm()" data-i18n="sp.import_from_json" title="Populate form fields from the JSON in the Raw JSON tab">📥 Import from JSON</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="syncFormToJson()" data-i18n="sp.sync_json">↔ Sync to JSON</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="toggleJsonPreview()" id="splitViewBtn" title="Show JSON preview alongside form">⟷ JSON Preview</button>
+        <button class="btn btn-outline-success btn-sm" id="btnSuggestFacts" onclick="openFactSuggestModal()" title="Find CanonicalFact-backed suggestions for empty or mismatched fields">💡 Suggest from Facts</button>
         <small class="text-muted" data-i18n="sp.form_hint">Fill in each field below and click Save. ✗ fields contribute to completeness (50% target for draft generation).</small>
       </div>
       <div id="formSplitWrap" class="form-split-wrap">
@@ -542,6 +543,49 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
     <div class="modal-footer">
       <span class="text-muted small me-auto" id="conflictsModalStatus"></span>
       <button class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="modal.close">Close</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- Field Suggestion Modal -->
+<div class="modal fade" id="factSuggestModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content" style="background:#1e1e2e;color:#cdd6f4;">
+    <div class="modal-header py-2" style="background:#1a1a2e;border-bottom:1px solid #313244;">
+      <div>
+        <h5 class="modal-title mb-0">💡 <span id="fsmTitle">Suggest from Facts</span></h5>
+        <small class="text-muted" id="fsmSubtitle"></small>
+      </div>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <!-- Apply mode selector -->
+    <div class="px-3 pt-2 pb-1 d-flex align-items-center gap-3 flex-wrap" style="background:#181825;border-bottom:1px solid #313244;">
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="radio" name="fsmMode" id="fsmModeEmpty" value="only_empty" checked>
+        <label class="form-check-label small" for="fsmModeEmpty">☑ Fill empty fields only <span class="text-success">(safe)</span></label>
+      </div>
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="radio" name="fsmMode" id="fsmModeOverwrite" value="overwrite">
+        <label class="form-check-label small" for="fsmModeOverwrite">⚠ Allow overwrite <span class="text-warning">(use with care)</span></label>
+      </div>
+      <div class="ms-auto d-flex gap-2">
+        <button class="btn btn-sm btn-outline-light" onclick="fsmSelectHighConf()">☑ Select HIGH</button>
+        <button class="btn btn-sm btn-outline-light" onclick="fsmSelectAll(true)">Select All Selectable</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="fsmSelectAll(false)">Deselect All</button>
+      </div>
+    </div>
+    <div class="modal-body p-0" id="fsmBody" style="max-height:65vh;overflow-y:auto;">
+      <div class="text-center py-5"><div class="spinner-border text-success"></div><p class="mt-2 text-muted">Scanning facts…</p></div>
+    </div>
+    <div class="modal-footer" style="background:#181825;border-top:1px solid #313244;">
+      <div id="fsmUndoWrap" class="me-auto d-none">
+        <button class="btn btn-warning btn-sm" onclick="fsmUndo()">↩ Undo Last Apply</button>
+      </div>
+      <span id="fsmStatus" class="text-muted small me-auto"></span>
+      <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+      <button class="btn btn-success btn-sm" id="fsmApplyBtn" onclick="fsmApply()">
+        <span id="fsmApplySpin" class="spinner-border spinner-sm d-none me-1"></span>
+        ✅ Apply Selected
+      </button>
     </div>
   </div></div>
 </div>
@@ -3638,6 +3682,234 @@ async function confirmEtlMerge(){
     document.getElementById('etlMergeStatus').textContent=tl('Error: ','錯誤：')+e.message;
   }finally{
     document.getElementById('etlMergeConfirmBtn').disabled=false;
+  }
+}
+
+// ── Field Suggestion from CanonicalFacts ────────────────────────────────────
+let _fsmSuggestions=[];      // current suggestion list
+let _fsmSecNo=null;          // section being suggested
+let _fsmUndoSnapshot=null;   // deep copy of form data before apply
+
+async function openFactSuggestModal(){
+  const secNo=currentPanelSec;
+  if(!secNo){toast(tl('Open a section panel first','請先開啟一個段落面板'),'warning');return;}
+  if(!currentRid){toast(tl('No report loaded','尚未載入報告'),'warning');return;}
+  _fsmSecNo=secNo;
+  _fsmSuggestions=[];
+  document.getElementById('fsmTitle').textContent=
+    tl(`Suggest from Facts — §${secNo}`,`從已知事實建議 — §${secNo}`);
+  document.getElementById('fsmSubtitle').textContent='';
+  document.getElementById('fsmBody').innerHTML=
+    '<div class="text-center py-5"><div class="spinner-border text-success"></div>'
+    +'<p class="mt-2 text-muted">'+tl('Scanning CanonicalFacts…','掃描已知事實中…')+'</p></div>';
+  document.getElementById('fsmStatus').textContent='';
+  document.getElementById('fsmUndoWrap').classList.add('d-none');
+  document.getElementById('fsmApplyBtn').disabled=false;
+  const btnSuggest=document.getElementById('btnSuggestFacts');
+  if(btnSuggest)btnSuggest.disabled=true;
+  new bootstrap.Modal(document.getElementById('factSuggestModal')).show();
+  document.getElementById('factSuggestModal').addEventListener('hidden.bs.modal',()=>{
+    if(btnSuggest)btnSuggest.disabled=false;
+  },{once:true});
+
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/sections/'+secNo+'/field-suggestions',
+      {headers:H()});
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.detail||'API error');
+    _fsmSuggestions=data.suggestions||[];
+    _fsmRenderSuggestions(data);
+  }catch(e){
+    document.getElementById('fsmBody').innerHTML=
+      `<div class="alert alert-danger m-3">Error: ${esc(e.message)}</div>`;
+    if(btnSuggest)btnSuggest.disabled=false;
+  }
+}
+
+function _fsmRenderSuggestions(data){
+  const sugs=data.suggestions||[];
+  const subtitle=tl(
+    `${sugs.length} suggestion(s) from ${data.total_facts_checked} fact(s) scanned`,
+    `共掃描 ${data.total_facts_checked} 個事實，找到 ${sugs.length} 個建議`);
+  document.getElementById('fsmSubtitle').textContent=subtitle;
+
+  if(!sugs.length){
+    document.getElementById('fsmBody').innerHTML=
+      '<div class="alert alert-info m-3">'
+      +tl('No new field matches found. All matching facts are already filled or identical to current values.',
+          '找不到新的欄位匹配。所有匹配的事實欄位已填寫或與現有值相同。')+'</div>';
+    return;
+  }
+
+  // Group by entity › period
+  const groups={};
+  for(const s of sugs){
+    const gk=(s.entity||'—')+' › '+(s.period||'—');
+    (groups[gk]=groups[gk]||[]).push(s);
+  }
+
+  const confBadge=c=>c==='high'
+    ?'<span class="badge bg-success">HIGH</span>'
+    :c==='medium'?'<span class="badge bg-warning text-dark">MED</span>'
+    :'<span class="badge bg-danger">LOW</span>';
+
+  let html='<div class="p-2">';
+  let idx=0;
+  for(const [gk,items] of Object.entries(groups)){
+    const highCount=items.filter(s=>s.confidence==='high'&&s.selectable).length;
+    const totalCount=items.length;
+    html+=`<details open class="mb-2 border rounded" style="border-color:#313244!important;">
+      <summary class="px-3 py-2 d-flex align-items-center gap-2" style="cursor:pointer;background:#252537;border-radius:4px;">
+        <strong class="text-info">${esc(gk)}</strong>
+        <span class="badge bg-secondary">${totalCount}</span>
+        <span class="badge bg-success">${highCount} HIGH</span>
+      </summary>
+      <div class="overflow-x-auto">
+      <table class="table table-sm mb-0" style="font-size:12px;color:#cdd6f4;">
+        <thead style="background:#181825;"><tr>
+          <th style="width:28px"></th>
+          <th>Field</th>
+          <th>Current Value</th>
+          <th>Suggested Value</th>
+          <th>Confidence</th>
+          <th>Source</th>
+        </tr></thead><tbody>`;
+    for(const s of items){
+      const chk=s.selectable&&s.confidence==='high'?'checked':'';
+      const disabled=s.selectable?'':'disabled title="Conflicted — cannot batch-apply"';
+      const curDisp=s.current_value!=null?esc(String(s.current_value)):'<em class="text-muted">empty</em>';
+      const sugDisp=esc(s.display||String(s.suggested_value))
+        +(s.currency?` <small class="text-muted">${esc(s.currency)}</small>`:'')
+        +(s.unit?` <small class="text-muted">${esc(s.unit)}</small>`:'');
+      const conflictNote=s.conflict_warning
+        ?`<div class="text-warning" style="font-size:11px;">⚠ ${esc(s.conflict_warning)}</div>`:'';
+      const reasonTip=s.confidence_reasons.join(' · ');
+      html+=`<tr class="${s.selectable?'':'table-danger opacity-75'}">
+        <td><input type="checkbox" class="form-check-input fsm-chk" data-idx="${idx}" ${chk} ${disabled}></td>
+        <td>
+          <span class="text-info">${esc(s.field_label)}</span>
+          <div style="font-size:10px;color:#6c7086;">${esc(s.field_path)}</div>
+          ${conflictNote}
+        </td>
+        <td class="${s.current_value!=null?'text-warning':''}">${curDisp}</td>
+        <td class="text-success fw-bold">${sugDisp}</td>
+        <td title="${esc(reasonTip)}">${confBadge(s.confidence)} <small>${s.confidence_score}</small></td>
+        <td><small class="text-muted">${esc(s.source_type.replaceAll('_',' '))}</small></td>
+      </tr>`;
+      idx++;
+    }
+    html+='</tbody></table></div></details>';
+  }
+  html+='</div>';
+  document.getElementById('fsmBody').innerHTML=html;
+}
+
+function fsmSelectAll(checked){
+  document.querySelectorAll('.fsm-chk:not(:disabled)').forEach(el=>el.checked=checked);
+}
+
+function fsmSelectHighConf(){
+  document.querySelectorAll('.fsm-chk').forEach(el=>{
+    const idx=parseInt(el.dataset.idx);
+    const s=_fsmSuggestions[idx];
+    // HIGH confidence + selectable + not disabled
+    el.checked=!el.disabled&&s&&s.confidence==='high'&&s.selectable;
+  });
+}
+
+async function fsmApply(){
+  const secNo=_fsmSecNo;
+  if(!secNo||!currentRid)return;
+  const selected=[];
+  document.querySelectorAll('.fsm-chk:checked:not(:disabled)').forEach(el=>{
+    const s=_fsmSuggestions[parseInt(el.dataset.idx)];
+    if(s)selected.push({suggestion_id:s.suggestion_id,field_path:s.field_path,
+      suggested_value:s.suggested_value,fact_id:s.fact_id});
+  });
+  if(!selected.length){toast(tl('No fields selected','未選擇任何欄位'),'warning');return;}
+
+  const mode=document.querySelector('input[name="fsmMode"]:checked')?.value||'only_empty';
+
+  // Confirm if overwrite mode
+  if(mode==='overwrite'&&!confirm(
+    tl(`Apply ${selected.length} field(s) — this will OVERWRITE existing values. Continue?`,
+       `即將套用 ${selected.length} 個欄位並覆蓋現有值，確定繼續？`))){return;}
+
+  // Snapshot for undo (in-memory form state)
+  _fsmUndoSnapshot=JSON.parse(JSON.stringify(sectionInputDataMap[secNo]||{}));
+
+  const btn=document.getElementById('fsmApplyBtn');
+  const spin=document.getElementById('fsmApplySpin');
+  btn.disabled=true;spin.classList.remove('d-none');
+  document.getElementById('fsmStatus').textContent=tl('Applying…','套用中…');
+
+  try{
+    const res=await fetch(
+      API+'/reports/'+currentRid+'/sections/'+secNo+'/field-suggestions/apply',
+      {method:'POST',headers:HJ(),body:JSON.stringify({items:selected,apply_mode:mode})});
+    const result=await res.json();
+    if(!res.ok)throw new Error(result.detail||'Apply failed');
+
+    // Reload form from server (fresh merged state)
+    const inputRes=await fetch(API+'/reports/'+currentRid+'/inputs/'+secNo,{headers:H()});
+    if(inputRes.ok){
+      const inputData=await inputRes.json();
+      const merged=inputData.input_json||{};
+      sectionInputDataMap[secNo]=merged;
+      if(currentPanelSec===secNo){
+        populateForm(secNo,expandPayload(secNo,merged));
+        _fsmHighlightApplied(result.applied_paths,secNo);
+      }
+    }
+
+    // Update undo button
+    document.getElementById('fsmUndoWrap').classList.remove('d-none');
+
+    // Summary
+    let msg=tl(`Applied ${result.applied_count}`,`已套用 ${result.applied_count}`);
+    if(result.skipped_count)msg+=tl(`, skipped ${result.skipped_count}`,`, 略過 ${result.skipped_count}`);
+    if(result.conflict_count)msg+=tl(`, ${result.conflict_count} conflict(s) blocked`,`, ${result.conflict_count} 個衝突已阻擋`);
+    document.getElementById('fsmStatus').textContent=msg+' ✓';
+    toast(msg,'success');
+
+    sectionInputMap[secNo]={has_data:true};
+    renderSectionsTable();
+
+  }catch(e){
+    document.getElementById('fsmStatus').textContent=tl('Error: ','錯誤：')+e.message;
+    toast(e.message,'danger');
+    _fsmUndoSnapshot=null;  // don't offer undo if apply failed
+  }finally{
+    btn.disabled=false;spin.classList.add('d-none');
+  }
+}
+
+function fsmUndo(){
+  const secNo=_fsmSecNo;
+  if(!secNo||!_fsmUndoSnapshot)return;
+  sectionInputDataMap[secNo]=_fsmUndoSnapshot;
+  if(currentPanelSec===secNo){
+    populateForm(secNo,expandPayload(secNo,_fsmUndoSnapshot));
+  }
+  _fsmUndoSnapshot=null;
+  document.getElementById('fsmUndoWrap').classList.add('d-none');
+  document.getElementById('fsmStatus').textContent=tl('Undone — form restored to pre-apply state (not yet saved).',
+    '已復原 — 表單已恢復至套用前狀態（尚未儲存）。');
+  toast(tl('Undo complete — remember to save if needed.','復原完成 — 如需請記得儲存。'),'info');
+}
+
+function _fsmHighlightApplied(paths,secNo){
+  for(const path of paths){
+    const defs=FIELD_DEFS[secNo]||[];
+    for(const f of defs){
+      if(f.p===path||path.startsWith(f.p)){
+        const el=document.getElementById(_fid(secNo,f.p));
+        if(!el)continue;
+        el.style.transition='background 0.3s';
+        el.style.background='#2d5016';
+        setTimeout(()=>{el.style.background='';el.style.transition='';},4000);
+      }
+    }
   }
 }
 

@@ -159,3 +159,54 @@ class ResolveConflictRequest(BaseModel):
     chosen_fact_id: str
     rejected_fact_ids: list[str]
     resolution_reason: str
+
+
+class FieldSuggestion(BaseModel):
+    suggestion_id: str          # deterministic: sha of (report_id, section_no, field_path, fact_id)
+    field_path: str             # dot-notation path into input_json
+    field_label: str            # human-readable label derived from path
+    metric_name: str
+    entity: str
+    period: str
+    current_value: Optional[Any]
+    suggested_value: Any
+    display: Optional[str]
+    currency: Optional[str]
+    unit: Optional[str]
+    confidence: str             # "high" | "medium" | "low"
+    confidence_score: float     # 0–100 numeric
+    confidence_reasons: list[str]
+    source_type: str
+    source_priority: int
+    fact_id: str
+    fact_state: str
+    conflict_warning: Optional[str]
+    selectable: bool            # False if conflicted — cannot be batch-selected
+
+
+class FieldSuggestionsResponse(BaseModel):
+    report_id: str
+    section_no: int
+    total_facts_checked: int
+    suggestions: list[FieldSuggestion]
+
+
+class ApplyFieldSuggestionItem(BaseModel):
+    suggestion_id: str
+    field_path: str
+    suggested_value: Any
+    fact_id: str
+
+
+class ApplySuggestionsRequest(BaseModel):
+    items: list[ApplyFieldSuggestionItem]
+    apply_mode: str = "only_empty"   # "only_empty" | "overwrite"
+
+
+class ApplySuggestionsResponse(BaseModel):
+    applied_count: int
+    skipped_count: int
+    conflict_count: int
+    applied_paths: list[str]
+    skipped_paths: list[str]
+    conflict_paths: list[str]

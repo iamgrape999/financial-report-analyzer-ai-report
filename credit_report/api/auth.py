@@ -6,7 +6,7 @@ import uuid
 from collections import defaultdict
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -168,8 +168,8 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/users", response_model=list[UserResponse])
 async def list_users(
-    skip: int = 0,
-    limit: int = 200,
+    skip: int = Query(default=0, ge=0, le=2_147_483_647),
+    limit: int = Query(default=200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):

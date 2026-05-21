@@ -4,7 +4,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -15,11 +15,16 @@ logger = logging.getLogger(__name__)
 
 from credit_report.audit.events import write_event
 from credit_report.database import get_db
-from credit_report.fact_store.input_extractor import InputFactExtractor
-from credit_report.fact_store.repository import upsert_facts
+from credit_report.fact_store.input_extractor import CONFIG_DIR, InputFactExtractor
+from credit_report.fact_store.repository import get_facts_for_report, upsert_facts
 from credit_report.models import Report, SectionInput
 from credit_report.schemas import (
+    ApplyFieldSuggestionItem,
+    ApplySuggestionsRequest,
+    ApplySuggestionsResponse,
     CreateReportRequest,
+    FieldSuggestion,
+    FieldSuggestionsResponse,
     ReportResponse,
     SectionInputPayload,
     SectionInputResponse,
@@ -545,3 +550,451 @@ async def get_review_progress(
         "ready_for_review": sections_done > 0 and report.status in ("draft", "validated"),
         "ready_to_approve": report.status == "review_in_progress",
     }
+
+
+# ── Field Suggestion helpers ──────────────────────────────────────────────────
+
+def _resolve_path_safe(obj: Any, path: str) -> Any:
+    """Walk dot-notation path into a nested dict; return None if any segment missing."""
+    parts = path.split(".")
+    cur = obj
+    for p in parts:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(p)
+        if cur is None:
+            return None
+    return cur
+
+
+def _values_equal(a: Any, b: Any) -> bool:
+    """Numerically-aware equality: '12,345' == 12345.0; '12.30' == 12.3."""
+    if a is None:
+        return False
+    try:
+        fa = float(str(a).replace(",", "").replace("%", "").strip())
+        fb = float(str(b).replace(",", "").replace("%", "").strip())
+        return abs(fa - fb) < 1e-6
+    except (ValueError, TypeError):
+        return str(a).strip() == str(b).strip()
+
+
+def _make_suggestion_id(report_id: str, section_no: int, field_path: str, fact_id: str) -> str:
+    import hashlib
+    raw = f"{report_id}:{section_no}:{field_path}:{fact_id}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def _humanize_path(path: str) -> str:
+    """Convert 7A_borrower_financials.income_statement.FY2024.revenue → readable label."""
+    parts = path.split(".")
+    cleaned = []
+    for p in parts:
+        # Strip leading section prefix like "7A_", "2B_"
+        import re
+        p = re.sub(r"^\d+[A-Z]_", "", p)
+        p = p.replace("_", " ").title()
+        cleaned.append(p)
+    return " › ".join(cleaned)
+
+
+def _compute_confidence(fact: Any, facts_for_report: list[Any]) -> tuple[str, float, list[str], Optional[str], bool]:
+    """Return (level, score, reasons, conflict_warning, selectable)."""
+    score = 60.0
+    reasons: list[str] = []
+    conflict_warning: Optional[str] = None
+
+    # Source reliability
+    if fact.source_priority == 1:
+        score += 20
+        reasons.append("Analyst-input source (highest priority)")
+    elif fact.source_priority == 2:
+        score += 15
+        reasons.append("Manual override source")
+    elif fact.source_priority == 3:
+        score += 8
+        reasons.append("Document extraction source")
+    else:
+        reasons.append("Derived calculation source")
+
+    # Extraction state
+    if fact.state == "approved":
+        score += 12
+        reasons.append("Fact approved by reviewer")
+    elif fact.state == "validated":
+        score += 8
+        reasons.append("Fact validated")
+    elif fact.state == "conflicted":
+        score -= 35
+        conflict_warning = "This fact has conflicting values from multiple sources — verify manually"
+        reasons.append("⚠ Conflicting sources detected")
+    elif fact.state == "deprecated":
+        score -= 50
+        reasons.append("⚠ Deprecated fact")
+
+    # Has a clean display value
+    if fact.display:
+        score += 5
+        reasons.append("Formatted display value available")
+
+    # Check if value is numeric (more reliable)
+    if fact.value is not None:
+        score += 5
+        reasons.append("Numeric value extracted")
+
+    # Consistency check: same metric across sources
+    same_metric = [f for f in facts_for_report if f.metric_name == fact.metric_name
+                   and f.entity == fact.entity and f.period == fact.period
+                   and f.id != fact.id and f.state != "deprecated"]
+    if same_metric:
+        values = [f.value for f in same_metric if f.value is not None]
+        if values and fact.value is not None:
+            max_v, min_v = max(values + [fact.value]), min(values + [fact.value])
+            if max_v > 0 and (max_v - min_v) / max_v < 0.02:
+                score += 8
+                reasons.append(f"Consistent across {len(same_metric)+1} sources")
+            elif (max_v - min_v) / max(max_v, 1) > 0.10:
+                score -= 15
+                if not conflict_warning:
+                    conflict_warning = f"Value differs >10% from another source"
+                reasons.append("⚠ Material discrepancy with another source")
+
+    score = max(0.0, min(100.0, score))
+
+    if score >= 85:
+        level = "high"
+    elif score >= 65:
+        level = "medium"
+    else:
+        level = "low"
+
+    selectable = fact.state != "conflicted" and score >= 50
+
+    return level, round(score, 1), reasons, conflict_warning, selectable
+
+
+# ── GET field-suggestions ─────────────────────────────────────────────────────
+
+@router.get("/{report_id}/sections/{section_no}/field-suggestions",
+            response_model=FieldSuggestionsResponse)
+async def get_field_suggestions(
+    report_id: str,
+    section_no: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return per-field CanonicalFact-backed suggestions for the given section."""
+    if section_no < 1 or section_no > 10:
+        raise HTTPException(status_code=400, detail="section_no must be 1–10")
+
+    report_result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_deleted == False)
+    )
+    report = report_result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _assert_can_view_report(report, current_user)
+
+    # Load all non-deprecated facts and build a metric+entity index
+    all_facts = await get_facts_for_report(db, report_id)
+    active_facts = [f for f in all_facts if f.state != "deprecated"]
+
+    # O(1) lookup: (metric.lower(), entity.upper(), period) → best fact
+    # Among duplicates keep the lowest source_priority (most authoritative)
+    full_index: dict[tuple, Any] = {}
+    for f in active_facts:
+        key = (f.metric_name.lower(), (f.entity or "").upper(), f.period)
+        existing = full_index.get(key)
+        if existing is None or f.source_priority < existing.source_priority:
+            full_index[key] = f
+
+    # Fallback index by (metric, entity) ignoring period — for static mappings
+    me_index: dict[tuple, Any] = {}
+    for f in active_facts:
+        key = (f.metric_name.lower(), (f.entity or "").upper())
+        existing = me_index.get(key)
+        if existing is None or f.source_priority < existing.source_priority:
+            me_index[key] = f
+
+    # Load YAML config for this section using the report's industry
+    industry = report.industry or "marine"
+    config_path = CONFIG_DIR / industry / f"section_{section_no}.yaml"
+    if not config_path.exists():
+        return FieldSuggestionsResponse(
+            report_id=report_id, section_no=section_no,
+            total_facts_checked=len(active_facts), suggestions=[],
+        )
+
+    try:
+        import yaml
+        with config_path.open(encoding="utf-8") as fh:
+            yaml_config = yaml.safe_load(fh) or {}
+    except Exception as exc:
+        logger.warning("get_field_suggestions: YAML load failed section=%d: %s", section_no, exc)
+        return FieldSuggestionsResponse(
+            report_id=report_id, section_no=section_no,
+            total_facts_checked=len(active_facts), suggestions=[],
+        )
+
+    # Load current section input for comparison
+    si_result = await db.execute(
+        select(SectionInput).where(
+            SectionInput.report_id == report_id,
+            SectionInput.section_no == section_no,
+        ).order_by(SectionInput.id.desc())
+    )
+    si = si_result.scalars().first()
+    current_input: dict = json.loads(si.input_json) if si and si.input_json else {}
+
+    suggestions: list[FieldSuggestion] = []
+
+    for mapping in yaml_config.get("facts", []):
+        metric = mapping.get("metric", "").lower()
+        entity_key = (mapping.get("entity") or "").upper()
+        if not metric:
+            continue
+
+        if "iterate_path" in mapping:
+            # Iterate mapping: one suggestion per fiscal-year period
+            iterate_path = mapping["iterate_path"]
+            field = mapping.get("field", "")
+            # Collect all facts for this metric+entity across all periods
+            candidates = [
+                f for f in active_facts
+                if f.metric_name.lower() == metric
+                and (not entity_key or (f.entity or "").upper() == entity_key)
+            ]
+            for fact in candidates:
+                full_path = f"{iterate_path}.{fact.period}.{field}"
+                suggested_val = fact.value if fact.value is not None else fact.value_text
+                if suggested_val is None:
+                    continue
+                current_val = _resolve_path_safe(current_input, full_path)
+                if _values_equal(current_val, suggested_val):
+                    continue
+                level, score, reasons, conflict_warning, selectable = _compute_confidence(fact, active_facts)
+                suggestions.append(FieldSuggestion(
+                    suggestion_id=_make_suggestion_id(report_id, section_no, full_path, fact.id),
+                    field_path=full_path,
+                    field_label=_humanize_path(full_path),
+                    metric_name=fact.metric_name,
+                    entity=fact.entity or "",
+                    period=fact.period,
+                    current_value=current_val,
+                    suggested_value=suggested_val,
+                    display=fact.display,
+                    currency=fact.currency,
+                    unit=fact.unit,
+                    confidence=level,
+                    confidence_score=score,
+                    confidence_reasons=reasons,
+                    source_type=fact.source_type,
+                    source_priority=fact.source_priority,
+                    fact_id=fact.id,
+                    fact_state=fact.state,
+                    conflict_warning=conflict_warning,
+                    selectable=selectable,
+                ))
+        else:
+            # Static mapping: single field
+            path = mapping.get("path", "")
+            if not path:
+                continue
+            # Prefer exact (metric, entity) match; fallback to metric-only
+            fact = full_index.get((metric, entity_key, mapping.get("period", "").upper()))
+            if fact is None:
+                fact = me_index.get((metric, entity_key))
+            if fact is None and entity_key:
+                # Relax entity constraint as last resort
+                fact = next(
+                    (f for f in active_facts if f.metric_name.lower() == metric),
+                    None,
+                )
+            if fact is None:
+                continue
+            suggested_val = fact.value if fact.value is not None else fact.value_text
+            if suggested_val is None:
+                continue
+            current_val = _resolve_path_safe(current_input, path)
+            if _values_equal(current_val, suggested_val):
+                continue
+            level, score, reasons, conflict_warning, selectable = _compute_confidence(fact, active_facts)
+            suggestions.append(FieldSuggestion(
+                suggestion_id=_make_suggestion_id(report_id, section_no, path, fact.id),
+                field_path=path,
+                field_label=_humanize_path(path),
+                metric_name=fact.metric_name,
+                entity=fact.entity or "",
+                period=fact.period,
+                current_value=current_val,
+                suggested_value=suggested_val,
+                display=fact.display,
+                currency=fact.currency,
+                unit=fact.unit,
+                confidence=level,
+                confidence_score=score,
+                confidence_reasons=reasons,
+                source_type=fact.source_type,
+                source_priority=fact.source_priority,
+                fact_id=fact.id,
+                fact_state=fact.state,
+                conflict_warning=conflict_warning,
+                selectable=selectable,
+            ))
+
+    suggestions.sort(key=lambda s: s.field_path)
+    logger.info(
+        "get_field_suggestions: report=%s section=%d facts_checked=%d suggestions=%d user=%s",
+        report_id, section_no, len(active_facts), len(suggestions), current_user.id,
+    )
+    return FieldSuggestionsResponse(
+        report_id=report_id,
+        section_no=section_no,
+        total_facts_checked=len(active_facts),
+        suggestions=suggestions,
+    )
+
+
+# ── POST field-suggestions/apply ─────────────────────────────────────────────
+
+@router.post("/{report_id}/sections/{section_no}/field-suggestions/apply",
+             response_model=ApplySuggestionsResponse)
+async def apply_field_suggestions(
+    report_id: str,
+    section_no: int,
+    payload: ApplySuggestionsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Server-side apply of analyst-selected field suggestions.
+
+    apply_mode="only_empty"  — skips fields that already have a value (safe default)
+    apply_mode="overwrite"   — overwrites existing values (requires explicit choice)
+    """
+    if section_no < 1 or section_no > 10:
+        raise HTTPException(status_code=400, detail="section_no must be 1–10")
+    if payload.apply_mode not in ("only_empty", "overwrite"):
+        raise HTTPException(status_code=400, detail="apply_mode must be 'only_empty' or 'overwrite'")
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items to apply")
+
+    report_result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_deleted == False)
+    )
+    report = report_result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    # Apply requires edit rights (not just view)
+    _assert_owner_or_admin(report, current_user)
+
+    # Load active facts for re-validation
+    all_facts = await get_facts_for_report(db, report_id)
+    fact_by_id = {f.id: f for f in all_facts if f.state != "deprecated"}
+
+    # Load current section input
+    si_result = await db.execute(
+        select(SectionInput).where(
+            SectionInput.report_id == report_id,
+            SectionInput.section_no == section_no,
+        ).order_by(SectionInput.id.desc())
+    )
+    si = si_result.scalars().first()
+    current_input: dict = json.loads(si.input_json) if si and si.input_json else {}
+
+    applied_paths: list[str] = []
+    skipped_paths: list[str] = []
+    conflict_paths: list[str] = []
+
+    for item in payload.items:
+        fact = fact_by_id.get(item.fact_id)
+        if not fact:
+            skipped_paths.append(item.field_path)
+            continue
+
+        # Re-validate suggestion_id to prevent tampered field paths
+        expected_id = _make_suggestion_id(report_id, section_no, item.field_path, item.fact_id)
+        if item.suggestion_id != expected_id:
+            logger.warning(
+                "apply_field_suggestions: tampered suggestion_id report=%s path=%s user=%s",
+                report_id, item.field_path, current_user.id,
+            )
+            skipped_paths.append(item.field_path)
+            continue
+
+        # Reject conflicted facts
+        if fact.state == "conflicted":
+            conflict_paths.append(item.field_path)
+            continue
+
+        current_val = _resolve_path_safe(current_input, item.field_path)
+
+        # only_empty mode: skip if already has a value
+        if payload.apply_mode == "only_empty" and current_val is not None and str(current_val).strip():
+            skipped_paths.append(item.field_path)
+            continue
+
+        # Set value at path (build intermediate dicts as needed)
+        parts = item.field_path.split(".")
+        cur = current_input
+        for p in parts[:-1]:
+            if not isinstance(cur.get(p), dict):
+                cur[p] = {}
+            cur = cur[p]
+        cur[parts[-1]] = item.suggested_value
+        applied_paths.append(item.field_path)
+
+    if not applied_paths:
+        return ApplySuggestionsResponse(
+            applied_count=0,
+            skipped_count=len(skipped_paths),
+            conflict_count=len(conflict_paths),
+            applied_paths=[],
+            skipped_paths=skipped_paths,
+            conflict_paths=conflict_paths,
+        )
+
+    # Persist the merged input
+    if si:
+        si.input_json = json.dumps(current_input, ensure_ascii=False)
+        si.saved_by = current_user.id
+        si.saved_at = datetime.now(timezone.utc)
+    else:
+        si = SectionInput(
+            id=str(uuid.uuid4()),
+            report_id=report_id,
+            section_no=section_no,
+            input_json=json.dumps(current_input, ensure_ascii=False),
+            saved_by=current_user.id,
+        )
+        db.add(si)
+
+    await db.flush()
+
+    await write_event(
+        db,
+        action="section_input.facts_applied",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="section_input",
+        target_id=f"{report_id}/{section_no}",
+        after=(
+            f"applied={len(applied_paths)} mode={payload.apply_mode} "
+            f"paths={','.join(applied_paths[:5])}{'...' if len(applied_paths)>5 else ''}"
+        ),
+    )
+
+    logger.info(
+        "apply_field_suggestions: report=%s section=%d applied=%d skipped=%d conflicts=%d mode=%s user=%s",
+        report_id, section_no, len(applied_paths), len(skipped_paths),
+        len(conflict_paths), payload.apply_mode, current_user.id,
+    )
+
+    return ApplySuggestionsResponse(
+        applied_count=len(applied_paths),
+        skipped_count=len(skipped_paths),
+        conflict_count=len(conflict_paths),
+        applied_paths=applied_paths,
+        skipped_paths=skipped_paths,
+        conflict_paths=conflict_paths,
+    )
