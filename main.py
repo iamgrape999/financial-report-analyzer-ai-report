@@ -226,7 +226,10 @@ async def root():
 
 @app.get("/app", include_in_schema=False)
 async def ui():
-    return FileResponse("static/index.html")
+    return FileResponse(
+        "static/index.html",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @app.get("/health", tags=["health"])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import logging
 import time
 from pathlib import Path
@@ -79,13 +80,21 @@ def retrieve_evidence(
     if not all_texts:
         return []
 
-    all_chunks: list[str] = []
+    # Bounded min-heap: keeps only top max_chunks scored chunks in memory.
+    # (score, idx, chunk) — idx breaks score ties without comparing chunk strings.
+    heap: list[tuple[int, int, str]] = []
+    idx = 0
     for text in all_texts:
-        all_chunks.extend(_chunk_text(text))
+        for chunk in _chunk_text(text):
+            score = _score_chunk(chunk, keywords)
+            if score > 0:
+                if len(heap) < max_chunks:
+                    heapq.heappush(heap, (score, idx, chunk))
+                elif score > heap[0][0]:
+                    heapq.heapreplace(heap, (score, idx, chunk))
+                idx += 1
 
-    scored = [(chunk, _score_chunk(chunk, keywords)) for chunk in all_chunks]
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return [chunk for chunk, score in scored[:max_chunks] if score > 0]
+    return [chunk for _, _, chunk in sorted(heap, key=lambda x: -x[0])]
 
 
 # ── Text quality check ────────────────────────────────────────────────────────
@@ -411,6 +420,24 @@ def _split_pdf_pages(pdf_bytes: bytes) -> list[bytes]:
         return []
 
 
+def _iter_pdf_pages(pdf_bytes: bytes):
+    """Yield single-page PDF byte blobs one at a time (memory-efficient alternative to _split_pdf_pages)."""
+    try:
+        import io
+        from pypdf import PdfReader, PdfWriter
+
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        for page in reader.pages:
+            writer = PdfWriter()
+            writer.add_page(page)
+            buf = io.BytesIO()
+            writer.write(buf)
+            yield buf.getvalue()
+    except Exception as e:
+        logger.warning("[OCR] _iter_pdf_pages failed: %s — stopping iteration", e)
+        return
+
+
 # Gemini inline PDF upload limit per request
 _GEMINI_PDF_SIZE_LIMIT = 20 * 1024 * 1024  # 20 MB
 # Page count threshold: PDFs larger than this go through page-by-page VLM
@@ -487,10 +514,17 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
             else:
                 return result
 
-        # Page-by-page path: split into single-page PDFs, OCR each, concatenate
-        page_blobs = _split_pdf_pages(pdf_bytes)
-        if not page_blobs:
-            # pypdf split failed — fall back to capped single-call
+        # Page-by-page path: iterate pages one at a time to avoid holding all blobs in memory.
+        # Count pages first with PdfReader (no blob allocation), then stream via _iter_pdf_pages.
+        try:
+            import io as _io2
+            from pypdf import PdfReader as _PR2
+            n_pages = len(_PR2(_io2.BytesIO(pdf_bytes)).pages)
+        except Exception:
+            n_pages = 0
+
+        if n_pages == 0:
+            # pypdf can't read the file — fall back to capped single-call
             data = pdf_bytes[:_GEMINI_PDF_SIZE_LIMIT]
             logger.info("[OCR] page split failed — fallback single-call sending_kb=%d", len(data) // 1024)
             response = client.models.generate_content(
@@ -503,14 +537,15 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
             )
             return response.text or ""
 
-        n_pages = len(page_blobs)
-        capped_pages = page_blobs[:max_pages]
+        pages_to_process = min(n_pages, max_pages)
         logger.info(
             "[OCR] page-by-page OCR: total_pages=%d processing=%d model=%s",
-            n_pages, len(capped_pages), GEMINI_OCR_MODEL,
+            n_pages, pages_to_process, GEMINI_OCR_MODEL,
         )
         page_texts: list[str] = []
-        for page_idx, page_blob in enumerate(capped_pages):
+        for page_idx, page_blob in enumerate(_iter_pdf_pages(pdf_bytes)):
+            if page_idx >= max_pages:
+                break
             try:
                 page_response = client.models.generate_content(
                     model=GEMINI_OCR_MODEL,
@@ -523,7 +558,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
                 page_text = page_response.text or ""
                 page_texts.append(page_text)
                 if page_idx % 10 == 0:
-                    logger.info("[OCR] page-by-page: processed %d/%d pages", page_idx + 1, len(capped_pages))
+                    logger.info("[OCR] page-by-page: processed %d/%d pages", page_idx + 1, pages_to_process)
             except Exception as page_err:
                 logger.warning("[OCR] page-by-page: page %d failed: %s", page_idx + 1, page_err)
                 page_texts.append("")  # preserve page numbering
@@ -534,7 +569,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
         logger.info(
             "[OCR] page-by-page OCR complete: total_pages=%d elapsed=%.0fms chars=%d "
             "meaningful=%d ratio=%.1f%% sample=%r",
-            len(capped_pages), elapsed, stats["chars"], stats["meaningful"],
+            pages_to_process, elapsed, stats["chars"], stats["meaningful"],
             stats["ratio_pct"], stats["sample"][:200],
         )
         if n_pages > max_pages:
@@ -602,9 +637,15 @@ async def extract_text_from_scanned_pdf_vision_async(
             logger.warning("[OCR-ASYNC] single-call failed: %s — trying page split", e)
             use_page_split = True
 
-    # Page-by-page path
-    page_blobs = _split_pdf_pages(pdf_bytes)
-    if not page_blobs:
+    # Page-by-page path: count pages first (no blob allocation), then iterate via generator.
+    try:
+        import io as _io2
+        from pypdf import PdfReader as _PR2
+        n_pages = len(_PR2(_io2.BytesIO(pdf_bytes)).pages)
+    except Exception:
+        n_pages = 0
+
+    if n_pages == 0:
         # Fallback: send capped single call
         data = pdf_bytes[:_GEMINI_PDF_SIZE_LIMIT]
         try:
@@ -621,13 +662,14 @@ async def extract_text_from_scanned_pdf_vision_async(
             logger.warning("[OCR-ASYNC] fallback call failed: %s", e)
             return ""
 
-    n_pages = len(page_blobs)
-    capped = page_blobs[:max_pages]
-    logger.info("[OCR-ASYNC] page-by-page: total=%d processing=%d", n_pages, len(capped))
+    pages_to_process = min(n_pages, max_pages)
+    logger.info("[OCR-ASYNC] page-by-page: total=%d processing=%d", n_pages, pages_to_process)
 
     page_texts: list[str] = []
     chars_total = 0
-    for idx, blob in enumerate(capped):
+    for idx, blob in enumerate(_iter_pdf_pages(pdf_bytes)):
+        if idx >= max_pages:
+            break
         try:
             response = await client.aio.models.generate_content(
                 model=GEMINI_OCR_MODEL,
@@ -645,7 +687,7 @@ async def extract_text_from_scanned_pdf_vision_async(
             page_texts.append("")
 
         if on_progress:
-            on_progress(idx + 1, len(capped), chars_total)
+            on_progress(idx + 1, pages_to_process, chars_total)
 
     result = "\n\n".join(t for t in page_texts if t.strip())
     elapsed = (time.perf_counter() - t0) * 1000
