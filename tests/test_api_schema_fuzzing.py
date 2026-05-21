@@ -5,9 +5,12 @@ Fuzz all non-streaming FastAPI endpoints via their OpenAPI schema.
 
 T1 — Generic schema fuzz   : every endpoint < 500 for any Hypothesis-generated input
 T2 — Path injection         : malformed report_id (SQL inj, path traversal, XSS, …)
+                              — covers GET *and* mutation (PUT) endpoints
 T3 — section_no out-of-range: 0, -1, 11, 999, "abc"
-T4 — Concurrent writes      : 5 simultaneous PUTs, no 5xx, at least one 200
-T5 — Oversized payload      : 600 KB body value must return 4xx, not 5xx
+T4 — Concurrent writes      : 5 simultaneous PUTs, no 5xx, at least one 200,
+                               plus data-integrity check after the race
+T5 — Oversized payload      : 600 KB input_json must be rejected (4xx), not accepted
+T6 — Authorization / RBAC   : 401 without token; analyst cannot read/approve admin report
 
 Run:
     python -m pytest tests/test_api_schema_fuzzing.py -v
@@ -43,15 +46,37 @@ schema = schemathesis.openapi.from_asgi("/openapi.json", app).exclude(
 )
 
 
-# ── Auth token fixture ────────────────────────────────────────────────────────
+# ── Auth token fixtures ───────────────────────────────────────────────────────
 # pytest-asyncio (asyncio_mode=auto) keeps an event loop running for the whole
 # test session.  Calling loop.run_until_complete() from inside that context
-# raises "This event loop is already running."  Running the login coroutine in
-# a daemon thread gives it its own isolated event loop.
+# raises "This event loop is already running."  Running login coroutines in
+# daemon threads gives each its own isolated event loop.
+
+def _run_in_thread(coro_factory):
+    """Run an async factory in an isolated thread event loop; return the result."""
+    result: list = []
+    exc: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            result.append(asyncio.run(coro_factory()))
+        except BaseException as e:  # noqa: BLE001
+            exc.append(e)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=30)
+
+    if exc:
+        raise exc[0]
+    if not result:
+        raise RuntimeError("_run_in_thread timed out after 30 s")
+    return result[0]
+
 
 @pytest.fixture(scope="module")
 def auth_token() -> str:
-    """Return a JWT access token, obtained once per module via a thread-local loop."""
+    """Return a JWT access token for admin, obtained once per module."""
     async def _login() -> str:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -63,24 +88,36 @@ def auth_token() -> str:
             assert r.status_code == 200, f"Auth setup failed ({r.status_code}): {r.text}"
             return r.json()["access_token"]
 
-    result: list[str] = []
-    exc: list[BaseException] = []
+    return _run_in_thread(_login)
 
-    def _run() -> None:
-        try:
-            result.append(asyncio.run(_login()))
-        except BaseException as e:  # noqa: BLE001
-            exc.append(e)
 
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    t.join(timeout=30)
+@pytest.fixture(scope="module")
+def analyst_token(auth_token: str) -> str:
+    """Return a JWT access token for a freshly-created analyst user."""
+    analyst_email = f"fuzz_{uuid.uuid4().hex[:10]}@test.local"
 
-    if exc:
-        raise exc[0]
-    if not result:
-        raise RuntimeError("auth_token fixture timed out after 30 s")
-    return result[0]
+    async def _create() -> str:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                f"{BASE}/auth/register",
+                headers={"Authorization": f"Bearer {auth_token}"},
+                json={"email": analyst_email, "password": "Fuzz@nalyst1", "role": "analyst"},
+            )
+            assert r.status_code == 201, (
+                f"Analyst registration failed ({r.status_code}): {r.text}"
+            )
+            r2 = await client.post(
+                f"{BASE}/auth/login",
+                data={"username": analyst_email, "password": "Fuzz@nalyst1"},
+            )
+            assert r2.status_code == 200, (
+                f"Analyst login failed ({r2.status_code}): {r2.text}"
+            )
+            return r2.json()["access_token"]
+
+    return _run_in_thread(_create)
 
 
 # ── Gemini mock ───────────────────────────────────────────────────────────────
@@ -121,7 +158,7 @@ def test_no_server_errors(case, auth_token):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# T2 — report_id path injection / special characters
+# T2 — report_id path injection / special characters (GET + mutation endpoints)
 # ════════════════════════════════════════════════════════════════════════════════
 
 _BAD_IDS = [
@@ -139,21 +176,29 @@ _BAD_IDS = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_id", _BAD_IDS)
 async def test_report_id_path_injection_no_500(bad_id, auth_token):
-    """Malformed report_id in path must return 4xx — never 5xx."""
+    """Malformed report_id in path must return 4xx — never 5xx (GET and mutation endpoints)."""
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         hdrs = {"Authorization": f"Bearer {auth_token}"}
         endpoints = [
-            ("GET", f"{BASE}/reports/{bad_id}"),
-            ("GET", f"{BASE}/reports/{bad_id}/inputs/1"),
-            ("GET", f"{BASE}/reports/{bad_id}/facts"),
-            ("GET", f"{BASE}/reports/{bad_id}/blocks"),
-            ("GET", f"{BASE}/reports/{bad_id}/audit"),
+            # Read endpoints
+            ("GET",    f"{BASE}/reports/{bad_id}",           None),
+            ("GET",    f"{BASE}/reports/{bad_id}/inputs/1",  None),
+            ("GET",    f"{BASE}/reports/{bad_id}/facts",     None),
+            ("GET",    f"{BASE}/reports/{bad_id}/blocks",    None),
+            ("GET",    f"{BASE}/reports/{bad_id}/audit",     None),
+            # Mutation endpoints — must also be injection-safe
+            ("PUT",    f"{BASE}/reports/{bad_id}/inputs/1",
+                {"section_no": 1, "input_json": {"metadata": {"purpose_text": "safe"}}}),
+            ("DELETE", f"{BASE}/reports/{bad_id}",           None),
         ]
-        for method, url in endpoints:
+        for method, url, body in endpoints:
+            kwargs: dict = {"headers": hdrs}
+            if body is not None:
+                kwargs["json"] = body
             try:
-                r = await client.request(method, url, headers=hdrs)
+                r = await client.request(method, url, **kwargs)
             except InvalidURL:
                 # Null / control bytes in URL are rejected by the HTTP client
                 # before reaching the server — safer than any server response.
@@ -183,9 +228,16 @@ async def test_section_no_out_of_range_no_500(bad_sec, auth_token):
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         hdrs = {"Authorization": f"Bearer {auth_token}"}
+        # For PUT, send a correctly structured body with the bad section_no so Pydantic
+        # validates the out-of-range value rather than returning 422 for a missing field.
+        put_body = (
+            {"section_no": bad_sec, "input_json": {}}
+            if isinstance(bad_sec, int)
+            else {"section_no": 1, "input_json": {}}  # non-int triggers 422 from URL param
+        )
         checks: list[tuple[str, str, dict | None]] = [
-            ("GET",  f"{BASE}/reports/{rid}/inputs/{bad_sec}",       None),
-            ("PUT",  f"{BASE}/reports/{rid}/inputs/{bad_sec}",       {"inputs": {}}),
+            ("GET",  f"{BASE}/reports/{rid}/inputs/{bad_sec}",          None),
+            ("PUT",  f"{BASE}/reports/{rid}/inputs/{bad_sec}",          put_body),
             ("GET",  f"{BASE}/reports/{rid}/sections/{bad_sec}/output", None),
             ("GET",  f"{BASE}/reports/{rid}/sections/{bad_sec}/blocks", None),
         ]
@@ -208,6 +260,7 @@ async def test_concurrent_section_writes_no_500(auth_token):
     """
     5 simultaneous PUT requests to the same section must not produce 5xx.
     Expected outcomes: 200 (writer wins) or 409 (optimistic lock conflict).
+    After the race, a GET must return valid data from one of the writers.
     """
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -247,24 +300,133 @@ async def test_concurrent_section_writes_no_500(auth_token):
             f"Expected at least one 200 from concurrent writes; got: {codes}"
         )
 
+        # ── Data integrity: exactly one writer must have persisted valid data ──
+        r_read = await client.get(f"{BASE}/reports/{rid}/inputs/4", headers=hdrs)
+        assert r_read.status_code == 200, (
+            f"GET /inputs/4 after concurrent writes → {r_read.status_code}: {r_read.text[:200]}"
+        )
+        saved = r_read.json()
+        assert "input_json" in saved, "Response missing 'input_json' field"
+        assert "corporate_background" in saved["input_json"], (
+            "Saved input_json should contain corporate_background written by one of the 5 concurrent writers"
+        )
+
 
 # ════════════════════════════════════════════════════════════════════════════════
-# T5 — Oversized JSON payload (600 KB string value)
+# T5 — Oversized JSON payload (600 KB string value must be rejected, not accepted)
 # ════════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_oversized_input_payload_no_500(auth_token):
-    """A 600 KB string value in a PUT body must return 4xx, not crash the server."""
-    rid = str(uuid.uuid4())
+async def test_oversized_input_payload_rejected(auth_token):
+    """
+    A 600 KB string value in input_json must be actively rejected (4xx).
+    The test creates a real report so the server fully processes the request —
+    a 404 'report not found' would be a false pass.
+    """
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         hdrs = {"Authorization": f"Bearer {auth_token}"}
+
+        # Create a real report so the endpoint reaches payload validation
+        r = await client.post(
+            f"{BASE}/reports",
+            headers=hdrs,
+            json={"borrower_name": "FuzzOversize Ltd", "report_type": "new_deal"},
+        )
+        assert r.status_code == 201, f"Report creation failed: {r.text}"
+        rid = r.json()["id"]
+
         r = await client.put(
             f"{BASE}/reports/{rid}/inputs/1",
             headers=hdrs,
-            json={"metadata": {"purpose_text": "X" * 600_000}},
+            json={
+                "section_no": 1,
+                "input_json": {"metadata": {"purpose_text": "X" * 600_000}},
+            },
         )
+        # Must not crash the server
         assert r.status_code < 500, (
-            f"Oversized payload → {r.status_code}: {r.text[:200]}"
+            f"Oversized payload crashed the server → {r.status_code}: {r.text[:200]}"
+        )
+        # Must actively reject the oversized payload — NOT silently accept it
+        assert r.status_code >= 400, (
+            f"Oversized 600 KB input_json was silently accepted (status={r.status_code}). "
+            "The server must enforce a payload size limit."
+        )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# T6 — Authorization / RBAC coverage
+# ════════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path", [
+    ("GET",  f"{BASE}/reports"),
+    ("POST", f"{BASE}/reports"),
+    ("GET",  f"{BASE}/reports/nonexistent-report-id"),
+])
+async def test_unauthenticated_returns_401(method, path):
+    """Core report endpoints must return 401 when Bearer token is absent."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.request(
+            method, path, json={} if method == "POST" else None
+        )
+        assert r.status_code == 401, (
+            f"{method} {path} without auth → {r.status_code} (expected 401)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_analyst_cannot_read_admin_report(analyst_token: str, auth_token: str):
+    """A report created by admin must not be readable by an unrelated analyst (RBAC ownership)."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        # Admin creates a report
+        r = await client.post(
+            f"{BASE}/reports",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json={"borrower_name": "RBAC Test Corp", "report_type": "new_deal"},
+        )
+        assert r.status_code == 201, f"Admin report creation failed: {r.text}"
+        rid = r.json()["id"]
+
+        # Unrelated analyst tries to read it — must be refused
+        r2 = await client.get(
+            f"{BASE}/reports/{rid}",
+            headers={"Authorization": f"Bearer {analyst_token}"},
+        )
+        assert r2.status_code == 403, (
+            f"Analyst could read admin's report → {r2.status_code}: {r2.text[:200]}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_analyst_cannot_approve_report(analyst_token: str, auth_token: str):
+    """Approving a report requires approver/admin role; analyst must receive 403."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        # Admin creates a report
+        r = await client.post(
+            f"{BASE}/reports",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json={"borrower_name": "RBAC Approval Test", "report_type": "new_deal"},
+        )
+        assert r.status_code == 201, f"Admin report creation failed: {r.text}"
+        rid = r.json()["id"]
+
+        # Analyst attempts to set status = "approved"
+        # The role check fires before the report ownership check, so this
+        # must return 403 even though analyst cannot see the report either.
+        r2 = await client.patch(
+            f"{BASE}/reports/{rid}/status",
+            headers={"Authorization": f"Bearer {analyst_token}"},
+            json={"status": "approved"},
+        )
+        assert r2.status_code == 403, (
+            f"Analyst could approve report → {r2.status_code}: {r2.text[:200]}"
         )

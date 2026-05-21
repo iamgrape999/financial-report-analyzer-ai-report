@@ -1,10 +1,11 @@
 """Pydantic request/response schemas for the Credit Report API."""
 from __future__ import annotations
 
+import json as _json
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoginRequest(BaseModel):
@@ -66,6 +67,13 @@ class UpdateReportStatusRequest(BaseModel):
 class SectionInputPayload(BaseModel):
     section_no: int = Field(..., ge=1, le=11)
     input_json: dict[str, Any]
+
+    @field_validator("input_json")
+    @classmethod
+    def _check_input_json_size(cls, v: dict) -> dict:
+        if len(_json.dumps(v)) > 524_288:  # 512 KB
+            raise ValueError("input_json exceeds 512 KB limit")
+        return v
 
 
 class SectionInputResponse(BaseModel):
