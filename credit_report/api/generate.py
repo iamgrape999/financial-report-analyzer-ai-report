@@ -789,6 +789,7 @@ async def etl_document_stream(
                     _flatten_section5 as _fs5,
                     _flatten_section6 as _fs6,
                     _flatten_section8 as _fs8,
+                    _flatten_section10 as _fs10,
                 )
                 if 3 in merged and isinstance(merged[3], dict):
                     merged[3] = _fs3(merged[3])
@@ -798,6 +799,8 @@ async def etl_document_stream(
                     merged[6] = _fs6(merged[6])
                 if 8 in merged and isinstance(merged[8], dict):
                     merged[8] = _fs8(merged[8])
+                if 10 in merged and isinstance(merged[10], dict):
+                    merged[10] = _fs10(merged[10])
 
                 # Auto-register CanonicalFacts
                 facts_registered = 0

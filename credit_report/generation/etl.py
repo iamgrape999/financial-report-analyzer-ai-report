@@ -1391,6 +1391,8 @@ async def _etl_document_chunked(
         merged[6] = _flatten_section6(merged[6])
     if 8 in merged and isinstance(merged[8], dict):
         merged[8] = _flatten_section8(merged[8])
+    if 10 in merged and isinstance(merged[10], dict):
+        merged[10] = _flatten_section10(merged[10])
     return merged
 
 
@@ -1463,6 +1465,8 @@ async def etl_document(
             result[6] = _flatten_section6(result[6])
         if 8 in result and isinstance(result[8], dict):
             result[8] = _flatten_section8(result[8])
+        if 10 in result and isinstance(result[10], dict):
+            result[10] = _flatten_section10(result[10])
         total_ms = (time.perf_counter() - t_start) * 1000
         logger.info(
             "[ETL] etl_document: COMPLETE doc_type=%s total_elapsed=%.0fms "
@@ -1759,6 +1763,68 @@ def _flatten_section6(sec6: dict) -> dict:
     return sec6
 
 
+def _flatten_section10(sec10: dict) -> dict:
+    """Flatten §10 array/nested structures to flat keys expected by FIELD_DEFS.
+
+    1. 10A_group_exposure.group_limit_sub_table.{approved,proposed} → direct keys
+    2. 10C_projections.base_case_dscr[i].dscr → base_dscr_fy_{1,2,3}
+    3. 10C_projections.worse_case_summary[is_dscr].value → worse_dscr_fy_1
+    4. 10C_projections.base_case_pl revenue row year-1 → base_revenue_fy_1
+    5. 10C_projections.worse_case_summary revenue row → worse_revenue_fy_1
+    """
+    result = dict(sec10)
+
+    # ── 10A group exposure sub-table hoisting ──────────────────────────────────
+    ga = result.get("10A_group_exposure")
+    if isinstance(ga, dict):
+        flat_ga = dict(ga)
+        sub = ga.get("group_limit_sub_table") or {}
+        if isinstance(sub, dict):
+            if "approved_group_limit_usd_m" not in flat_ga and sub.get("approved_group_limit_usd_m") is not None:
+                flat_ga["approved_group_limit_usd_m"] = sub["approved_group_limit_usd_m"]
+            if "proposed_exposure_usd_m" not in flat_ga and sub.get("proposed_total_exposure_usd_m") is not None:
+                flat_ga["proposed_exposure_usd_m"] = sub["proposed_total_exposure_usd_m"]
+        result["10A_group_exposure"] = flat_ga
+
+    # ── 10C projections — scalar DSCR/revenue from arrays ─────────────────────
+    pr = result.get("10C_projections")
+    if isinstance(pr, dict):
+        flat_pr = dict(pr)
+
+        dscr_rows = pr.get("base_case_dscr") or []
+        for i, row in enumerate(dscr_rows[:3], 1):
+            if isinstance(row, dict):
+                key = f"base_dscr_fy_{i}"
+                if key not in flat_pr and row.get("dscr") is not None:
+                    flat_pr[key] = row["dscr"]
+                # Capture year label of first row to look up base P&L revenue
+                if i == 1:
+                    yr_label = str(row.get("year_label") or "").strip()
+                    if yr_label:
+                        for pl_row in pr.get("base_case_pl") or []:
+                            if isinstance(pl_row, dict) and pl_row.get("item", "").lower() in (
+                                "revenue", "net revenue", "total revenue"
+                            ):
+                                rev_val = pl_row.get(yr_label)
+                                if rev_val is not None and "base_revenue_fy_1" not in flat_pr:
+                                    flat_pr["base_revenue_fy_1"] = rev_val
+                                break
+
+        worse_rows = pr.get("worse_case_summary") or []
+        for row in worse_rows:
+            if not isinstance(row, dict):
+                continue
+            item_lower = str(row.get("item") or "").lower()
+            if row.get("is_dscr") and "worse_dscr_fy_1" not in flat_pr and row.get("value") is not None:
+                flat_pr["worse_dscr_fy_1"] = row["value"]
+            elif item_lower in ("revenue", "net revenue") and "worse_revenue_fy_1" not in flat_pr and row.get("value") is not None:
+                flat_pr["worse_revenue_fy_1"] = row["value"]
+
+        result["10C_projections"] = flat_pr
+
+    return result
+
+
 _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     # §1 — Credit Facility (facility_summary totals)
     (1, "facility_summary", "totals.total_credit_limit_usd_m", "credit_limit_usd_m",   "mn"),
@@ -1876,6 +1942,14 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (9, "9C_recommendation", "tenor_years",            "tenor_years",           None),
     (9, "9C_recommendation", "balloon_ltv_pct",        "ltv_at_maturity_pct",   None),
     (9, "9C_recommendation", "margin_bps",             "margin_bps",            None),
+
+    # §10 — Appendix (flattened by _flatten_section10 before this map runs)
+    (10, "10A_group_exposure", "approved_group_limit_usd_m", "approved_group_limit_usd_m", "mn"),
+    (10, "10A_group_exposure", "proposed_exposure_usd_m",    "group_utilization_usd_m",    "mn"),
+    (10, "10B_fleet_growth",   "cagr_pct",                   "fleet_cagr_pct",             None),
+    (10, "10C_projections",    "base_dscr_fy_1",             "dscr_base_case",             None),
+    (10, "10C_projections",    "worse_dscr_fy_1",            "dscr_stress_case",           None),
+    (10, "10C_projections",    "freight_rate_drop_pct",      "stress_freight_rate_drop_pct", None),
 ]
 
 
