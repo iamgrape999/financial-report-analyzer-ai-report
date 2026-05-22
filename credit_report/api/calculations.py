@@ -79,7 +79,7 @@ async def _upsert_calculation(
             CalculationResult.metric_name == metric_name,
         )
     )
-    row = existing.scalar_one_or_none()
+    row = existing.scalars().first()
     if row:
         row.value = value
         row.formula = formula
