@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
+_REPORTS_ROOT_RESOLVED: Path = CREDIT_REPORTS_ROOT.resolve()
+
+
+def _safe_report_dir(report_id: str) -> Path:
+    """Resolve and validate report directory to prevent path traversal attacks."""
+    candidate = (CREDIT_REPORTS_ROOT / report_id).resolve()
+    if not str(candidate).startswith(str(_REPORTS_ROOT_RESOLVED) + "/") and candidate != _REPORTS_ROOT_RESOLVED:
+        raise ValueError(f"Invalid report_id: path traversal attempt detected")
+    return candidate
+
 
 def _chunk_text(text: str) -> list[str]:
     """Split text into overlapping chunks of approximately CHUNK_SIZE characters."""
@@ -34,14 +44,14 @@ def _score_chunk(chunk: str, keywords: list[str]) -> int:
 
 def save_document_text(report_id: str, doc_id: str, text: str) -> None:
     """Persist extracted document text to CREDIT_REPORTS_ROOT/{report_id}/{doc_id}.txt."""
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     doc_dir.mkdir(parents=True, exist_ok=True)
     (doc_dir / f"{doc_id}.txt").write_text(text, encoding="utf-8")
 
 
 def save_document_binary(report_id: str, doc_id: str, file_bytes: bytes, filename: str) -> None:
     """Persist the original uploaded file bytes so ETL can be re-run without re-uploading."""
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     doc_dir.mkdir(parents=True, exist_ok=True)
     (doc_dir / f"{doc_id}.bin").write_bytes(file_bytes)
     (doc_dir / f"{doc_id}.fname").write_text(filename, encoding="utf-8")
@@ -49,7 +59,7 @@ def save_document_binary(report_id: str, doc_id: str, file_bytes: bytes, filenam
 
 def load_document_texts(report_id: str) -> list[str]:
     """Load all extracted document texts for a report from the filesystem."""
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     if not doc_dir.exists():
         return []
     texts: list[str] = []

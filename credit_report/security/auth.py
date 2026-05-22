@@ -58,6 +58,15 @@ def _decode_jwt(token: str) -> dict:
     if len(parts) != 3:
         raise JWTError("Malformed token")
     header_b64, payload_b64, sig_b64 = parts
+    # Validate header before signature check to prevent algorithm confusion attacks.
+    try:
+        header = json.loads(_b64url_decode(header_b64))
+    except Exception:
+        raise JWTError("Malformed token header")
+    if header.get("alg") != "HS256":
+        raise JWTError("Unsupported algorithm")
+    if header.get("typ") != "JWT":
+        raise JWTError("Unsupported token type")
     expected_sig = _sign(header_b64, payload_b64)
     if not hmac.compare_digest(expected_sig, sig_b64):
         raise JWTError("Invalid signature")

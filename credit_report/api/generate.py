@@ -468,9 +468,8 @@ async def etl_document_endpoint(
     Returns extracted field values per section so the UI can show them and let the
     analyst review/save them as section inputs.
     """
-    from credit_report.generation.evidence import load_document_texts, save_document_text
+    from credit_report.generation.evidence import load_document_texts, save_document_text, _safe_report_dir
     from pathlib import Path
-    from credit_report.config import CREDIT_REPORTS_ROOT
 
     report = await _require_report(db, report_id)
     _assert_can_view(report, current_user)
@@ -487,7 +486,7 @@ async def etl_document_endpoint(
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Load extracted text — if .txt is missing, re-extract from stored binary (server restart recovery)
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     txt_path = doc_dir / f"{doc_id}.txt"
     if not txt_path.exists():
         bin_path = doc_dir / f"{doc_id}.bin"
@@ -604,7 +603,7 @@ async def etl_document_stream(
     Streaming ETL: runs OCR + extraction as a background task and returns
     a task_id.  Connect to GET .../etl/stream/{task_id} for SSE progress.
     """
-    from credit_report.config import CREDIT_REPORTS_ROOT
+    from credit_report.generation.evidence import _safe_report_dir
     from pathlib import Path
 
     report = await _require_report(db, report_id)
@@ -627,7 +626,7 @@ async def etl_document_stream(
     # Capture values needed in background task
     user_id = current_user.id
     doc_type = doc.document_type or "other"
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     txt_path = doc_dir / f"{doc_id}.txt"
     bin_path = doc_dir / f"{doc_id}.bin"
     fname_path = doc_dir / f"{doc_id}.fname"
