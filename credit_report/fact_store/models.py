@@ -26,6 +26,11 @@ FACT_STATES = (
     "user_overridden",
     "approved",
     "deprecated",
+    # ETL found the field in the document but could not parse it to a numeric value
+    # (e.g. Gemini returned "N/A", "nil", or a malformed string).  This is distinct
+    # from a missing field (no CanonicalFact created at all) and must not be confused
+    # with a valid null (company genuinely has no data for this metric).
+    "parse_failed",
 )
 
 # Source types ordered by priority (lower index = higher trust)

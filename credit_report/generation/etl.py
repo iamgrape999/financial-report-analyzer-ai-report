@@ -2615,13 +2615,36 @@ def build_canonical_facts_from_etl(
             fact_currency = resolved_currency
             fact_unit = unit
 
-        if num_val is None:
-            continue
-
         dedup_key = f"{metric_name}|{resolved_entity}|{resolved_period}"
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
+
+        if num_val is None:
+            # Field was present in the document but could not be parsed as a number.
+            # Store as a parse_failed text fact so analysts can see Gemini returned
+            # something (e.g. "N/A", "nil") rather than silently dropping the field.
+            # This distinguishes "document has no data" (no fact at all) from
+            # "ETL could not parse the value" (parse_failed fact with value_text).
+            text_val = str(raw_val).strip() if isinstance(raw_val, str) else None
+            if not text_val or text_val.lower() in ("null", "none", ""):
+                continue
+            facts.append({
+                "report_id": report_id,
+                "metric_name": metric_name,
+                "entity": resolved_entity,
+                "period": resolved_period,
+                "value": None,
+                "value_text": text_val[:255],
+                "currency": None,
+                "unit": fact_unit or "",
+                "source_type": "pdf_extraction",
+                "source_priority": 3,
+                "source_evidence_id": doc_id,
+                "source_section_no": sec_no,
+                "state": "parse_failed",
+            })
+            continue
 
         facts.append({
             "report_id": report_id,
@@ -2639,8 +2662,10 @@ def build_canonical_facts_from_etl(
             "state": "extracted",
         })
 
+    facts_extracted = sum(1 for f in facts if f["state"] == "extracted")
+    facts_parse_failed = sum(1 for f in facts if f["state"] == "parse_failed")
     logger.info(
-        "[ETL] build_canonical_facts_from_etl: report=%s doc=%s facts_found=%d",
-        report_id, doc_id, len(facts),
+        "[ETL] build_canonical_facts_from_etl: report=%s doc=%s facts_extracted=%d parse_failed=%d",
+        report_id, doc_id, facts_extracted, facts_parse_failed,
     )
     return facts

@@ -28,14 +28,29 @@ def _safe_report_dir(report_id: str) -> Path:
 
 
 def _chunk_text(text: str) -> list[str]:
-    """Split text into overlapping chunks of approximately CHUNK_SIZE characters."""
+    """Split text into overlapping chunks, snapping to line boundaries where possible.
+
+    Snapping to newlines prevents Markdown table rows from being split mid-row, which
+    would cause Gemini to receive truncated column values without their header context.
+    """
+    if not text:
+        return []
     chunks: list[str] = []
     i = 0
     while i < len(text):
-        chunk = text[i : i + CHUNK_SIZE].strip()
+        end = min(i + CHUNK_SIZE, len(text))
+        # Snap to last newline within the overlap window to avoid mid-row splits
+        if end < len(text):
+            nl = text.rfind("\n", max(i + 1, end - CHUNK_OVERLAP), end)
+            if nl > i:
+                end = nl + 1
+        chunk = text[i:end].strip()
         if chunk:
             chunks.append(chunk)
-        i += CHUNK_SIZE - CHUNK_OVERLAP
+        # Advance by (chunk_length - overlap); if chunk is shorter than overlap,
+        # advance to end to avoid infinite loop on very short texts.
+        step = (end - i) - CHUNK_OVERLAP
+        i += step if step > 0 else (end - i)
     return chunks
 
 
@@ -264,10 +279,16 @@ def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
                         if not table or not table[0]:
                             continue
                         headers = [str(c).strip() if c is not None else "" for c in table[0]]
-                        parts.append(f"\n[Page {page_no} Table]\n")
+                        col_context = " | ".join(h for h in headers if h)
+                        # Structured table opener — survives chunk splits downstream
+                        parts.append(f"\n[TABLE page={page_no} columns={col_context}]\n")
                         parts.append("| " + " | ".join(headers) + " |")
                         parts.append("| " + " | ".join(["---"] * len(headers)) + " |")
-                        for row in table[1:]:
+                        for row_idx, row in enumerate(table[1:]):
+                            # Repeat column context every 15 data rows so that even when
+                            # Gemini receives a mid-table chunk, it knows the column mapping.
+                            if row_idx > 0 and row_idx % 15 == 0:
+                                parts.append(f"<!-- columns: {col_context} -->")
                             cells = [str(c).strip() if c is not None else "" for c in row]
                             parts.append("| " + " | ".join(cells) + " |")
                 if page_text.strip():
