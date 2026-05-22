@@ -18,31 +18,38 @@ async def save_blocks(
     blocks: list[dict],
     cells: list[dict],
 ) -> None:
-    """Persist Block AST dicts to DB (upsert by block_id).
+    """Persist Block AST dicts to DB (delete-then-insert by section).
 
-    Cells are replaced atomically: existing cells for any block being re-processed
-    are deleted before inserting the fresh set. This prevents duplicate TableCells
-    when a section is regenerated.
+    Deletes all existing blocks for the section before inserting fresh ones.
+    This prevents orphaned blocks from previous generations that had a different
+    block count or structure — the root cause of 100+ block duplication.
     """
-    for bd in blocks:
-        existing = await db.get(ReportBlock, bd["id"])
-        if existing:
-            # Update existing block
-            for k, v in bd.items():
-                if k != "id":
-                    setattr(existing, k, v)
-        else:
-            db.add(ReportBlock(**bd))
+    if not blocks:
+        return
 
-    # Flush so new ReportBlock rows exist in DB before FK-constrained TableCell inserts
-    await db.flush()
+    report_id = blocks[0]["report_id"]
+    section_no = blocks[0]["section_no"]
 
-    # Delete stale cells before inserting new ones (prevents duplicates on regeneration)
-    block_ids_with_cells = {c["block_id"] for c in cells}
-    if block_ids_with_cells:
-        await db.execute(
-            sql_delete(TableCell).where(TableCell.block_id.in_(block_ids_with_cells))
+    # Find all existing blocks for this section
+    old_ids_result = await db.execute(
+        select(ReportBlock.id).where(
+            ReportBlock.report_id == report_id,
+            ReportBlock.section_no == section_no,
         )
+    )
+    old_ids = list(old_ids_result.scalars())
+    if old_ids:
+        # Delete dependents first (no DB-level cascade on these FKs)
+        await db.execute(sql_delete(TableCell).where(TableCell.block_id.in_(old_ids)))
+        await db.execute(sql_delete(BlockVersion).where(BlockVersion.block_id.in_(old_ids)))
+        await db.execute(sql_delete(ReportBlock).where(ReportBlock.id.in_(old_ids)))
+
+    # Insert the fresh block set
+    for bd in blocks:
+        db.add(ReportBlock(**bd))
+
+    # Flush so ReportBlock PKs exist before FK-constrained TableCell inserts
+    await db.flush()
 
     for cd in cells:
         db.add(TableCell(**cd))

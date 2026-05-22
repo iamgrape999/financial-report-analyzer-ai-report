@@ -3970,64 +3970,68 @@ async function exportDocx(){
   toast(tl('Generating DOCX…','正在生成 DOCX…'),'info');
   try{
     // ── Primary: backend python-docx endpoint ─────────────────────────────
-    const res=await fetch(API+'/reports/'+currentRid+'/export/docx',{headers:H()});
-    if(res.ok){
-      const blob=await res.blob();
-      const cd=res.headers.get('Content-Disposition')||'';
-      const fname=(cd.match(/filename="([^"]+)"/)||[])[1]||'credit_report.docx';
-      _dlBlobSafe(blob,fname);
-      toast(tl('DOCX downloaded ✓ (server-generated)','DOCX 已下載 ✓（伺服器生成）'),'success');
-      return;
+    let useFallback=false;
+    try{
+      const res=await fetch(API+'/reports/'+currentRid+'/export/docx',{headers:H()});
+      if(res.ok){
+        const blob=await res.blob();
+        const cd=res.headers.get('Content-Disposition')||'';
+        const fname=(cd.match(/filename="([^"]+)"/)||[])[1]||'credit_report.docx';
+        _dlBlobSafe(blob,fname);
+        toast(tl('DOCX downloaded ✓ (server-generated)','DOCX 已下載 ✓（伺服器生成）'),'success');
+        return;
+      }
+      if(res.status===503){
+        useFallback=true;
+      }else{
+        const errBody=await res.json().catch(()=>({}));
+        throw new Error(errBody.detail||`Server error ${res.status}`);
+      }
+    }catch(err){
+      if(err.message&&!err.message.startsWith('Server error 503')&&!(err instanceof TypeError)){
+        throw err;
+      }
+      useFallback=true;
     }
-    // 503 = python-docx not on server → use client-side fallback
-    if(res.status===503){
-      console.warn('Backend DOCX unavailable (503) — using client-side fallback');
-    } else {
-      const errBody=await res.json().catch(()=>({}));
-      throw new Error(errBody.detail||`Server error ${res.status}`);
+
+    // ── Fallback: html-docx-js (loaded via CDN script tag) ─────────────────
+    if(useFallback){
+      if(typeof htmlDocx==='undefined'){
+        toast(tl('Client-side DOCX library not loaded yet — try again in a moment','用戶端 DOCX 函式庫尚未載入，請稍後再試'),'warning');
+        return;
+      }
+      const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
+      if(!outs.length){toast(tl('No generated sections to export','尚無已生成的段落可匯出'),'warning');return;}
+
+      const body=outs.map(o=>`
+        <h1 style="color:#00703C;border-bottom:2px solid #00703C;padding-bottom:6px;">
+          §${o.section_no} — ${esc(snm(o.section_no))}
+        </h1>
+        ${marked.parse(o.markdown)}
+      `).join('<hr style="border-top:1px dashed #ccc;margin:24px 0;">');
+
+      const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+        <style>
+          body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.6;color:#1a1a1a;}
+          table{border-collapse:collapse;width:100%;margin:8pt 0;font-size:10pt;}
+          th,td{border:1px solid #999;padding:4pt 8pt;}
+          th{background:#e8f5ee;font-weight:bold;}
+          h1{font-size:14pt;color:#00703C;}
+          h2{font-size:12pt;border-bottom:1px solid #b2dfce;padding-bottom:3pt;}
+          h3{font-size:11pt;color:#00703C;}
+          ul{margin:4pt 0;}li{margin:2pt 0;}
+        </style>
+      </head><body>${body}</body></html>`;
+
+      const blob=htmlDocx.asBlob(html,{orientation:'portrait',margins:{top:720,right:720,bottom:720,left:1080}});
+      _dlBlobSafe(blob,'credit_report.docx');
+      toast(tl('DOCX downloaded ✓ (client-side fallback)','DOCX 已下載 ✓（用戶端備援）'),'success');
     }
-  }catch(err){
-    if(!(err instanceof TypeError)&&!String(err.message).startsWith('Server error 503')){
-      // Real error (not network failure or 503) — stop here
-      toast(tl('DOCX export failed: ','DOCX 匯出失敗：')+err.message,'danger');sp.classList.add('d-none');return;
-    }
-    console.warn('Backend unreachable — trying client-side DOCX fallback');
+  }catch(e){
+    toast(tl('DOCX export failed: ','DOCX 匯出失敗：')+e.message,'danger');
+  }finally{
+    sp.classList.add('d-none');
   }
-
-  // ── Fallback: html-docx-js (loaded via CDN script tag) ───────────────────
-  try{
-    if(typeof htmlDocx==='undefined'){
-      toast(tl('Client-side DOCX library not loaded yet — try again in a moment','用戶端 DOCX 函式庫尚未載入，請稍後再試'),'warning');
-      sp.classList.add('d-none');return;
-    }
-    const outs=allOutputs.filter(o=>o.status==='done'&&o.markdown).sort((a,b)=>a.section_no-b.section_no);
-    if(!outs.length){toast(tl('No generated sections to export','尚無已生成的段落可匯出'),'warning');sp.classList.add('d-none');return;}
-
-    const body=outs.map(o=>`
-      <h1 style="color:#00703C;border-bottom:2px solid #00703C;padding-bottom:6px;">
-        §${o.section_no} — ${esc(snm(o.section_no))}
-      </h1>
-      ${marked.parse(o.markdown)}
-    `).join('<hr style="border-top:1px dashed #ccc;margin:24px 0;">');
-
-    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
-      <style>
-        body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.6;color:#1a1a1a;}
-        table{border-collapse:collapse;width:100%;margin:8pt 0;font-size:10pt;}
-        th,td{border:1px solid #999;padding:4pt 8pt;}
-        th{background:#e8f5ee;font-weight:bold;}
-        h1{font-size:14pt;color:#00703C;}
-        h2{font-size:12pt;border-bottom:1px solid #b2dfce;padding-bottom:3pt;}
-        h3{font-size:11pt;color:#00703C;}
-        ul{margin:4pt 0;}li{margin:2pt 0;}
-      </style>
-    </head><body>${body}</body></html>`;
-
-    const blob=htmlDocx.asBlob(html,{orientation:'portrait',margins:{top:720,right:720,bottom:720,left:1080}});
-    _dlBlobSafe(blob,'credit_report.docx');
-    toast(tl('DOCX downloaded ✓ (client-side fallback)','DOCX 已下載 ✓（用戶端備援）'),'success');
-  }catch(e){toast(tl('DOCX fallback failed: ','DOCX 備援失敗：')+e.message,'danger');}
-  finally{sp.classList.add('d-none');}
 }
 
 function stripMarkdown(md){
@@ -4088,18 +4092,21 @@ function _isIOS(){
 }
 function _dlBlobSafe(blob,filename){
   const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  // iOS Safari ignores a.download and blocks window.open() called after async.
+  // Using a.click() within the current tab context works on both platforms:
+  // desktop triggers immediate download; iOS opens the share sheet (→ Save to Files).
   if(_isIOS()){
-    // iOS Safari: a.download is ignored — open in new tab so user can Share → Save to Files
-    const win=window.open(url,'_blank');
-    if(!win)toast(tl('Pop-up blocked — allow pop-ups to download files','彈出視窗被封鎖 — 請允許彈出視窗以下載檔案'),'warning');
-    else toast(tl(`Tap Share → Save to Files to save ${filename}`,`點擊「分享」→「儲存至檔案」以儲存 ${filename}`),'info');
-    setTimeout(()=>URL.revokeObjectURL(url),90000);
-  }else{
-    const a=document.createElement('a');
-    a.href=url;a.download=filename;
-    document.body.appendChild(a);a.click();
-    document.body.removeChild(a);URL.revokeObjectURL(url);
+    a.target='_blank';
+    a.rel='noopener noreferrer';
+    toast(tl(`File ready — tap the link or use Share → Save to Files to save ${filename}`,`檔案已就緒 — 點擊連結或使用「分享」→「儲存至檔案」以儲存 ${filename}`),'info');
   }
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),_isIOS()?90000:5000);
 }
 function dlBlob(content,filename,mime){
   _dlBlobSafe(new Blob([content],{type:mime}),filename);
