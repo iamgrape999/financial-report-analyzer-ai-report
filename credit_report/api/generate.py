@@ -782,6 +782,23 @@ async def etl_document_stream(
                     "message": f"Extraction complete — {len(merged)} section(s) found",
                 })
 
+                # Apply section-specific flatten transforms so downstream code sees
+                # the same flat FIELD_DEFS-compatible structure as etl_document() produces.
+                from credit_report.generation.etl import (
+                    _flatten_section3 as _fs3,
+                    _flatten_section5 as _fs5,
+                    _flatten_section6 as _fs6,
+                    _flatten_section8 as _fs8,
+                )
+                if 3 in merged and isinstance(merged[3], dict):
+                    merged[3] = _fs3(merged[3])
+                if 5 in merged and isinstance(merged[5], dict):
+                    merged[5] = _fs5(merged[5])
+                if 6 in merged and isinstance(merged[6], dict):
+                    merged[6] = _fs6(merged[6])
+                if 8 in merged and isinstance(merged[8], dict):
+                    merged[8] = _fs8(merged[8])
+
                 # Auto-register CanonicalFacts
                 facts_registered = 0
                 if merged:
