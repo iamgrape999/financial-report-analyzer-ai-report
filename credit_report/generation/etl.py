@@ -69,6 +69,11 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     appendix_ref_verbatim
   },
   regulatory_compliance: {
+    bank_net_worth_twd_bn (number), single_borrower_limit_pct (number),
+    single_borrower_limit_twd_bn (number), usd_equivalent_usd_m (number),
+    exchange_rate (number), unsecured_drawdown_cap_pct (number),
+    unsecured_drawdown_cap_usd_m (number),
+    group_limit: {approved_group_limit_usd_m (number), total_proposed_group_utilization_usd_m (number)},
     banking_act_33_3: {requirement_verbatim, borrower_name, compliant_yn,
       bank_nw_twd_bn, limit_5pct_twd_bn, limit_5pct_usd_m, fx_rate, fx_date, calculation_line},
     unsecured_exposure_table[{label, credit_limit_usd_m, unsecured_usd_m, secured_usd_m,
@@ -88,6 +93,9 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
     psr_formula_verbatim, psr_purpose
   },
   terms_and_conditions: {
+    tenor_years (number), margin_bps (number), ltc_percent (number),
+    balloon_percent (number), upfront_fee_pct (number),
+    value_maintenance_clause: {acr_minimum_pct (number), ltv_maximum_pct (number), cure_period_days (number)},
     tc_rows[{field, content_verbatim}],
     deal_comparison_rows[{term, proposed_deal, previous_deal}]
   },
@@ -1375,10 +1383,14 @@ async def _etl_document_chunked(
     total_ms = (time.perf_counter() - t_start) * 1000
     logger.info("[ETL] chunked ETL complete: chunks=%d sections=%s total_ms=%.0f",
                 n_chunks, list(merged.keys()), total_ms)
+    if 3 in merged and isinstance(merged[3], dict):
+        merged[3] = _flatten_section3(merged[3])
     if 5 in merged and isinstance(merged[5], dict):
         merged[5] = _flatten_section5(merged[5])
     if 6 in merged and isinstance(merged[6], dict):
         merged[6] = _flatten_section6(merged[6])
+    if 8 in merged and isinstance(merged[8], dict):
+        merged[8] = _flatten_section8(merged[8])
     return merged
 
 
@@ -1443,10 +1455,14 @@ async def etl_document(
             text_chunk=text,
             target_sections=target_sections,
         )
+        if 3 in result and isinstance(result[3], dict):
+            result[3] = _flatten_section3(result[3])
         if 5 in result and isinstance(result[5], dict):
             result[5] = _flatten_section5(result[5])
         if 6 in result and isinstance(result[6], dict):
             result[6] = _flatten_section6(result[6])
+        if 8 in result and isinstance(result[8], dict):
+            result[8] = _flatten_section8(result[8])
         total_ms = (time.perf_counter() - t_start) * 1000
         logger.info(
             "[ETL] etl_document: COMPLETE doc_type=%s total_elapsed=%.0fms "
@@ -1550,6 +1566,110 @@ def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
     return None
 
 
+def _flatten_section3(sec3: dict) -> dict:
+    """Flatten §3 array structures to flat form-compatible paths.
+    3B_internal_ratings.rows[] → borrower_* / guarantor_* flat keys.
+    """
+    result = dict(sec3)
+    int_ratings = result.get("3B_internal_ratings") or {}
+    rows = int_ratings.get("rows") or []
+    if isinstance(rows, list) and rows:
+        flat_ir: dict = {k: v for k, v in int_ratings.items() if k != "rows"}
+        prefixes = ["borrower", "guarantor"]
+        for i, (row, pfx) in enumerate(zip(rows[:2], prefixes)):
+            if not isinstance(row, dict):
+                continue
+            def _set_ir(key: str, val, _pfx=pfx, _flat=flat_ir):
+                if val is not None:
+                    _flat[f"{_pfx}_{key}"] = val
+            _set_ir("entity_full_name", row.get("entity_full_name"))
+            _set_ir("entity_abbrev",    row.get("entity_abbrev"))
+            _set_ir("fy2022_23",        row.get("fy2022_23") or row.get("fy2023_24"))
+            _set_ir("fy2024",           row.get("fy2024"))
+            _set_ir("interim",          row.get("interim"))
+            _set_ir("current",          row.get("current"))
+            _set_ir("override_flag",    row.get("override_flag"))
+            _set_ir("override_remarks", row.get("remarks"))
+        result["3B_internal_ratings"] = flat_ir
+    return result
+
+
+def _flatten_section8(sec8: dict) -> dict:
+    """Hoist 8A_acra_banking_charges.summary.* to match form FIELD_DEFS flat paths."""
+    result = dict(sec8)
+    acra = result.get("8A_acra_banking_charges") or {}
+    summary = acra.get("summary") or {}
+    if isinstance(summary, dict) and summary:
+        flat_acra = dict(acra)
+        for k, v in summary.items():
+            if k not in flat_acra and v is not None:
+                flat_acra[k] = v
+        result["8A_acra_banking_charges"] = flat_acra
+    return result
+
+
+def _extract_section3_facts(
+    sec3: dict, report_id: str, doc_id: str,
+) -> list[dict]:
+    """Extract rating grade facts from §3 as value_text CanonicalFacts."""
+    facts: list[dict] = []
+
+    def _push_text(metric: str, val, entity: str, period: str = "CURRENT") -> None:
+        if val is None or str(val).strip() in ("", "null", "None"):
+            return
+        facts.append({
+            "report_id": report_id, "metric_name": metric,
+            "entity": entity, "period": period,
+            "value": None, "value_text": str(val).strip(),
+            "currency": None, "unit": "grade",
+            "source_type": "pdf_extraction", "source_priority": 3,
+            "source_evidence_id": doc_id, "source_section_no": 3,
+            "state": "extracted",
+        })
+
+    # MAS 612
+    mas612 = sec3.get("3C_mas_612") or {}
+    _push_text("mas612_grade",     mas612.get("grade"),     "BORROWER")
+    _push_text("mas612_msr_value", mas612.get("msr_value"), "BORROWER")
+
+    # Internal ratings — support both raw rows[] and flattened borrower_*/guarantor_* format
+    int_ratings = sec3.get("3B_internal_ratings") or {}
+    rows = int_ratings.get("rows") or []
+    if rows:
+        prefixes_entities = [("borrower", "BORROWER"), ("guarantor", "GUARANTOR")]
+        for i, (row, (_, entity)) in enumerate(zip(rows[:2], prefixes_entities)):
+            if not isinstance(row, dict):
+                continue
+            entity_abbrev = str(row.get("entity_abbrev") or "").strip().upper()
+            ent = entity_abbrev if entity_abbrev else entity
+            _push_text("internal_rating_current",   row.get("current"),        ent)
+            _push_text("internal_rating_fy2024",    row.get("fy2024"),         ent)
+            _push_text("internal_rating_fy2022_23", row.get("fy2022_23") or row.get("fy2023_24"), ent, "FY2022")
+            _push_text("internal_rating_interim",   row.get("interim"),        ent, "INTERIM")
+    else:
+        # Flat format (after _flatten_section3)
+        _push_text("internal_rating_current",   int_ratings.get("borrower_current"),   "BORROWER")
+        _push_text("internal_rating_fy2024",    int_ratings.get("borrower_fy2024"),    "BORROWER")
+        _push_text("internal_rating_fy2022_23", int_ratings.get("borrower_fy2022_23"), "BORROWER", "FY2022")
+        _push_text("internal_rating_interim",   int_ratings.get("borrower_interim"),   "BORROWER", "INTERIM")
+        _push_text("internal_rating_current",   int_ratings.get("guarantor_current"),  "GUARANTOR")
+        _push_text("internal_rating_fy2024",    int_ratings.get("guarantor_fy2024"),   "GUARANTOR")
+        _push_text("internal_rating_fy2022_23", int_ratings.get("guarantor_fy2022_23"),"GUARANTOR", "FY2022")
+
+    # External ratings
+    ext_ratings = sec3.get("3A_external_ratings") or {}
+    for i, rating in enumerate((ext_ratings.get("ratings") or [])[:2]):
+        if not isinstance(rating, dict):
+            continue
+        ea = str(rating.get("entity_abbrev") or "").strip().upper()
+        entity = ea if ea else ("BORROWER" if i == 0 else "GUARANTOR")
+        _push_text("sp_rating",     rating.get("sp"),     entity)
+        _push_text("moodys_rating", rating.get("moodys"), entity)
+        _push_text("fitch_rating",  rating.get("fitch"),  entity)
+
+    return facts
+
+
 # ── Mapping of ETL section fields → CanonicalFact metric names ───────────────────────────────
 # (section_no, sub_key, field_dotted_path, metric_name, unit)
 # Dotted paths (e.g. "deal_dscr.dscr_value") are supported for nested fields.
@@ -1640,13 +1760,38 @@ def _flatten_section6(sec6: dict) -> dict:
 
 
 _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
-    # §1 — Credit Facility
+    # §1 — Credit Facility (facility_summary totals)
     (1, "facility_summary", "totals.total_credit_limit_usd_m", "credit_limit_usd_m",   "mn"),
     (1, "facility_summary", "totals.psr_spot_limit_usd_m",     "psr_spot_limit_usd_m", "mn"),
-    (1, "account_strategy", "nii_usd_m",                       "nii_usd_m",            "mn"),
+    # §1 regulatory_compliance — flat fields (new schema asks Gemini to extract these directly)
+    (1, "regulatory_compliance", "bank_net_worth_twd_bn",                        "bank_nw_twd_bn",              None),
+    (1, "regulatory_compliance", "single_borrower_limit_pct",                    "single_borrower_limit_pct",   None),
+    (1, "regulatory_compliance", "single_borrower_limit_twd_bn",                 "single_borrower_limit_twd_bn",None),
+    (1, "regulatory_compliance", "usd_equivalent_usd_m",                         "ba33_limit_usd_m",            "mn"),
+    (1, "regulatory_compliance", "exchange_rate",                                 "ba33_fx_rate",                None),
+    (1, "regulatory_compliance", "unsecured_drawdown_cap_pct",                   "unsecured_cap_pct",           None),
+    (1, "regulatory_compliance", "unsecured_drawdown_cap_usd_m",                 "unsecured_cap_usd_m",         "mn"),
+    (1, "regulatory_compliance", "group_limit.approved_group_limit_usd_m",       "group_limit_usd_m",           "mn"),
+    (1, "regulatory_compliance", "group_limit.total_proposed_group_utilization_usd_m", "group_utilization_usd_m","mn"),
+    # §1 purpose_and_recommendation
+    (1, "purpose_and_recommendation", "facility_amount_usd_m",                   "facility_amount_usd_m",       "mn"),
+    (1, "purpose_and_recommendation", "ltc_pct",                                  "ltc_pct",                     None),
+    (1, "purpose_and_recommendation", "acr_pct",                                  "acr_pct",                     None),
+    # §1 terms_and_conditions — flat scalar fields (new schema asks Gemini to extract these)
+    (1, "terms_and_conditions", "tenor_years",                                    "tenor_years",                 None),
+    (1, "terms_and_conditions", "margin_bps",                                     "margin_bps",                  None),
+    (1, "terms_and_conditions", "ltc_percent",                                    "ltc_pct",                     None),
+    (1, "terms_and_conditions", "balloon_percent",                                "balloon_pct",                 None),
+    (1, "terms_and_conditions", "upfront_fee_pct",                                "upfront_fee_pct",             None),
+    (1, "terms_and_conditions", "value_maintenance_clause.acr_minimum_pct",       "acr_minimum_pct",             None),
+    (1, "terms_and_conditions", "value_maintenance_clause.ltv_maximum_pct",       "ltv_maximum_pct",             None),
+    (1, "terms_and_conditions", "value_maintenance_clause.cure_period_days",      "vmc_cure_period_days",        None),
+    # §1 account_strategy
+    (1, "account_strategy", "nii_usd_m",                                          "nii_usd_m",                   "mn"),
 
     # §2 — Overall Comments
     (2, "2B_solvency", "deal_dscr.dscr_value",          "dscr",                  None),
+    (2, "2B_solvency", "ema.cash_bn_usd",                "ema_cash_usd_bn",       "bn"),
     (2, "2B_solvency", "ema.debt_ebitda_ratio",          "debt_ebitda",           None),
     (2, "2B_solvency", "ema.interest_coverage",          "interest_coverage",     None),
     (2, "2B_solvency", "ema.op_ebitda_bn_usd",           "ema_ebitda_usd_bn",     "bn"),
@@ -1718,15 +1863,19 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
 
     # §7 — handled by _extract_section7_facts() due to dynamic FY_YYYY nesting
 
-    # §8 — ACRA Banking Charges
-    (8, "8A_acra_banking_charges", "summary.total_active_usd_m", "acra_total_active_usd_m", "mn"),
-    (8, "8A_acra_banking_charges", "summary.cub_total_usd_m",    "acra_cub_total_usd_m",    "mn"),
+    # §8 — ACRA Banking Charges (summary fields hoisted to flat by _flatten_section8)
+    (8, "8A_acra_banking_charges", "total_charges",      "total_acra_charges",    None),
+    (8, "8A_acra_banking_charges", "active_charges",     "active_acra_charges",   None),
+    (8, "8A_acra_banking_charges", "satisfied_charges",  "satisfied_acra_charges",None),
+    (8, "8A_acra_banking_charges", "total_active_usd_m", "acra_total_active_usd_m","mn"),
+    (8, "8A_acra_banking_charges", "cub_charge_count",   "cub_charge_count",      None),
+    (8, "8A_acra_banking_charges", "cub_total_usd_m",    "cub_acra_total_usd_m",  "mn"),
 
-    # §9 — Recommendation
-    (9, "9C_recommendation", "facility_amount_usd_m", "proposed_facility_usd_m", "mn"),
-    (9, "9C_recommendation", "tenor_years",            "proposed_tenor_years",    None),
-    (9, "9C_recommendation", "balloon_ltv_pct",        "balloon_ltv_pct",         None),
-    (9, "9C_recommendation", "margin_bps",             "margin_bps",              None),
+    # §9 — Recommendation (analyst-filled, but numeric fields extracted from credit doc)
+    (9, "9C_recommendation", "facility_amount_usd_m", "facility_amount_usd_m", "mn"),
+    (9, "9C_recommendation", "tenor_years",            "tenor_years",           None),
+    (9, "9C_recommendation", "balloon_ltv_pct",        "ltv_at_maturity_pct",   None),
+    (9, "9C_recommendation", "margin_bps",             "margin_bps",            None),
 ]
 
 
@@ -2218,6 +2367,15 @@ def build_canonical_facts_from_etl(
 
     facts: list[dict] = []
     seen: set[str] = set()  # deduplicate by (metric_name, entity, period)
+
+    # §3 ratings use value_text — handled by dedicated extractor
+    sec3 = extracted.get(3)
+    if isinstance(sec3, dict):
+        facts.extend(_extract_section3_facts(
+            sec3=sec3,
+            report_id=report_id,
+            doc_id=doc_id,
+        ))
 
     # §7 uses dynamic FY_YYYY nesting — handled by dedicated extractor
     sec7 = extracted.get(7)

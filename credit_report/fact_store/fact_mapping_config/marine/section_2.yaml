@@ -82,3 +82,34 @@ facts:
     entity_path: "2C_guarantor.guarantor_name_abbrev"
     period_path: "2C_guarantor.period"
     unit: "x"
+
+  # EMA/borrower cash snapshot (missing from original mappings)
+  - id_template: "FIN-CASH-USD-EMA-{entity}-{period}"
+    path: "2B_solvency.ema.cash_bn_usd"
+    metric: "ema_cash_usd_bn"
+    entity: "BORROWER"
+    period_path: "2B_solvency.ema.period"
+    currency: "USD"
+    unit: "bn"
+
+  # Post-delivery collateral ratios (2D_collateral mirrors 5C/6A ratios)
+  - id_template: "RATIO-LTC-2D-{entity}-{period}"
+    path: "2D_collateral.post_delivery.ltc_pct"
+    metric: "ltc_pct"
+    entity: "VESSEL"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "RATIO-ACR-2D-{entity}-{period}"
+    path: "2D_collateral.post_delivery.acr_pct"
+    metric: "acr_at_delivery_pct"
+    entity: "VESSEL"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "RATIO-LTV-2D-{entity}-{period}"
+    path: "2D_collateral.post_delivery.ltv_pct"
+    metric: "ltv_at_maturity_pct"
+    entity: "VESSEL"
+    period: "CURRENT"
+    unit: "pct"

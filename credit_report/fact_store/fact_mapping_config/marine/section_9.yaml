@@ -1,41 +1,52 @@
-# Section 9 — Credit Checklist / Compliance: fact extraction mappings
+# Section 9 — Credit Analysis Checklist & Recommendation: fact extraction mappings
+# Paths match the actual FORM FIELD_DEFS paths:
+#   9C_recommendation.* — recommendation numeric fields (most auto-fillable from §1/§5 facts)
+#   9A_checklist.* — a few structured fields (most are manual analyst inputs)
+# Most §9 fields are qualitative analyst decisions and cannot be auto-filled.
 facts:
-  # Overall credit recommendation (APPROVE / DECLINE / CONDITIONAL)
-  - id_template: "COMPLIANCE-RECOMMENDATION-{entity}-CURRENT"
-    path: "9A_checklist.recommendation"
-    metric: "compliance_recommendation"
+  # ── Recommendation — numeric fields (cross-section from §1/§5/§6 CanonicalFacts) ──
+  - id_template: "REC-FACILITY-AMT-{entity}-CURRENT"
+    path: "9C_recommendation.facility_amount_usd_m"
+    metric: "facility_amount_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "REC-TENOR-YEARS-{entity}-CURRENT"
+    path: "9C_recommendation.tenor_years"
+    metric: "tenor_years"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "years"
+
+  - id_template: "REC-BALLOON-LTV-{entity}-CURRENT"
+    path: "9C_recommendation.balloon_ltv_pct"
+    metric: "ltv_at_maturity_pct"
+    entity: "VESSEL"
+    period: "CURRENT"
+    unit: "pct"
+
+  # ── Checklist — MAS612 classification (cross-section from §3 CanonicalFacts) ──
+  - id_template: "CHK-MAS612-{entity}-CURRENT"
+    path: "9A_checklist.mas612_classification"
+    metric: "mas612_grade"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "grade"
+
+  # ── Checklist — ACRA reference from §8 ──────────────────────────────────────
+  - id_template: "CHK-ITEM16-ENTITY-{entity}-CURRENT"
+    path: "9A_checklist.item16_entity_name"
+    metric: "acra_entity_name"
     entity: "BORROWER"
     period: "CURRENT"
     unit: "text"
 
-  # Number of conditions precedent to drawdown
-  - id_template: "COMPLIANCE-CP-COUNT-{entity}-CURRENT"
-    path: "9A_checklist.conditions_precedent_count"
-    metric: "conditions_precedent_count"
-    entity: "BORROWER"
+  - id_template: "CHK-ITEM15-PREDELIVERY-{entity}-CURRENT"
+    path: "9A_checklist.item15_pre_delivery_usd_m"
+    metric: "unsecured_cap_usd_m"
+    entity: "FACILITY"
     period: "CURRENT"
-    unit: "count"
-
-  # Whether all KYC/AML checks are cleared
-  - id_template: "COMPLIANCE-KYC-CLEARED-{entity}-CURRENT"
-    path: "9A_checklist.kyc_aml_cleared"
-    metric: "kyc_aml_cleared"
-    entity: "BORROWER"
-    period: "CURRENT"
-    unit: "boolean"
-
-  # Whether environmental / ESG screening is passed
-  - id_template: "COMPLIANCE-ESG-PASS-{entity}-CURRENT"
-    path: "9A_checklist.esg_screen_passed"
-    metric: "esg_screen_passed"
-    entity: "BORROWER"
-    period: "CURRENT"
-    unit: "boolean"
-
-  # Number of outstanding checklist items (0 = all clear)
-  - id_template: "COMPLIANCE-OUTSTANDING-ITEMS-{entity}-CURRENT"
-    path: "9B_checklist_items.outstanding_count"
-    metric: "outstanding_checklist_items"
-    entity: "BORROWER"
-    period: "CURRENT"
-    unit: "count"
+    currency: "USD"
+    unit: "million"

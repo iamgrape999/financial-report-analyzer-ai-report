@@ -1,41 +1,50 @@
-# Section 8 — ACRA / Banking Charges: fact extraction mappings
+# Section 8 — ACRA Banking Charges: fact extraction mappings
+# Paths match the actual FORM FIELD_DEFS paths:
+#   8A_acra_banking_charges.* — summary fields hoisted by _flatten_section8()
+#   8B_other_information.* — qualitative flags (boolean/text, not numeric)
 facts:
-  # Whether new banking charges have been imposed since last review
-  - id_template: "ACRA-NEW-CHARGES-{entity}-CURRENT"
-    path: "8A_acra_banking_charges.new_charges"
-    metric: "new_banking_charges"
-    entity: "BORROWER"
-    period: "CURRENT"
-    unit: "boolean"
-
-  # Analyst comments on ACRA charges (qualitative)
-  - id_template: "ACRA-COMMENTS-{entity}-CURRENT"
-    path: "8A_acra_banking_charges.comments"
-    metric: "acra_charges_comments"
-    entity: "BORROWER"
-    period: "CURRENT"
-    unit: "text"
-
-  # Total number of banking facilities (row count from 8B)
-  - id_template: "BANKING-TOTAL-FACILITIES-{entity}-CURRENT"
-    path: "8B_banking_changes.total_facilities"
-    metric: "total_banking_facilities"
+  # ── ACRA Summary Counts (hoisted from summary by _flatten_section8) ────────
+  - id_template: "ACRA-TOTAL-CHARGES-{entity}-CURRENT"
+    path: "8A_acra_banking_charges.total_charges"
+    metric: "total_acra_charges"
     entity: "BORROWER"
     period: "CURRENT"
     unit: "count"
 
-  # CUB total exposure in USD millions
-  - id_template: "BANKING-CUB-TOTAL-USD-{entity}-CURRENT"
-    path: "8B_banking_changes.cub_total_usd_m"
-    metric: "cub_total_exposure_usd_m"
+  - id_template: "ACRA-ACTIVE-CHARGES-{entity}-CURRENT"
+    path: "8A_acra_banking_charges.active_charges"
+    metric: "active_acra_charges"
     entity: "BORROWER"
     period: "CURRENT"
-    unit: "USD_m"
+    unit: "count"
 
-  # CUB share of total banking facilities (%)
-  - id_template: "BANKING-CUB-SHARE-PCT-{entity}-CURRENT"
-    path: "8B_banking_changes.cub_share_pct"
-    metric: "cub_share_pct"
+  - id_template: "ACRA-SATISFIED-CHARGES-{entity}-CURRENT"
+    path: "8A_acra_banking_charges.satisfied_charges"
+    metric: "satisfied_acra_charges"
     entity: "BORROWER"
     period: "CURRENT"
-    unit: "percent"
+    unit: "count"
+
+  # ── ACRA Amounts ──────────────────────────────────────────────────────────
+  - id_template: "ACRA-TOTAL-ACTIVE-USD-{entity}-CURRENT"
+    path: "8A_acra_banking_charges.total_active_usd_m"
+    metric: "acra_total_active_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "ACRA-CUB-COUNT-{entity}-CURRENT"
+    path: "8A_acra_banking_charges.cub_charge_count"
+    metric: "cub_charge_count"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "count"
+
+  - id_template: "ACRA-CUB-TOTAL-USD-{entity}-CURRENT"
+    path: "8A_acra_banking_charges.cub_total_usd_m"
+    metric: "cub_acra_total_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"

@@ -188,3 +188,56 @@ facts:
     period: "CURRENT"
     currency: "USD"
     unit: "million"
+
+  # Regulatory compliance — additional fields
+  - id_template: "REG-EXCHANGE-RATE-{entity}-{period}"
+    path: "regulatory_compliance.exchange_rate"
+    metric: "ba33_fx_rate"
+    entity: "CUB"
+    period: "CURRENT"
+    unit: "ratio"
+
+  - id_template: "REG-SB-LIMIT-TWD-{entity}-{period}"
+    path: "regulatory_compliance.single_borrower_limit_twd_bn"
+    metric: "single_borrower_limit_twd_bn"
+    entity: "CUB"
+    period: "CURRENT"
+    currency: "TWD"
+    unit: "billion"
+
+  # Terms and conditions — Value Maintenance Clause
+  - id_template: "TC-VMC-ACR-{entity}-{period}"
+    path: "terms_and_conditions.value_maintenance_clause.acr_minimum_pct"
+    metric: "acr_minimum_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "TC-VMC-LTV-{entity}-{period}"
+    path: "terms_and_conditions.value_maintenance_clause.ltv_maximum_pct"
+    metric: "ltv_maximum_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "TC-VMC-CURE-DAYS-{entity}-{period}"
+    path: "terms_and_conditions.value_maintenance_clause.cure_period_days"
+    metric: "vmc_cure_period_days"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "days"
+
+  # Terms and conditions — individual scalar fields
+  - id_template: "TC-BALLOON-PCT-{entity}-{period}"
+    path: "terms_and_conditions.balloon_percent"
+    metric: "balloon_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "TC-UPFRONT-FEE-PCT-{entity}-{period}"
+    path: "terms_and_conditions.upfront_fee_pct"
+    metric: "upfront_fee_pct"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "pct"

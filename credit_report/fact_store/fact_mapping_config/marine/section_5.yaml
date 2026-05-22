@@ -205,3 +205,17 @@ facts:
     entity: "GUARANTOR"
     period: "CURRENT"
     unit: "x"
+
+  - id_template: "RATIO-NI-MARGIN-GUAR-{entity}-{period}"
+    path: "5F_corporate_guarantee.net_margin_pct"
+    metric: "guarantor_net_margin_pct"
+    entity: "GUARANTOR"
+    period: "CURRENT"
+    unit: "pct"
+
+  - id_template: "RATIO-ROE-GUAR-{entity}-{period}"
+    path: "5F_corporate_guarantee.roe_pct"
+    metric: "guarantor_roe_pct"
+    entity: "GUARANTOR"
+    period: "CURRENT"
+    unit: "pct"
