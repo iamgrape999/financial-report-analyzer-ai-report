@@ -1385,6 +1385,8 @@ async def _etl_document_chunked(
                 n_chunks, list(merged.keys()), total_ms)
     if 3 in merged and isinstance(merged[3], dict):
         merged[3] = _flatten_section3(merged[3])
+    if 4 in merged and isinstance(merged[4], dict):
+        merged[4] = _flatten_section4(merged[4])
     if 5 in merged and isinstance(merged[5], dict):
         merged[5] = _flatten_section5(merged[5])
     if 6 in merged and isinstance(merged[6], dict):
@@ -1459,6 +1461,8 @@ async def etl_document(
         )
         if 3 in result and isinstance(result[3], dict):
             result[3] = _flatten_section3(result[3])
+        if 4 in result and isinstance(result[4], dict):
+            result[4] = _flatten_section4(result[4])
         if 5 in result and isinstance(result[5], dict):
             result[5] = _flatten_section5(result[5])
         if 6 in result and isinstance(result[6], dict):
@@ -1825,6 +1829,125 @@ def _flatten_section10(sec10: dict) -> dict:
     return result
 
 
+def _flatten_section4(sec4: dict) -> dict:
+    """Flatten §4 array/nested structures to flat keys expected by FIELD_DEFS.
+
+    1. 4C_management[] → ceo_name/ceo_title/ceo_background, cfo_name/cfo_title/cfo_background
+    2. 4F_fleet.total_vessels → owned_vessel_count (additive; keep original for fact map)
+    3. 4F_fleet.total_owned_teu → owned_total_teu (additive)
+    4. 4F_fleet.fleet_breakdown[] → chartered_*/on_order_* flat scalars
+    5. 4F_fleet.orderbook[] → on_order_vessel_count/on_order_total_teu if not from breakdown
+    6. 4B_ownership.shareholders[] → pipe-delimited lines string
+    """
+    result = dict(sec4)
+
+    # ── 4C management array → flat CEO/CFO fields ─────────────────────────────
+    mgmt = result.get("4C_management")
+    if isinstance(mgmt, list):
+        flat_mgmt = {}
+        _TITLE_CEO = {"ceo", "chief executive officer", "president", "managing director", "md"}
+        _TITLE_CFO = {"cfo", "chief financial officer", "finance director", "fd"}
+        for person in mgmt:
+            if not isinstance(person, dict):
+                continue
+            title_raw = str(person.get("title") or "").lower()
+            name = person.get("name")
+            title = person.get("title")
+            bg = person.get("background")
+            if any(k in title_raw for k in _TITLE_CEO) and "ceo_name" not in flat_mgmt:
+                if name is not None:
+                    flat_mgmt["ceo_name"] = name
+                if title is not None:
+                    flat_mgmt["ceo_title"] = title
+                if bg is not None:
+                    flat_mgmt["ceo_background"] = bg
+            elif any(k in title_raw for k in _TITLE_CFO) and "cfo_name" not in flat_mgmt:
+                if name is not None:
+                    flat_mgmt["cfo_name"] = name
+                if title is not None:
+                    flat_mgmt["cfo_title"] = title
+                if bg is not None:
+                    flat_mgmt["cfo_background"] = bg
+        if flat_mgmt:
+            result["4C_management"] = flat_mgmt
+
+    # ── 4B shareholders array → pipe-delimited lines ───────────────────────────
+    ownership = result.get("4B_ownership")
+    if isinstance(ownership, dict):
+        shareholders = ownership.get("shareholders")
+        if isinstance(shareholders, list):
+            lines = []
+            for sh in shareholders:
+                if not isinstance(sh, dict):
+                    continue
+                name = sh.get("name") or ""
+                stake = sh.get("stake_percent") or ""
+                country = sh.get("country") or ""
+                if name:
+                    lines.append(f"{name}|{stake}|{country}")
+            if lines:
+                flat_own = dict(ownership)
+                flat_own["shareholders"] = "\n".join(lines)
+                result["4B_ownership"] = flat_own
+
+    # ── 4F fleet scalar aliases + fleet_breakdown decomposition ───────────────
+    fleet = result.get("4F_fleet")
+    if isinstance(fleet, dict):
+        flat_fleet = dict(fleet)
+
+        # Alias total_vessels → owned_vessel_count (keep original for _ETL_FACT_MAP)
+        if "owned_vessel_count" not in flat_fleet and flat_fleet.get("total_vessels") is not None:
+            flat_fleet["owned_vessel_count"] = flat_fleet["total_vessels"]
+
+        # Alias total_owned_teu → owned_total_teu (keep original for _ETL_FACT_MAP)
+        if "owned_total_teu" not in flat_fleet and flat_fleet.get("total_owned_teu") is not None:
+            flat_fleet["owned_total_teu"] = flat_fleet["total_owned_teu"]
+
+        # Decompose fleet_breakdown[] by category
+        breakdown = flat_fleet.get("fleet_breakdown") or []
+        _CAT_CHARTERED = {"chartered", "chartered-in", "time charter", "tc", "leased"}
+        _CAT_ORDER = {"on order", "newbuild", "order", "orderbook", "newbuilding"}
+        _CAT_OWNED = {"owned", "self-owned", "own"}
+        for row in breakdown:
+            if not isinstance(row, dict):
+                continue
+            cat = str(row.get("category") or "").lower().strip()
+            vc = row.get("vessel_count")
+            teu = row.get("total_teu")
+            if any(k in cat for k in _CAT_CHARTERED):
+                if "chartered_vessel_count" not in flat_fleet and vc is not None:
+                    flat_fleet["chartered_vessel_count"] = vc
+                if "chartered_total_teu" not in flat_fleet and teu is not None:
+                    flat_fleet["chartered_total_teu"] = teu
+            elif any(k in cat for k in _CAT_ORDER):
+                if "on_order_vessel_count" not in flat_fleet and vc is not None:
+                    flat_fleet["on_order_vessel_count"] = vc
+                if "on_order_total_teu" not in flat_fleet and teu is not None:
+                    flat_fleet["on_order_total_teu"] = teu
+            elif any(k in cat for k in _CAT_OWNED):
+                # Reinforce owned counts if not already set
+                if "owned_vessel_count" not in flat_fleet and vc is not None:
+                    flat_fleet["owned_vessel_count"] = vc
+                if "owned_total_teu" not in flat_fleet and teu is not None:
+                    flat_fleet["owned_total_teu"] = teu
+
+        # Fallback: derive on_order counts from orderbook[] length + teu sum
+        orderbook = flat_fleet.get("orderbook") or []
+        if "on_order_vessel_count" not in flat_fleet and orderbook:
+            valid_ob = [r for r in orderbook if isinstance(r, dict) and r.get("vessel_name")]
+            if valid_ob:
+                flat_fleet["on_order_vessel_count"] = len(valid_ob)
+                teu_sum = sum(
+                    float(r["teu"]) for r in valid_ob if r.get("teu") is not None
+                )
+                if teu_sum > 0 and "on_order_total_teu" not in flat_fleet:
+                    flat_fleet["on_order_total_teu"] = teu_sum
+
+        result["4F_fleet"] = flat_fleet
+
+    return result
+
+
 _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     # §1 — Credit Facility (facility_summary totals)
     (1, "facility_summary", "totals.total_credit_limit_usd_m", "credit_limit_usd_m",   "mn"),
@@ -1876,6 +1999,13 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (4, "4E_financials", "net_income",                 "net_income",                "mn"),
     (4, "4F_fleet",    "total_fleet_teu",              "total_fleet_teu",           None),
     (4, "4F_fleet",    "total_vessels",                "total_vessels",             None),
+    # Flat fleet keys produced by _flatten_section4
+    (4, "4F_fleet",    "owned_vessel_count",           "owned_vessel_count",        None),
+    (4, "4F_fleet",    "owned_total_teu",              "owned_total_teu",           None),
+    (4, "4F_fleet",    "chartered_vessel_count",       "chartered_vessel_count",    None),
+    (4, "4F_fleet",    "chartered_total_teu",          "chartered_total_teu",       None),
+    (4, "4F_fleet",    "on_order_vessel_count",        "on_order_vessel_count",     None),
+    (4, "4F_fleet",    "on_order_total_teu",           "on_order_total_teu",        None),
 
     # §5 — Collateral / Guarantor (5B milestones flattened by _flatten_section5)
     (5, "5B_refund_guarantee", "lag_time_days",          "rg_lag_time_days",              None),
@@ -1900,6 +2030,7 @@ _ETL_FACT_MAP: list[tuple[int, str, str, str, Optional[str]]] = [
     (5, "5F_corporate_guarantee", "cash_twd_bn",          "guarantor_cash_twd_bn",        "bn"),
     (5, "5F_corporate_guarantee", "cash_usd_bn",          "guarantor_cash_usd_bn",        "bn"),
     (5, "5F_corporate_guarantee", "total_debt_twd_bn",    "guarantor_total_debt_twd_bn",  "bn"),
+    (5, "5F_corporate_guarantee", "total_debt_usd_bn",    "guarantor_total_debt_usd_bn",  "bn"),
     (5, "5F_corporate_guarantee", "net_worth_twd_bn",     "guarantor_net_worth_twd",      "bn"),
     (5, "5F_corporate_guarantee", "revenue_twd_bn",       "guarantor_revenue_twd",        "bn"),
     (5, "5F_corporate_guarantee", "ebitda_twd_bn",        "guarantor_ebitda_twd",         "bn"),

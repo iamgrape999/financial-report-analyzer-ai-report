@@ -127,6 +127,49 @@ facts:
     period: "CURRENT"
     unit: "TEU"
 
+  # Flat keys produced by _flatten_section4 (FIELD_DEFS-compatible paths)
+  - id_template: "FLEET-OWNED-COUNT-{entity}-CURRENT"
+    path: "4F_fleet.owned_vessel_count"
+    metric: "owned_vessel_count"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "vessels"
+
+  - id_template: "FLEET-OWNED-TOTALTEU-{entity}-CURRENT"
+    path: "4F_fleet.owned_total_teu"
+    metric: "owned_total_teu"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "TEU"
+
+  - id_template: "FLEET-CHARTERED-COUNT-{entity}-CURRENT"
+    path: "4F_fleet.chartered_vessel_count"
+    metric: "chartered_vessel_count"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "vessels"
+
+  - id_template: "FLEET-CHARTERED-TEU-{entity}-CURRENT"
+    path: "4F_fleet.chartered_total_teu"
+    metric: "chartered_total_teu"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "TEU"
+
+  - id_template: "FLEET-ONORDER-COUNT-{entity}-CURRENT"
+    path: "4F_fleet.on_order_vessel_count"
+    metric: "on_order_vessel_count"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "vessels"
+
+  - id_template: "FLEET-ONORDER-TEU-{entity}-CURRENT"
+    path: "4F_fleet.on_order_total_teu"
+    metric: "on_order_total_teu"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "TEU"
+
   # ── Market data ────────────────────────────────────────────────────────────────
   - id_template: "MKT-CCFI-{entity}-CURRENT"
     path: "4I_market_data.ccfi_level"

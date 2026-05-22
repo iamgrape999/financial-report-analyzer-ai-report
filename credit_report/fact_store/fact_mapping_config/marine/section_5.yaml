@@ -175,6 +175,14 @@ facts:
     currency: "TWD"
     unit: "billion"
 
+  - id_template: "FIN-DEBT-USD-GUAR-{entity}-{period}"
+    path: "5F_corporate_guarantee.total_debt_usd_bn"
+    metric: "guarantor_total_debt_usd_bn"
+    entity: "GUARANTOR"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "billion"
+
   - id_template: "FIN-NW-TWD-GUAR-{entity}-{period}"
     path: "5F_corporate_guarantee.net_worth_twd_bn"
     metric: "guarantor_net_worth_twd"

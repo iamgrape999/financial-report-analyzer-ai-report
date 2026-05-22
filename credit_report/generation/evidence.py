@@ -225,19 +225,23 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     return ""
 
 
+_PDF_SPARSE_PAGE_THRESHOLD = 50   # chars below which a page is considered "image-only"
+_PDF_MAX_IMAGE_PAGE_OCR = 5       # max Vision OCR calls per PDF for sparse pages
+
+
 def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
     """Extract text + tables from PDF via pdfplumber, rendering tables as Markdown.
 
-    Used as a quality supplement: when pdfminer/pypdf produce quality text we
-    prepend pdfplumber's table-aware extraction so ETL can read structured financial
-    tables (e.g. income statement, balance sheet) that otherwise appear as
-    concatenated rows without column context.
+    Pages with embedded images but very little native text (image-only pages, e.g.
+    financial tables rendered as pictures) are sent to Gemini Vision OCR so that
+    embedded financial data is not silently lost.
     """
     try:
         import io
         import pdfplumber
 
         parts: list[str] = []
+        image_ocr_count = 0
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             for page_no, page in enumerate(pdf.pages, 1):
                 page_text = page.extract_text() or ""
@@ -255,8 +259,25 @@ def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
                             parts.append("| " + " | ".join(cells) + " |")
                 if page_text.strip():
                     parts.append(f"\n[Page {page_no}]\n{page_text}")
+                elif (
+                    image_ocr_count < _PDF_MAX_IMAGE_PAGE_OCR
+                    and len(page_text) < _PDF_SPARSE_PAGE_THRESHOLD
+                    and page.images  # pdfplumber detected embedded images on this page
+                ):
+                    # Image-only page: send to Gemini Vision so charts/tables aren't lost
+                    try:
+                        page_pdf_bytes = _render_single_pdf_page(pdf_bytes, page_no - 1)
+                        if page_pdf_bytes:
+                            vis_text = extract_text_from_image(page_pdf_bytes, "application/pdf")
+                            if vis_text.strip():
+                                parts.append(f"\n[Page {page_no} Vision OCR]\n{vis_text}")
+                                image_ocr_count += 1
+                                logger.info("[OCR] pdfplumber: page %d image-only → Vision OCR (%d chars)", page_no, len(vis_text))
+                    except Exception as page_ocr_e:
+                        logger.warning("[OCR] pdfplumber: page %d Vision OCR failed: %s", page_no, page_ocr_e)
+
         result = "\n".join(parts)
-        logger.info("[OCR] pdfplumber: extracted %d chars from PDF", len(result))
+        logger.info("[OCR] pdfplumber: extracted %d chars from PDF (image_pages_ocr=%d)", len(result), image_ocr_count)
         return result
     except ImportError:
         return ""
@@ -265,14 +286,41 @@ def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
         return ""
 
 
+def _render_single_pdf_page(pdf_bytes: bytes, page_idx: int) -> bytes:
+    """Extract a single PDF page as a minimal PDF blob for Vision OCR."""
+    try:
+        import io
+        from pypdf import PdfReader, PdfWriter
+
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        if page_idx >= len(reader.pages):
+            return b""
+        writer = PdfWriter()
+        writer.add_page(reader.pages[page_idx])
+        buf = io.BytesIO()
+        writer.write(buf)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning("[OCR] _render_single_pdf_page failed: %s", e)
+        return b""
+
+
 # ── Office format extraction ──────────────────────────────────────────────────
 
 def extract_text_from_docx(file_bytes: bytes) -> str:
-    """Extract plain text from DOCX bytes using python-docx."""
+    """Extract plain text + embedded images from DOCX bytes.
+
+    Paragraphs and native tables are extracted via python-docx.
+    Embedded images (charts rendered as pictures, scanned exhibits) are
+    sent to Gemini Vision OCR so image-based financial data is captured.
+    """
     logger.info("[OCR] extract_text_from_docx: start bytes=%dKB", len(file_bytes) // 1024)
     try:
         import io
         from docx import Document
+
+        _DOCX_MAX_IMAGE_OCR = 10
+        _DOCX_MIN_IMAGE_BYTES = 10 * 1024   # skip tiny images (icons, logos)
 
         t0 = time.perf_counter()
         doc = Document(io.BytesIO(file_bytes))
@@ -289,13 +337,45 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
                 if row_text:
                     parts.append(row_text)
                     table_rows += 1
+
+        # Extract embedded images and run Vision OCR on each
+        images_ocr_count = 0
+        try:
+            from docx.opc.constants import RELATIONSHIP_TYPE as RT
+            seen_rids: set[str] = set()
+            for rel in doc.part.rels.values():
+                if images_ocr_count >= _DOCX_MAX_IMAGE_OCR:
+                    break
+                if rel.reltype != RT.IMAGE:
+                    continue
+                rid = rel.rId
+                if rid in seen_rids:
+                    continue
+                seen_rids.add(rid)
+                try:
+                    image_bytes = rel.target_part.blob
+                    if len(image_bytes) < _DOCX_MIN_IMAGE_BYTES:
+                        continue
+                    mt = rel.target_part.content_type or "image/png"
+                    if mt not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+                        mt = "image/png"
+                    img_text = extract_text_from_image(image_bytes, mt)
+                    if img_text.strip():
+                        parts.append(f"\n[Embedded Image {images_ocr_count + 1}]\n{img_text}")
+                        images_ocr_count += 1
+                except Exception as img_e:
+                    logger.warning("[OCR] docx embedded image OCR failed: %s", img_e)
+        except Exception as img_loop_e:
+            logger.warning("[OCR] docx image loop failed: %s", img_loop_e)
+
         result = "\n".join(parts)
         elapsed = (time.perf_counter() - t0) * 1000
         stats = _quality_stats(result)
         logger.info(
             "[OCR] extract_text_from_docx: elapsed=%.0fms paragraphs=%d table_rows=%d "
-            "chars=%d ratio=%.1f%% sample=%r",
-            elapsed, para_count, table_rows, stats["chars"], stats["ratio_pct"], stats["sample"],
+            "images_ocr=%d chars=%d ratio=%.1f%% sample=%r",
+            elapsed, para_count, table_rows, images_ocr_count,
+            stats["chars"], stats["ratio_pct"], stats["sample"],
         )
         return result
     except Exception as e:
@@ -741,18 +821,19 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
             rows = list(ws.iter_rows(values_only=True))
             if not rows:
                 continue
-            if len(rows) > 201:
+            _XLSX_MAX_ROWS = 500  # per-sheet data-row cap
+            if len(rows) > _XLSX_MAX_ROWS + 1:
                 logger.warning(
-                    "[OCR] xlsx: sheet=%r has %d data rows — only first 200 extracted "
-                    "(%d rows truncated); re-save with fewer rows or split the sheet",
-                    sheet_name, len(rows) - 1, len(rows) - 201,
+                    "[OCR] xlsx: sheet=%r has %d data rows — only first %d extracted "
+                    "(%d rows truncated)",
+                    sheet_name, len(rows) - 1, _XLSX_MAX_ROWS, len(rows) - _XLSX_MAX_ROWS - 1,
                 )
             parts.append(f"\n## Sheet: {sheet_name}\n")
             headers = [str(c) if c is not None else "" for c in rows[0]]
             n_cols = len(headers)
             parts.append("| " + " | ".join(headers) + " |")
             parts.append("| " + " | ".join(["---"] * n_cols) + " |")
-            for row in rows[1:201]:   # cap at 200 data rows per sheet
+            for row in rows[1: _XLSX_MAX_ROWS + 1]:
                 raw = [str(c) if c is not None else "" for c in row]
                 # Pad/truncate to match header width so the markdown table stays valid.
                 padded = (raw + [""] * n_cols)[:n_cols]
