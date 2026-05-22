@@ -44,9 +44,10 @@ def test_section_8_yaml_loads():
     path = Path("credit_report/fact_store/fact_mapping_config/marine/section_8.yaml")
     cfg = yaml.safe_load(path.read_text())
     ids = [f["id_template"] for f in cfg["facts"]]
-    assert "ACRA-NEW-CHARGES-{entity}-CURRENT" in ids
-    assert "BANKING-CUB-TOTAL-USD-{entity}-CURRENT" in ids
-    assert len(cfg["facts"]) == 5
+    # Paths now use flat form FIELD_DEFS paths (hoisted by _flatten_section8)
+    assert "ACRA-TOTAL-CHARGES-{entity}-CURRENT" in ids
+    assert "ACRA-CUB-TOTAL-USD-{entity}-CURRENT" in ids
+    assert len(cfg["facts"]) == 6
 
 
 def test_section_9_yaml_loads():
@@ -55,9 +56,10 @@ def test_section_9_yaml_loads():
     path = Path("credit_report/fact_store/fact_mapping_config/marine/section_9.yaml")
     cfg = yaml.safe_load(path.read_text())
     ids = [f["id_template"] for f in cfg["facts"]]
-    assert "COMPLIANCE-RECOMMENDATION-{entity}-CURRENT" in ids
-    assert "COMPLIANCE-OUTSTANDING-ITEMS-{entity}-CURRENT" in ids
-    assert len(cfg["facts"]) == 5
+    # Paths now use actual FIELD_DEFS paths (9C_recommendation.*, 9A_checklist.*)
+    assert "REC-FACILITY-AMT-{entity}-CURRENT" in ids
+    assert "REC-TENOR-YEARS-{entity}-CURRENT" in ids
+    assert len(cfg["facts"]) == 6
 
 
 def test_section_10_yaml_loads():
@@ -67,50 +69,49 @@ def test_section_10_yaml_loads():
     cfg = yaml.safe_load(path.read_text())
     ids = [f["id_template"] for f in cfg["facts"]]
     assert "EXPOSURE-APPROVED-GROUP-LIMIT-{entity}-CURRENT" in ids
-    assert "STRESS-DSCR-BASE-{entity}-FY2025F" in ids
-    assert "STRESS-DSCR-WORSE-{entity}-FY2025F" in ids
-    assert len(cfg["facts"]) == 9
+    # Correct prefix is 10C_projections (not 10C_financial_projections)
+    assert "PROJ-BASE-DSCR-FY1-{entity}-{period}" in ids
+    assert "PROJ-WORSE-DSCR-FY1-{entity}-{period}" in ids
+    assert len(cfg["facts"]) == 11
 
 
 def test_section_8_extraction_from_input():
     from credit_report.fact_store.input_extractor import InputFactExtractor
     extractor = InputFactExtractor(8)
+    # Input uses flat paths matching FIELD_DEFS (summary fields hoisted by _flatten_section8)
     input_json = {
         "8A_acra_banking_charges": {
-            "new_charges": False,
-            "comments": "No new charges imposed since last review.",
-        },
-        "8B_banking_changes": {
-            "total_facilities": 12,
-            "cub_total_usd_m": 213.84,
-            "cub_share_pct": 28.5,
+            "total_charges": 5,
+            "active_charges": 3,
+            "satisfied_charges": 2,
+            "total_active_usd_m": 150.0,
+            "cub_charge_count": 2,
+            "cub_total_usd_m": 100.0,
         },
     }
     facts = extractor.extract(REPORT_ID, input_json)
     metrics = {f["metric_name"] for f in facts}
-    assert "new_banking_charges" in metrics
-    assert "cub_total_exposure_usd_m" in metrics
-    assert "total_banking_facilities" in metrics
+    assert "total_acra_charges" in metrics
+    assert "cub_acra_total_usd_m" in metrics
+    assert "active_acra_charges" in metrics
     assert len(facts) >= 3
 
 
 def test_section_10_extraction_from_input():
     from credit_report.fact_store.input_extractor import InputFactExtractor
     extractor = InputFactExtractor(10)
+    # Correct sub-key is 10C_projections (not 10C_financial_projections)
     input_json = {
         "10A_group_exposure": {
             "approved_group_limit_usd_m": 750,
             "proposed_exposure_usd_m": 213.84,
             "existing_exposure_usd_m": 170.0,
-            "total_fleet_teu": 280000,
         },
-        "10C_financial_projections": {
-            "base_dscr_fy2025": 12.5,
-            "worse_dscr_fy2025": 10.0,
-            "base_revenue_fy2025": 8500,
-            "worse_revenue_fy2025": 6800,
-            "reporting_currency": "USD",
-            "unit": "million",
+        "10C_projections": {
+            "base_dscr_fy_1": 12.5,
+            "worse_dscr_fy_1": 10.0,
+            "base_revenue_fy_1": 8500,
+            "worse_revenue_fy_1": 6800,
             "freight_rate_drop_pct": 30.0,
         },
     }
@@ -119,9 +120,9 @@ def test_section_10_extraction_from_input():
     assert "approved_group_limit_usd_m" in metrics
     assert "dscr_base_case" in metrics
     assert "dscr_stress_case" in metrics
-    # Periods for stress facts must be FY2025F
+    # Period is FY2026F per YAML (first projection year)
     base_dscr = next(f for f in facts if f["metric_name"] == "dscr_base_case")
-    assert base_dscr["period"] == "FY2025F"
+    assert base_dscr["period"] == "FY2026F"
 
 
 # ── _run_recalculate_core ─────────────────────────────────────────────────────
