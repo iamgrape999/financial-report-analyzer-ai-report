@@ -65,25 +65,36 @@ async def _safe_add_columns(conn) -> None:
             pass  # SQLite: unsupported; PostgreSQL already TEXT: no-op
 
     # Deduplicate section_inputs and section_outputs: keep the row with the lowest id
-    # per (report_id, section_no). Duplicate rows arise from concurrent generation
-    # requests both inserting when no row existed yet (race condition).
+    # per (report_id, section_no). This runs index-first: if the unique index already
+    # exists (subsequent startups), CREATE ... IF NOT EXISTS is a no-op and no data is
+    # touched. Only when the index cannot be created because duplicate rows exist (first
+    # deployment against a database that already has legacy concurrent-write duplicates)
+    # does the one-time DELETE run before creating the index.
     for tbl in ("section_inputs", "section_outputs"):
+        idx_name = f"uq_{tbl}_report_section"
         try:
+            # IF NOT EXISTS → no-op when index is already there (all subsequent startups).
+            # Fails with duplicate-key error only when legacy duplicate rows block creation.
             await conn.execute(text(
-                f"DELETE FROM {tbl} WHERE id NOT IN ("
-                f"  SELECT MIN(id) FROM {tbl} GROUP BY report_id, section_no"
-                f")"
+                f"CREATE UNIQUE INDEX IF NOT EXISTS {idx_name} "
+                f"ON {tbl} (report_id, section_no)"
             ))
+            logger.info("_safe_add_columns: unique constraint on %s verified", tbl)
+        except Exception:
+            # Legacy duplicate rows are blocking index creation — clean up once.
             try:
                 await conn.execute(text(
-                    f"CREATE UNIQUE INDEX IF NOT EXISTS uq_{tbl}_report_section "
+                    f"DELETE FROM {tbl} WHERE id NOT IN ("
+                    f"  SELECT MIN(id) FROM {tbl} GROUP BY report_id, section_no"
+                    f")"
+                ))
+                await conn.execute(text(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS {idx_name} "
                     f"ON {tbl} (report_id, section_no)"
                 ))
-                logger.info("_safe_add_columns: unique index created on %s", tbl)
-            except Exception:
-                pass  # Index may already exist
-        except Exception as e:
-            logger.warning("_safe_add_columns: dedup %s failed (non-critical): %s", tbl, e)
+                logger.info("_safe_add_columns: one-time deduplicated and indexed %s", tbl)
+            except Exception as e:
+                logger.warning("_safe_add_columns: dedup %s failed: %s", tbl, e)
 
 # Initialise logging before anything else logs
 setup_logging()
@@ -96,6 +107,10 @@ async def _seed_admin() -> None:
     if not email or not password:
         logger.info("ADMIN_EMAIL / ADMIN_PASSWORD not set — skipping admin seed")
         return
+    # ADMIN_BOOTSTRAP_OVERRIDE=true re-syncs credentials from env on every restart.
+    # Without it this function is first-run-only: it creates the account but never
+    # silently overwrites a password that may have been changed in production.
+    allow_override = os.getenv("ADMIN_BOOTSTRAP_OVERRIDE", "").lower() == "true"
     async with AsyncSessionLocal() as session:
         # Exact-match first, then case-insensitive fallback
         result = await session.execute(select(User).where(User.email == email))
@@ -108,13 +123,18 @@ async def _seed_admin() -> None:
                             user.email, email)
 
         if user:
-            # Always sync password from env var — ensures ADMIN_PASSWORD change takes effect immediately.
-            # This is intentional: env var is the source of truth for the admin credential.
-            user.hashed_password = hash_password(password)
-            user.is_active = True
-            user.role = "admin"
-            await session.commit()
-            logger.info("_seed_admin: synced password for admin=%s from ADMIN_PASSWORD env var", user.email)
+            if allow_override:
+                user.hashed_password = hash_password(password)
+                user.is_active = True
+                user.role = "admin"
+                await session.commit()
+                logger.info("_seed_admin: ADMIN_BOOTSTRAP_OVERRIDE — synced credentials for admin=%s", user.email)
+            else:
+                logger.info(
+                    "_seed_admin: admin account already exists email=%s — skipping credential sync "
+                    "(set ADMIN_BOOTSTRAP_OVERRIDE=true to force env-var sync)",
+                    user.email,
+                )
         else:
             session.add(User(
                 id=str(uuid.uuid4()),
@@ -176,6 +196,21 @@ app.add_middleware(
 
 
 # ── Request / response logging middleware ─────────────────────────────────────
+# Only trust x-forwarded-for when the server is behind a known reverse proxy.
+# Without explicit proxy config, use the socket-level client IP to prevent
+# log-poisoning via spoofed headers.
+_TRUSTED_PROXY = os.getenv("TRUSTED_PROXY_IPS", "")
+
+
+def _client_ip(request: Request) -> str:
+    """Return the most-trustworthy client IP for logging and audit."""
+    if _TRUSTED_PROXY:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     req_id = str(uuid.uuid4())[:8]
@@ -189,7 +224,7 @@ async def log_requests(request: Request, call_next):
             req_id,
             request.method,
             path,
-            request.headers.get("x-forwarded-for", request.client.host if request.client else "?"),
+            _client_ip(request),
             request.headers.get("user-agent", "")[:60],
         )
 
@@ -201,7 +236,11 @@ async def log_requests(request: Request, call_next):
             "[%s] ← UNHANDLED EXCEPTION %s %s | %.1fms | %s",
             req_id, request.method, path, elapsed, exc,
         )
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error", "request_id": req_id},
+            headers={"X-Request-ID": req_id},
+        )
 
     elapsed = (time.perf_counter() - start) * 1000
     if not path.startswith("/static"):
@@ -212,6 +251,7 @@ async def log_requests(request: Request, call_next):
             req_id, response.status_code, request.method, path, elapsed,
         )
 
+    response.headers["X-Request-ID"] = req_id
     return response
 
 
@@ -234,12 +274,21 @@ async def ui():
 
 @app.get("/health", tags=["health"])
 async def health():
-    from credit_report.config import CREDIT_REPORTS_ROOT, DATABASE_URL
     import pathlib
+    from credit_report.config import CREDIT_REPORTS_ROOT
+
+    # DB connectivity check
+    db_ok = False
+    db_error = None
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as e:
+        db_error = str(e)
 
     # Disk write test
     disk_ok = False
-    disk_path = str(CREDIT_REPORTS_ROOT)
     disk_error = None
     try:
         probe = pathlib.Path(CREDIT_REPORTS_ROOT) / ".health_probe"
@@ -250,15 +299,13 @@ async def health():
     except Exception as e:
         disk_error = str(e)
 
-    # DB type
-    db_backend = "sqlite" if "sqlite" in DATABASE_URL else "postgresql"
-
-    return {
-        "ok": True,
+    healthy = db_ok and disk_ok
+    body = {
+        "ok": healthy,
         "service": "financial-report-analyzer",
-        "production": IS_PRODUCTION,
-        "db_backend": db_backend,
-        "disk_writable": disk_ok,
-        "disk_path": disk_path,
-        **({"disk_error": disk_error} if disk_error else {}),
+        "checks": {
+            "db": {"ok": db_ok, **({"error": db_error} if db_error else {})},
+            "disk": {"ok": disk_ok, **({"error": disk_error} if disk_error else {})},
+        },
     }
+    return JSONResponse(status_code=200 if healthy else 503, content=body)

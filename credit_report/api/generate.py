@@ -946,6 +946,8 @@ async def import_section_json(
         raise HTTPException(status_code=400, detail="section_no must be 1-11")
 
     raw = await file.read()
+    if len(raw) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
     try:
         payload: dict = json.loads(raw.decode("utf-8", errors="replace"))
     except json.JSONDecodeError as exc:
