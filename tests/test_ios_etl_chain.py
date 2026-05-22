@@ -664,11 +664,12 @@ class TestIOSPopupSafety:
         body = m.group(1)
         assert "window.open" in body
 
-    def test_popup_blocked_toast_message_present(self):
-        """If popup is blocked on iOS, user must see a clear toast message."""
+    def test_ios_download_guidance_present(self):
+        """iOS users must see guidance on how to save the file (no popup needed)."""
         html = _load_html()
-        # _dlBlobSafe should show a toast if window.open returns null
-        assert "Pop-up blocked" in html or "pop-up" in html.lower() or "popup" in html.lower()
+        # _dlBlobSafe now uses a.click() instead of window.open() on iOS,
+        # so a toast with Share/Save instructions is shown instead of popup warning
+        assert "Save to Files" in html or "Share" in html or "tap" in html.lower()
 
     def test_ios_share_instructions_in_toast(self):
         """iOS users must be instructed how to save (Share → Save to Files)."""
