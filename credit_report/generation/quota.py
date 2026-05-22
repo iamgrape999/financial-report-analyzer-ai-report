@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -13,13 +14,20 @@ from credit_report.generation.models import UserTokenQuota
 
 # Per-user locks prevent concurrent requests from both passing check_quota()
 # before either records tokens (TOCTOU race condition).
-_quota_locks: dict[str, asyncio.Lock] = {}
+# Bounded to avoid unbounded memory growth on long-running servers.
+_MAX_QUOTA_LOCKS = 10_000
+_quota_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
 
 
 def _get_quota_lock(user_id: str) -> asyncio.Lock:
-    if user_id not in _quota_locks:
-        _quota_locks[user_id] = asyncio.Lock()
-    return _quota_locks[user_id]
+    if user_id in _quota_locks:
+        _quota_locks.move_to_end(user_id)
+        return _quota_locks[user_id]
+    lock = asyncio.Lock()
+    _quota_locks[user_id] = lock
+    if len(_quota_locks) > _MAX_QUOTA_LOCKS:
+        _quota_locks.popitem(last=False)
+    return lock
 
 # Per-role daily token limits — higher-trust roles get more headroom.
 # DAILY_TOKEN_LIMIT (env var) sets the analyst baseline; others scale from it.

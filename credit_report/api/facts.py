@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from credit_report.audit.events import write_event
 from credit_report.database import get_db
 from credit_report.fact_store import repository as repo
-from credit_report.fact_store.models import FactConflict
 from credit_report.fact_store.repository import OptimisticLockError
 from credit_report.schemas import (
     FactApproveRequest,
@@ -15,7 +14,6 @@ from credit_report.schemas import (
     FactResponse,
     FactStateResponse,
     FactUpdateRequest,
-    ResolveConflictRequest,
 )
 from credit_report.models import Report
 from credit_report.security.auth import get_current_user, require_analyst, require_reviewer
@@ -28,7 +26,7 @@ async def _assert_report_access(db: AsyncSession, report_id: str, current_user: 
     """Raise 404/403 if the user cannot read this report's facts."""
     result = await db.execute(select(Report).where(Report.id == report_id))
     report = result.scalar_one_or_none()
-    if not report:
+    if not report or report.is_deleted:
         raise HTTPException(status_code=404, detail="Report not found")
     if current_user.role != "admin" and report.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -43,67 +41,6 @@ async def list_facts(
 ):
     await _assert_report_access(db, report_id, current_user)
     return await repo.get_facts_for_report(db, report_id, state_filter=state)
-
-
-@router.get("/conflicts")
-async def list_conflicts(
-    report_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await _assert_report_access(db, report_id, current_user)
-    return await repo.get_open_conflicts(db, report_id)
-
-
-@router.post("/conflicts/{conflict_id}/resolve")
-async def resolve_conflict(
-    report_id: str,
-    conflict_id: str,
-    payload: ResolveConflictRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_analyst),
-):
-    """Resolve a fact conflict: approve the chosen fact, deprecate the rejected ones."""
-    result = await db.execute(
-        select(FactConflict).where(
-            FactConflict.id == conflict_id,
-            FactConflict.report_id == report_id,
-        )
-    )
-    existing = result.scalar_one_or_none()
-    if not existing:
-        raise HTTPException(status_code=404, detail="Conflict not found")
-    if existing.status != "open":
-        raise HTTPException(status_code=400, detail=f"Conflict is already '{existing.status}'")
-
-    try:
-        conflict = await repo.resolve_conflict(
-            db,
-            conflict_id=conflict_id,
-            chosen_fact_id=payload.chosen_fact_id,
-            rejected_fact_ids=payload.rejected_fact_ids,
-            resolution_reason=payload.resolution_reason,
-            resolved_by=current_user.id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    await write_event(
-        db,
-        action="fact.conflict_resolved",
-        actor_user_id=current_user.id,
-        actor_role=current_user.role,
-        report_id=report_id,
-        target_type="fact_conflict",
-        target_id=conflict_id,
-        after=f"chosen={payload.chosen_fact_id} reason={payload.resolution_reason}",
-    )
-    return {
-        "conflict_id": conflict_id,
-        "status": "resolved",
-        "chosen_fact_id": payload.chosen_fact_id,
-        "rejected_fact_ids": payload.rejected_fact_ids,
-    }
 
 
 @router.get("/{fact_id}", response_model=FactResponse)

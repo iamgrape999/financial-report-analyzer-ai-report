@@ -28,7 +28,7 @@ async def _assert_conflict_report_access(
     """Raise 404/403 if the caller does not own the report (admin exempt)."""
     result = await db.execute(select(Report).where(Report.id == report_id))
     report = result.scalar_one_or_none()
-    if not report:
+    if not report or report.is_deleted:
         raise HTTPException(status_code=404, detail="Report not found")
     if current_user.role != "admin" and report.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")

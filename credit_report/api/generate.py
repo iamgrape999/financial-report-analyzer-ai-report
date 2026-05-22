@@ -192,20 +192,27 @@ class _ProgressBus:
                 pass
 
     async def stream(self, task_id: str) -> AsyncGenerator[str, None]:
-        """Yield SSE strings until None sentinel is received."""
+        """Yield SSE strings until None sentinel is received.
+
+        Cleans up the queue in a finally block so that early client disconnects
+        do not leave orphaned queues in memory indefinitely.
+        """
         q = self._queues.get(task_id)
         if not q:
             yield _sse("error", {"detail": "task not found"})
             return
-        while True:
-            try:
-                event = await asyncio.wait_for(q.get(), timeout=60.0)
-            except asyncio.TimeoutError:
-                yield _sse("heartbeat", {"ts": time.monotonic()})
-                continue
-            if event is None:
-                break
-            yield _sse(event.get("type", "progress"), event)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    yield _sse("heartbeat", {"ts": time.monotonic()})
+                    continue
+                if event is None:
+                    break
+                yield _sse(event.get("type", "progress"), event)
+        finally:
+            self._queues.pop(task_id, None)
 
 
 _progress_bus = _ProgressBus()
@@ -377,7 +384,7 @@ async def upload_document(
 
     doc_id = str(uuid.uuid4())
     logger.info("upload_document: extracting text file=%r type=%s bytes=%d doc=%s report=%s", fname, document_type, len(file_bytes), doc_id, report_id)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         text, detected_fmt = await asyncio.wait_for(
             loop.run_in_executor(None, partial(extract_text_from_file, file_bytes, fname)),
@@ -501,7 +508,7 @@ async def etl_document_endpoint(
                 "etl_document_endpoint: .txt missing, re-extracting from binary doc=%s file=%r report=%s",
                 doc_id, stored_fname, report_id,
             )
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             reextracted_text, _ = await loop.run_in_executor(
                 None, partial(extract_text_from_file, bin_path.read_bytes(), stored_fname)
             )
@@ -658,7 +665,7 @@ async def etl_document_stream(
                             _quality_stats,
                         )
                         raw = bin_path.read_bytes()
-                        loop = asyncio.get_event_loop()
+                        loop = asyncio.get_running_loop()
                         text = await loop.run_in_executor(None, extract_text_from_pdf, raw)
                         stats = _quality_stats(text)
 
@@ -700,7 +707,7 @@ async def etl_document_stream(
                     else:
                         raw = bin_path.read_bytes()
                         from credit_report.generation.evidence import extract_text_from_file
-                        loop = asyncio.get_event_loop()
+                        loop = asyncio.get_running_loop()
                         text, _ = await loop.run_in_executor(None, extract_text_from_file, raw, stored_fname)
                         save_document_text(report_id, doc_id, text)
                 else:

@@ -28,7 +28,7 @@ async def _get_report_or_403(db: AsyncSession, report_id: str, current_user) -> 
     """Fetch report and enforce ownership (admin sees all, analyst sees own only)."""
     result = await db.execute(select(Report).where(Report.id == report_id))
     report = result.scalar_one_or_none()
-    if not report:
+    if not report or report.is_deleted:
         raise HTTPException(status_code=404, detail="Report not found")
     if current_user.role != "admin" and report.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
