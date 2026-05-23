@@ -174,7 +174,9 @@ async def patch_block(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    await _get_report_or_403(db, report_id, current_user)
+    report = await _get_report_or_403(db, report_id, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports are immutable")
     block = await block_repo.get_block(db, block_id)
     if not block or block.report_id != report_id:
         raise HTTPException(status_code=404, detail="Block not found")

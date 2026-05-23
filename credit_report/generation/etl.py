@@ -2120,16 +2120,20 @@ def _get_nested(d: dict, dotted_path: str):
 
 
 def _normalise_year_key(key: str) -> str:
-    """Convert FY_YYYY / YYYY / YYYYF to canonical 'FY2024' period string."""
+    """Convert FY_YYYY / fy_yyyy / YYYY / YYYYF to canonical 'FY2024' period string."""
     import re
     s = str(key).strip()
-    if "YYYY" in s or "QN" in s:
+    su = s.upper()
+    if "YYYY" in su or "QN" in su:
         return s  # template placeholder — skip
-    if re.match(r"^FY\d{4}", s):
-        return s  # already canonical: FY2024, FY2024F
-    m = re.match(r"^FY_(\d{4})([A-Za-z]?)$", s)
+    # Already canonical: FY2024, FY2024F (case-insensitive check, return uppercase)
+    if re.match(r"^FY\d{4}", su):
+        return re.sub(r"^FY(\d{4})([A-Za-z]?)$", lambda m: f"FY{m.group(1)}{m.group(2).upper()}", su)
+    # FY_2024 / fy_2024 / FY_2024F
+    m = re.match(r"^FY_(\d{4})([A-Za-z]?)$", su)
     if m:
         return f"FY{m.group(1)}{m.group(2).upper()}"
+    # 2024 / 2024F / 2024f
     m = re.match(r"^(\d{4})([FEfe]?)$", s)
     if m:
         suffix = m.group(2).upper()

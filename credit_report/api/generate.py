@@ -157,6 +157,11 @@ class _TaskStore:
 
 _generation_tasks = _TaskStore()
 
+# Per-(report_id, section_no) lock — prevents duplicate concurrent generation of
+# the same section.  Entries are added just before the BackgroundTask is queued
+# and removed when the background task finishes (success or error).
+_generating_sections: set[tuple[str, int]] = set()
+
 
 # ── SSE Progress Bus ──────────────────────────────────────────────────────────
 
@@ -1201,6 +1206,14 @@ async def generate_section(
             detail=f"Hard dependencies not yet generated: sections {missing}",
         )
 
+    gen_key = (report_id, section_no)
+    if gen_key in _generating_sections:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Section {section_no} is already being generated for this report",
+        )
+    _generating_sections.add(gen_key)
+
     task_id = str(uuid.uuid4())
     _generation_tasks.set(task_id, {"status": "running", "section_no": section_no, "report_id": report_id})
     user_id, user_role = current_user.id, current_user.role
@@ -1260,6 +1273,8 @@ async def generate_section(
                     "generate_section[bg]: error section=%d report=%s: %s",
                     section_no, report_id, exc,
                 )
+            finally:
+                _generating_sections.discard(gen_key)
 
     background_tasks.add_task(_bg_generate_section)
     logger.info("generate_section: queued task=%s section=%d report=%s user=%s", task_id, section_no, report_id, user_id)

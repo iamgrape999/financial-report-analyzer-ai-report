@@ -235,6 +235,8 @@ async def save_section_input(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     _assert_owner_or_admin(report, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports are immutable")
 
     # Upsert section input — always read newest row (DESC) so subsequent saves are idempotent
     si_result = await db.execute(
@@ -964,6 +966,8 @@ async def apply_field_suggestions(
         raise HTTPException(status_code=404, detail="Report not found")
     # Apply requires edit rights (not just view)
     _assert_owner_or_admin(report, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports are immutable")
 
     # Load active facts for re-validation
     all_facts = await get_facts_for_report(db, report_id)

@@ -116,16 +116,20 @@ def create_test_environment():
 def reset_in_memory_security_state():
     """Reset per-process in-memory security state between tests.
 
-    The rate limiter, brute-force tracker, and refresh-token revocation list
-    are module-level dicts that persist across tests in the same process.
-    Resetting them prevents earlier tests from causing 429s/401s in later ones.
+    The rate limiter, brute-force tracker, refresh-token revocation list,
+    and generation-lock set are module-level dicts/sets that persist across
+    tests in the same process.  Resetting them prevents earlier tests from
+    causing 429s/401s/409s in later ones.
     """
     from credit_report.security.rate_limit import reset_all as rl_reset
     from credit_report.api.auth import _failed, _revoked_refresh
+    from credit_report.api.generate import _generating_sections
     rl_reset()
     _failed.clear()
     _revoked_refresh.clear()
+    _generating_sections.clear()
     yield
     rl_reset()
     _failed.clear()
     _revoked_refresh.clear()
+    _generating_sections.clear()

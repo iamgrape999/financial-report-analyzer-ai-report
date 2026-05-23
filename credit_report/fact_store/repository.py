@@ -203,6 +203,11 @@ async def _detect_and_create_conflicts(
     different source_type whose value disagrees.  Creates a FactConflict row and
     transitions both facts to 'conflicted' if no open conflict already exists for
     the pair.
+
+    Three-way conflicts (A vs B vs C from three different sources) are handled
+    naturally: each new fact is checked against ALL non-deprecated peers including
+    those already in 'conflicted' state, so A-C and B-C pairs are created in
+    addition to the existing A-B pair.
     """
     peer_result = await db.execute(
         select(CanonicalFact).where(
@@ -211,7 +216,8 @@ async def _detect_and_create_conflicts(
             CanonicalFact.entity == new_fact.entity,
             CanonicalFact.period == new_fact.period,
             CanonicalFact.source_type != new_fact.source_type,
-            CanonicalFact.state.notin_(["deprecated", "conflicted"]),
+            CanonicalFact.id != new_fact.id,
+            CanonicalFact.state != "deprecated",
         )
     )
     peers = peer_result.scalars().all()
@@ -405,9 +411,12 @@ async def create_conflict(
     )
     db.add(conflict)
 
-    # Both facts enter conflicted state
-    await update_fact_state(db, fact_a.id, "conflicted", "system")
-    await update_fact_state(db, fact_b.id, "conflicted", "system")
+    # Transition facts to 'conflicted' state — skip if already conflicted (can happen
+    # in three-way conflicts where a fact already has an earlier conflict pair).
+    if fact_a.state != "conflicted":
+        await update_fact_state(db, fact_a.id, "conflicted", "system")
+    if fact_b.state != "conflicted":
+        await update_fact_state(db, fact_b.id, "conflicted", "system")
 
     return conflict
 
