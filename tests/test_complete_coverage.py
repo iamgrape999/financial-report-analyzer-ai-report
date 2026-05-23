@@ -373,14 +373,15 @@ class TestFactDeprecate:
         )
         assert r.status_code == 404
 
-    async def test_deprecate_writes_audit_event(self, ac, reviewer_hdrs, report):
+    async def test_deprecate_writes_audit_event(self, ac, admin_hdrs, reviewer_hdrs, report):
         fid = await _seed_fact(report["id"], state="extracted")
         await ac.post(
             f"{RPTS}/{report['id']}/facts/{fid}/deprecate",
             params={"reason": "audit check"},
             headers=reviewer_hdrs,
         )
-        audit = await ac.get(f"{RPTS}/{report['id']}/audit", headers=reviewer_hdrs)
+        # Audit trail is ownership-gated: use admin (report owner) to read it.
+        audit = await ac.get(f"{RPTS}/{report['id']}/audit", headers=admin_hdrs)
         evs = audit.json()
         events = evs["events"] if isinstance(evs, dict) else evs
         assert any(e["action"] == "fact.deprecate" for e in events)

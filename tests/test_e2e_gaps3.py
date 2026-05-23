@@ -276,17 +276,14 @@ class TestAuditPermissive:
     async def test_non_owner_analyst_can_read_audit_trail(
         self, ac, admin_hdrs, report, other_analyst
     ):
-        """GET /audit has no _assert_owner_or_admin guard — non-owner analyst
-        receives 200. This documents the current permissive design.
-        If ownership enforcement is desired here, this test should be updated to 403.
+        """GET /audit enforces ownership — non-owner analyst receives 403.
+        Ownership guard added to prevent information leakage across reports.
         """
         r = await ac.get(
             f"{REPORTS}/{report['id']}/audit",
             headers=other_analyst["headers"],
         )
-        assert r.status_code == 200
-        data = r.json()
-        assert "events" in data or isinstance(data, (list, dict))
+        assert r.status_code == 403
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -298,16 +295,14 @@ class TestRecalculatePermissive:
     async def test_non_owner_analyst_can_trigger_recalculate(
         self, ac, admin_hdrs, report, other_analyst
     ):
-        """POST /recalculate has no _assert_owner_or_admin guard — non-owner analyst
-        can trigger recalculation and receives 200. Documents current permissive design.
+        """POST /recalculate enforces ownership — non-owner analyst receives 403.
+        Ownership guard added to prevent cross-report recalculation.
         """
         r = await ac.post(
             f"{REPORTS}/{report['id']}/recalculate",
             headers=other_analyst["headers"],
         )
-        assert r.status_code == 200
-        body = r.json()
-        assert "calculations_computed" in body
+        assert r.status_code == 403
 
 
 # ══════════════════════════════════════════════════════════════════════════════
