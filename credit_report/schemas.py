@@ -40,11 +40,22 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+VALID_INDUSTRIES = {"marine", "shipping", "aviation", "real_estate", "corporate", "finance", "other"}
+
+
 class CreateReportRequest(BaseModel):
     industry: str = "marine"
     report_type: Optional[str] = None
     borrower_name: Optional[str] = None
     booking_branch: Optional[str] = None
+
+    @field_validator("industry")
+    @classmethod
+    def validate_industry(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if clean not in VALID_INDUSTRIES:
+            raise ValueError(f"industry must be one of: {sorted(VALID_INDUSTRIES)}")
+        return clean
 
 
 class ReportResponse(BaseModel):

@@ -94,8 +94,10 @@ def create_access_token(user_id: str, role: str) -> str:
 
 
 def create_refresh_token(user_id: str) -> str:
+    import secrets as _secrets
     expire = time.time() + REFRESH_TOKEN_EXPIRE_DAYS * 86400
-    return _encode_jwt({"sub": user_id, "exp": expire, "type": "refresh"})
+    jti = _secrets.token_hex(16)  # unique token ID for rotation
+    return _encode_jwt({"sub": user_id, "exp": expire, "type": "refresh", "jti": jti})
 
 
 def decode_token(token: str) -> dict:

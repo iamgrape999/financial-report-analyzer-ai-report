@@ -193,7 +193,7 @@ class TestFactDependencies:
         """Fact exists but belongs to a different report → 404."""
         fid = await _seed_fact(report["id"])
         other = (await ac.post(f"{RPTS}",
-                               json={"borrower_name": "Other", "industry": "x"},
+                               json={"borrower_name": "Other", "industry": "other"},
                                headers=admin_hdrs)).json()
         r = await ac.get(f"{RPTS}/{other['id']}/facts/{fid}/dependencies",
                          headers=admin_hdrs)

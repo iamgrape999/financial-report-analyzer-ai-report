@@ -72,6 +72,7 @@ async def resolve_conflict(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
+    await _assert_conflict_report_access(db, report_id, current_user)
     result = await db.execute(
         select(FactConflict).where(
             FactConflict.id == conflict_id,
@@ -114,6 +115,7 @@ async def mark_unresolved(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
+    await _assert_conflict_report_access(db, report_id, current_user)
     result = await db.execute(
         select(FactConflict).where(
             FactConflict.id == conflict_id,

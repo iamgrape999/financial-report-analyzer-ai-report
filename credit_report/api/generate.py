@@ -1133,12 +1133,18 @@ async def delete_document(
 async def generation_task_status(
     report_id: str,
     task_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Poll the status of a background generation task."""
     task = _generation_tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found or server was restarted")
+    # Verify the task belongs to the report in the URL to prevent IDOR.
+    if task.get("report_id") and task["report_id"] != report_id:
+        raise HTTPException(status_code=404, detail="Task not found or server was restarted")
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, current_user)
     return GenerateTaskResult(task_id=task_id, **task)
 
 
@@ -1172,7 +1178,7 @@ async def generate_section(
         )
 
     task_id = str(uuid.uuid4())
-    _generation_tasks.set(task_id, {"status": "running", "section_no": section_no})
+    _generation_tasks.set(task_id, {"status": "running", "section_no": section_no, "report_id": report_id})
     user_id, user_role = current_user.id, current_user.role
     output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
@@ -1273,7 +1279,7 @@ async def generate_full_report(
         )
 
     task_id = str(uuid.uuid4())
-    _generation_tasks.set(task_id, {"status": "running"})
+    _generation_tasks.set(task_id, {"status": "running", "report_id": report_id})
     _progress_bus.create(task_id)
     user_id, user_role = current_user.id, current_user.role
     full_output_lang = gen_language if gen_language in ("en", "zh") else "en"

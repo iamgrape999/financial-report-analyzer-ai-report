@@ -69,6 +69,26 @@ def _clear_failures(ip: str) -> None:
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# ── Refresh-token one-time-use revocation (in-memory, single-instance) ────────
+# Tracks JTI strings of refresh tokens that have already been consumed.
+# Bounded to prevent unbounded growth; old entries evict after TTL via LRU swap.
+import time as _time
+from collections import OrderedDict as _OrderedDict
+
+_REVOKED_REFRESH_MAX = 10_000   # max entries; LRU eviction beyond this
+_revoked_refresh: "_OrderedDict[str, float]" = _OrderedDict()
+
+
+def _revoke_refresh_jti(jti: str) -> None:
+    _revoked_refresh[jti] = _time.monotonic()
+    _revoked_refresh.move_to_end(jti)
+    if len(_revoked_refresh) > _REVOKED_REFRESH_MAX:
+        _revoked_refresh.popitem(last=False)
+
+
+def _is_refresh_jti_revoked(jti: str) -> bool:
+    return jti in _revoked_refresh
+
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
@@ -153,10 +173,20 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     if data.get("type") != "refresh":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not a refresh token")
 
+    # Enforce one-time use: if this token's JTI was already consumed, reject it.
+    jti = data.get("jti")
+    if jti and _is_refresh_jti_revoked(jti):
+        logger.warning("refresh: replay of revoked token user=%s", data.get("sub"))
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token already used")
+
     result = await db.execute(select(User).where(User.id == data["sub"]))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+    # Revoke the incoming token before issuing the new pair.
+    if jti:
+        _revoke_refresh_jti(jti)
 
     return TokenResponse(
         access_token=create_access_token(user.id, user.role),

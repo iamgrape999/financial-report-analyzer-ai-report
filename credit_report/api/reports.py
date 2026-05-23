@@ -41,6 +41,7 @@ from credit_report.schemas import (
 )
 from credit_report.security.auth import get_current_user, require_analyst
 from credit_report.security.models import User
+from credit_report.security.rate_limit import rate_limit_check
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -86,6 +87,8 @@ async def create_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
+    rate_limit_check(f"create_report:{current_user.id}", max_requests=100, window_seconds=86400)
+
     report = Report(
         id=str(uuid.uuid4()),
         industry=payload.industry,
@@ -737,9 +740,17 @@ async def get_field_suggestions(
         if existing is None or f.source_priority < existing.source_priority:
             me_index[key] = f
 
-    # Load YAML config for this section using the report's industry
+    # Load YAML config for this section using the report's industry.
+    # Resolve and verify the path stays inside CONFIG_DIR to prevent path traversal
+    # (industry is validated on report creation, but defence-in-depth).
     industry = report.industry or "marine"
-    config_path = CONFIG_DIR / industry / f"section_{section_no}.yaml"
+    config_path = (CONFIG_DIR / industry / f"section_{section_no}.yaml").resolve()
+    if not str(config_path).startswith(str(CONFIG_DIR.resolve())):
+        logger.error("get_field_suggestions: path traversal attempt industry=%r", industry)
+        return FieldSuggestionsResponse(
+            report_id=report_id, section_no=section_no,
+            total_facts_checked=len(active_facts), suggestions=[],
+        )
     if not config_path.exists():
         logger.warning(
             "get_field_suggestions: no YAML config for section=%d industry=%r path=%s — suggestions empty",

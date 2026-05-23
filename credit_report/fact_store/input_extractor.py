@@ -30,7 +30,11 @@ class InputFactExtractor:
 
     def __init__(self, section_no: int, industry: str = "marine") -> None:
         self.section_no = section_no
-        config_path = CONFIG_DIR / industry / f"section_{section_no}.yaml"
+        config_path = (CONFIG_DIR / industry / f"section_{section_no}.yaml").resolve()
+        if not str(config_path).startswith(str(CONFIG_DIR.resolve())):
+            logger.warning("InputFactExtractor: path traversal blocked for industry=%r", industry)
+            self.config = {}
+            return
         if config_path.exists() and _YAML_AVAILABLE:
             with config_path.open(encoding="utf-8") as f:
                 self.config = yaml.safe_load(f) or {}
