@@ -1285,6 +1285,7 @@ async def _call_gemini_etl_once(
                     system_instruction=system_prompt,
                     max_output_tokens=65536,
                     thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                    response_mime_type="application/json",
                 ),
             )
             gemini_ms = (time.perf_counter() - t_gemini) * 1000
@@ -2495,6 +2496,31 @@ def parse_financial_value(raw: str) -> tuple[Optional[float], str, str]:
     return num, currency, ""
 
 
+_DICT_VALUE_KEYS = ("value", "amount", "figure", "total", "number", "val")
+
+
+def _coerce_field_value(raw_val):
+    """Unwrap a dict/list that Gemini returned where a scalar was expected.
+
+    Gemini occasionally returns {"value": 100, "currency": "USD"} or [100]
+    instead of a bare numeric when response_mime_type is not strictly typed.
+    This extracts the numeric leaf so _try_float() can succeed.
+    """
+    if isinstance(raw_val, dict):
+        for key in _DICT_VALUE_KEYS:
+            candidate = raw_val.get(key)
+            if candidate is not None and not isinstance(candidate, (dict, list)):
+                return candidate
+        logger.debug("[ETL] _coerce_field_value: dict with no recognized scalar key: %r", raw_val)
+        return None
+    if isinstance(raw_val, list):
+        for item in raw_val:
+            if item is not None and not isinstance(item, (dict, list)):
+                return item
+        return None
+    return raw_val
+
+
 def _try_float(val) -> Optional[float]:
     """Safely convert a value to float; return None if not possible."""
     if val is None:
@@ -2504,6 +2530,12 @@ def _try_float(val) -> Optional[float]:
     if isinstance(val, str):
         parsed, _, _ = parse_financial_value(val)
         return parsed
+    # Unwrap dicts/lists before attempting float conversion
+    val = _coerce_field_value(val)
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
     try:
         return float(str(val).replace(",", "").strip())
     except (ValueError, TypeError):
@@ -2604,6 +2636,17 @@ def build_canonical_facts_from_etl(
         raw_val = _get_nested(sub, field)
         if raw_val is None:
             continue
+
+        # Unwrap dict/list wrappers Gemini may emit for scalar fields
+        # (e.g. {"value": 100, "currency": "USD"} instead of bare 100)
+        if isinstance(raw_val, (dict, list)):
+            raw_val = _coerce_field_value(raw_val)
+            if raw_val is None:
+                logger.warning(
+                    "[ETL] field %s.%s returned complex type with no extractable scalar "
+                    "— skipping metric=%s", sub_key, field, metric_name
+                )
+                continue
 
         # For string values, try to extract embedded currency/unit
         if isinstance(raw_val, str):
