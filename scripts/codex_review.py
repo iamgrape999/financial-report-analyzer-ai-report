@@ -2,22 +2,20 @@
 """AI code-review hook for Claude Code.
 
 PostToolUse hook triggered on Edit/Write to production Python files.
-Uses OPENROUTER_API_KEY (already configured in this project) with
-free-tier models — zero cost per review.
+Auto-selects the first available key in priority order — all free/cheap:
 
-Free model options (set CODEX_REVIEW_MODEL to switch):
-  poolside/laguna-m.1:free          ← best for code (coding agent, #15 Programming)
-  nvidia/nemotron-super-49b-v1:free ← strong general reasoning
-  openai/gpt-oss-120b:free          ← OpenAI open-weight 120B
-  deepseek/deepseek-chat:free       ← reliable fallback
+  1. OPENROUTER_API_KEY  → poolside/laguna-m.1:free   (coding agent, $0)
+  2. CEREBRAS_API_KEY    → llama3.1-70b                (ultra-fast inference)
+  3. GROQ_API_KEY        → llama-3.3-70b-versatile     (fast inference)
 
-Default priority:
-  1. CODEX_REVIEW_MODEL env var (explicit override)
-  2. OPENROUTER_MODEL env var (reuse project's existing setting)
-  3. poolside/laguna-m.1:free (best for code review)
+All three already exist in this project's .env — no new accounts needed.
+All three use the same OpenAI-compatible API format.
 
-Optional env vars:
-  CODEX_REVIEW_MAX_LINES  — skip files longer than this (default: 300)
+Override model for whichever provider wins:
+  CODEX_REVIEW_MODEL=<model-id>
+
+Skip files longer than:
+  CODEX_REVIEW_MAX_LINES=300  (default)
 
 Exit code: always 0 — never blocks Claude Code.
 """
@@ -29,21 +27,38 @@ import sys
 import urllib.error
 import urllib.request
 
-# ── API key ───────────────────────────────────────────────────────────────────
+MAX_LINES = int(os.getenv("CODEX_REVIEW_MAX_LINES", "300"))
 
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
-MAX_LINES      = int(os.getenv("CODEX_REVIEW_MAX_LINES", "300"))
+# ── Provider auto-detection (first key found wins) ────────────────────────────
 
-if not OPENROUTER_KEY:
+_CANDIDATES = [
+    # (provider_label, api_key, api_url, default_model)
+    (
+        "OpenRouter",
+        os.getenv("OPENROUTER_API_KEY", ""),
+        "https://openrouter.ai/api/v1/chat/completions",
+        os.getenv("OPENROUTER_MODEL") or "poolside/laguna-m.1:free",
+    ),
+    (
+        "Cerebras",
+        os.getenv("CEREBRAS_API_KEY", ""),
+        "https://api.cerebras.ai/v1/chat/completions",
+        os.getenv("CEREBRAS_MODEL") or "llama3.1-70b",
+    ),
+    (
+        "Groq",
+        os.getenv("GROQ_API_KEY", ""),
+        "https://api.groq.com/openai/v1/chat/completions",
+        os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile",
+    ),
+]
+
+_match = next((c for c in _CANDIDATES if c[1]), None)
+if not _match:
     sys.exit(0)   # no key configured → silent no-op
 
-# ── Model selection ───────────────────────────────────────────────────────────
-
-_MODEL = (
-    os.getenv("CODEX_REVIEW_MODEL")          # 1. explicit override
-    or os.getenv("OPENROUTER_MODEL")          # 2. project's existing setting
-    or "poolside/laguna-m.1:free"             # 3. best free coding model
-)
+_PROVIDER, _KEY, _URL, _MODEL = _match
+_MODEL = os.getenv("CODEX_REVIEW_MODEL") or _MODEL   # explicit override wins
 
 # ── File filtering ────────────────────────────────────────────────────────────
 
@@ -88,26 +103,24 @@ PROMPT = (
     f"```python\n{content}\n```"
 )
 
-# ── API call (OpenRouter — OpenAI-compatible format) ──────────────────────────
+# ── API call (OpenAI-compatible — same format for all three providers) ─────────
+
+headers = {
+    "Authorization": f"Bearer {_KEY}",
+    "Content-Type":  "application/json",
+}
+if _PROVIDER == "OpenRouter":
+    headers["HTTP-Referer"] = "https://github.com/iamgrape999/financial-report-analyzer-ai-report"
+    headers["X-Title"]      = "CathyChang AI Code Review"
 
 body = json.dumps({
-    "model": _MODEL,
-    "messages": [{"role": "user", "content": PROMPT}],
-    "max_tokens": 200,
+    "model":       _MODEL,
+    "messages":    [{"role": "user", "content": PROMPT}],
+    "max_tokens":  200,
     "temperature": 0.1,
 }).encode()
 
-req = urllib.request.Request(
-    "https://openrouter.ai/api/v1/chat/completions",
-    data=body,
-    headers={
-        "Authorization": f"Bearer {OPENROUTER_KEY}",
-        "Content-Type":  "application/json",
-        "HTTP-Referer":  "https://github.com/iamgrape999/financial-report-analyzer-ai-report",
-        "X-Title":       "CathyChang AI Code Review",
-    },
-    method="POST",
-)
+req = urllib.request.Request(_URL, data=body, headers=headers, method="POST")
 
 try:
     with urllib.request.urlopen(req, timeout=20) as resp:
@@ -119,11 +132,11 @@ except (urllib.error.URLError, KeyError, IndexError,
 
 # ── Print annotation ──────────────────────────────────────────────────────────
 
-icon         = "✓" if review.startswith("✓") else "🔍"
-model_short  = _MODEL.split("/")[-1].replace(":free", "")   # e.g. "laguna-m.1"
+icon        = "✓" if review.startswith("✓") else "🔍"
+model_short = _MODEL.split("/")[-1].replace(":free", "")
 
 print(
-    f"\n{icon} [OpenRouter/{model_short}] review — {os.path.basename(file_path)}:\n"
+    f"\n{icon} [{_PROVIDER}/{model_short}] review — {os.path.basename(file_path)}:\n"
     f"{review}\n",
     flush=True,
 )

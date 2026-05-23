@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Verification & live test for the OpenRouter code-review hook.
+"""Verification & live test for the multi-provider code-review hook.
 
 Usage
 -----
   # Mock only (no API cost — always works):
   python3 scripts/test_codex_review.py
 
-  # Live test (uses free model — also no cost):
-  OPENROUTER_API_KEY=sk-or-... python3 scripts/test_codex_review.py
+  # Live test (uses whichever key is set — all free/cheap):
+  OPENROUTER_API_KEY=sk-or-...  python3 scripts/test_codex_review.py
+  CEREBRAS_API_KEY=csk-...      python3 scripts/test_codex_review.py
+  GROQ_API_KEY=gsk_...          python3 scripts/test_codex_review.py
+
+Provider priority: OpenRouter → Cerebras → Groq (first key found wins).
 
 Exit codes:  0 = all passed,  1 = failures
 """
@@ -29,11 +33,24 @@ BIG_FILE  = os.path.join(ROOT, "credit_report", "api", "reports.py")
 TEST_FILE = os.path.join(ROOT, "tests", "test_gap_coverage.py")
 HTML_FILE = os.path.join(ROOT, "static", "index.html")
 
-LIVE_KEY = os.getenv("OPENROUTER_API_KEY", "")
-LIVE     = bool(LIVE_KEY)
+# Detect live provider (mirrors hook priority)
+_OR_KEY  = os.getenv("OPENROUTER_API_KEY", "")
+_CB_KEY  = os.getenv("CEREBRAS_API_KEY", "")
+_GQ_KEY  = os.getenv("GROQ_API_KEY", "")
+
+if _OR_KEY:
+    LIVE_PROVIDER, LIVE_KEY = "OpenRouter", _OR_KEY
+elif _CB_KEY:
+    LIVE_PROVIDER, LIVE_KEY = "Cerebras",   _CB_KEY
+elif _GQ_KEY:
+    LIVE_PROVIDER, LIVE_KEY = "Groq",       _GQ_KEY
+else:
+    LIVE_PROVIDER, LIVE_KEY = "", ""
+
+LIVE = bool(LIVE_KEY)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Mock HTTP server  (OpenAI-compatible — same format OpenRouter uses)
+# Mock HTTP server  (OpenAI-compatible — same format all three providers use)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _QUEUE: list[str] = []
@@ -64,13 +81,23 @@ _srv  = http.server.HTTPServer(("127.0.0.1", 0), _MockHandler)
 _port = _srv.server_address[1]
 threading.Thread(target=_srv.serve_forever, daemon=True).start()
 
+# Provider URLs to patch → mock server
+_PATCH_URLS = {
+    "openrouter": ("https://openrouter.ai/api/v1/chat/completions",
+                   f"http://127.0.0.1:{_port}/v1/chat/completions"),
+    "cerebras":   ("https://api.cerebras.ai/v1/chat/completions",
+                   f"http://127.0.0.1:{_port}/v1/chat/completions"),
+    "groq":       ("https://api.groq.com/openai/v1/chat/completions",
+                   f"http://127.0.0.1:{_port}/v1/chat/completions"),
+}
 
-def _patched() -> str:
-    """Return path to a temp copy whose OpenRouter URL points at mock server."""
+
+def _patched(provider: str) -> str:
+    """Return path to a temp copy whose provider URL points at mock server."""
     with open(SCRIPT) as f:
         src = f.read()
-    src = src.replace("https://openrouter.ai/api/v1/chat/completions",
-                      f"http://127.0.0.1:{_port}/v1/chat/completions")
+    old, new = _PATCH_URLS[provider]
+    src = src.replace(old, new)
     tf = tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False)
     tf.write(src); tf.flush()
     return tf.name
@@ -102,6 +129,9 @@ def _run(script: str, *, file_path: str = "",
                           capture_output=True, text=True)
 
 
+_NO_KEYS = {"OPENROUTER_API_KEY": "", "CEREBRAS_API_KEY": "", "GROQ_API_KEY": ""}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Test groups
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,8 +139,8 @@ def _run(script: str, *, file_path: str = "",
 def test_exclusions() -> None:
     section("A — Exclusion / no-op branches  (zero API calls)")
 
-    print("\n  [1] No API key set")
-    p = _run(SCRIPT, file_path=PROD_FILE, extra_env={"OPENROUTER_API_KEY": ""})
+    print("\n  [1] No API keys set")
+    p = _run(SCRIPT, file_path=PROD_FILE, extra_env=_NO_KEYS)
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
@@ -119,7 +149,7 @@ def test_exclusions() -> None:
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
-    print("\n  [3] HTML file (.html) excluded")
+    print("\n  [3] HTML file excluded")
     p = _run(SCRIPT, file_path=HTML_FILE, extra_env={"OPENROUTER_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
@@ -151,74 +181,115 @@ def test_error_resilience() -> None:
     check("no Traceback", "Traceback" not in p.stdout + p.stderr)
 
     print("\n  [8] Malformed JSON response → silent")
-    patched = _patched()
+    patched = _patched("openrouter")
     try:
         _QUEUE.clear(); _QUEUE.append(b"not-json{")  # type: ignore[arg-type]
         p = _run(patched, file_path=PROD_FILE,
-                 extra_env={"OPENROUTER_API_KEY": "fake"})
+                 extra_env={**_NO_KEYS, "OPENROUTER_API_KEY": "fake"})
         check("exit 0", p.returncode == 0)
         check("no Traceback", "Traceback" not in p.stdout + p.stderr)
     finally:
         os.unlink(patched)
 
 
-def test_happy_paths() -> None:
-    section("C — Happy paths via mock server")
-    patched = _patched()
-    env     = {"OPENROUTER_API_KEY": "fake-key",
-               "CODEX_REVIEW_MODEL": "poolside/laguna-m.1:free"}
+def test_provider_mock(provider_key: str, env_key: str, env_val: str,
+                       provider_label: str, model_fragment: str) -> None:
+    section(f"C.{provider_label} — Happy paths via mock server")
+    patched = _patched(provider_key)
+    env     = {**_NO_KEYS, env_key: env_val,
+               "CODEX_REVIEW_MODEL": f"test/{model_fragment}:free"}
     try:
-        print("\n  [clean] returns ✓ No critical issues")
+        print(f"\n  [clean] {provider_label} returns ✓ No critical issues")
         _QUEUE.clear(); _QUEUE.append(_CLEAN)
         p = _run(patched, file_path=PROD_FILE, extra_env=env)
-        check("exit 0",           p.returncode == 0)
-        check("prints ✓",         "✓" in p.stdout,         p.stdout[:200])
-        check("shows filename",   "events.py" in p.stdout)
-        check("shows OpenRouter", "OpenRouter/" in p.stdout)
-        check("shows model",      "laguna-m.1" in p.stdout)
-        check("no 🔍",            "🔍" not in p.stdout)
+        check("exit 0",            p.returncode == 0)
+        check("prints ✓",          "✓" in p.stdout,              p.stdout[:200])
+        check("shows filename",    "events.py" in p.stdout)
+        check("shows provider",    provider_label in p.stdout)
+        check("shows model",       model_fragment in p.stdout)
+        check("no 🔍",             "🔍" not in p.stdout)
         print(f"       Output: {p.stdout.strip()}")
 
-        print("\n  [warn] returns issues found")
+        print(f"\n  [warn]  {provider_label} returns issues found")
         _QUEUE.clear(); _QUEUE.append(_WARN)
         p = _run(patched, file_path=PROD_FILE, extra_env=env)
-        check("exit 0",           p.returncode == 0)
-        check("prints 🔍",        "🔍" in p.stdout,         p.stdout[:200])
-        check("shows filename",   "events.py" in p.stdout)
-        check("shows OpenRouter", "OpenRouter/" in p.stdout)
-        check("contains bullets", "•" in p.stdout)
+        check("exit 0",            p.returncode == 0)
+        check("prints 🔍",         "🔍" in p.stdout,              p.stdout[:200])
+        check("shows filename",    "events.py" in p.stdout)
+        check("shows provider",    provider_label in p.stdout)
+        check("contains bullets",  "•" in p.stdout)
         print(f"       Output:\n{p.stdout.strip()}")
+    finally:
+        os.unlink(patched)
 
-        print("\n  [model fallback] uses OPENROUTER_MODEL when CODEX_REVIEW_MODEL unset")
+
+def test_priority_fallback() -> None:
+    section("D — Provider priority fallback")
+
+    print("\n  [only Cerebras key set → uses Cerebras]")
+    patched = _patched("cerebras")
+    try:
         _QUEUE.clear(); _QUEUE.append(_CLEAN)
         p = _run(patched, file_path=PROD_FILE, extra_env={
-            "OPENROUTER_API_KEY": "fake-key",
-            "OPENROUTER_MODEL":   "nvidia/nemotron-super-49b-v1:free",
-            "CODEX_REVIEW_MODEL": "",
+            **_NO_KEYS,
+            "CEREBRAS_API_KEY": "fake-cerebras",
+            "CODEX_REVIEW_MODEL": "test/cerebras-model:free",
         })
-        check("exit 0",               p.returncode == 0)
-        check("uses nemotron model",  "nemotron" in p.stdout, p.stdout[:200])
+        check("exit 0",          p.returncode == 0)
+        check("uses Cerebras",   "Cerebras/" in p.stdout, p.stdout[:200])
+        print(f"       Output: {p.stdout.strip()}")
+    finally:
+        os.unlink(patched)
+
+    print("\n  [only Groq key set → uses Groq]")
+    patched = _patched("groq")
+    try:
+        _QUEUE.clear(); _QUEUE.append(_CLEAN)
+        p = _run(patched, file_path=PROD_FILE, extra_env={
+            **_NO_KEYS,
+            "GROQ_API_KEY": "fake-groq",
+            "CODEX_REVIEW_MODEL": "test/groq-model:free",
+        })
+        check("exit 0",       p.returncode == 0)
+        check("uses Groq",    "Groq/" in p.stdout, p.stdout[:200])
+        print(f"       Output: {p.stdout.strip()}")
+    finally:
+        os.unlink(patched)
+
+    print("\n  [OpenRouter takes priority over Cerebras + Groq]")
+    patched = _patched("openrouter")
+    try:
+        _QUEUE.clear(); _QUEUE.append(_CLEAN)
+        p = _run(patched, file_path=PROD_FILE, extra_env={
+            "OPENROUTER_API_KEY": "fake-openrouter",
+            "CEREBRAS_API_KEY":   "fake-cerebras",
+            "GROQ_API_KEY":       "fake-groq",
+            "CODEX_REVIEW_MODEL": "test/or-model:free",
+        })
+        check("exit 0",             p.returncode == 0)
+        check("uses OpenRouter",    "OpenRouter/" in p.stdout, p.stdout[:200])
         print(f"       Output: {p.stdout.strip()}")
     finally:
         os.unlink(patched)
 
 
 def test_live() -> None:
-    section("D — Live call  (real OpenRouter API — free model, $0 cost)")
+    section(f"E — Live call  (real {LIVE_PROVIDER or 'n/a'} API)")
 
     if not LIVE:
         print(
-            "\n  ⚠️  OPENROUTER_API_KEY not set — live section skipped.\n"
-            "\n  To run (costs nothing — free model):\n"
-            "    OPENROUTER_API_KEY=sk-or-... python3 scripts/test_codex_review.py\n"
+            "\n  ⚠️  No API key found — live section skipped.\n"
+            "\n  Set any one of these (all already in this project's .env):\n"
+            "    OPENROUTER_API_KEY=sk-or-...   (free models)\n"
+            "    CEREBRAS_API_KEY=csk-...        (ultra-fast)\n"
+            "    GROQ_API_KEY=gsk_...            (fast)\n"
         )
         return
 
     n_lines = sum(1 for _ in open(PROD_FILE))
-    print(f"\n  Key    : {LIVE_KEY[:12]}...{LIVE_KEY[-4:]}")
-    print(f"  Model  : {os.getenv('CODEX_REVIEW_MODEL') or os.getenv('OPENROUTER_MODEL') or 'poolside/laguna-m.1:free'}")
-    print(f"  Target : credit_report/audit/events.py  ({n_lines} lines)")
-    print(f"  Cost   : $0.00  (free tier model)")
+    print(f"\n  Provider : {LIVE_PROVIDER}")
+    print(f"  Key      : {LIVE_KEY[:12]}...{LIVE_KEY[-4:]}")
+    print(f"  Target   : credit_report/audit/events.py  ({n_lines} lines)")
 
     t0 = time.monotonic()
     p  = _run(SCRIPT, file_path=PROD_FILE)
@@ -233,7 +304,7 @@ def test_live() -> None:
     check("non-empty output",    p.stdout.strip() != "")
     check("annotation icon",     "✓" in p.stdout or "🔍" in p.stdout)
     check("shows filename",      "events.py" in p.stdout)
-    check("shows OpenRouter tag","OpenRouter/" in p.stdout)
+    check("shows provider tag",  any(t in p.stdout for t in ("OpenRouter/", "Cerebras/", "Groq/")))
     check("finished < 30s",      elapsed < 30, f"took {elapsed:.1f}s")
 
 
@@ -243,17 +314,25 @@ def test_live() -> None:
 
 def main() -> None:
     print("\n" + "═"*60)
-    print("  OpenRouter Code-Review Hook — Verification Suite")
-    print("  Free models · $0 per review · no cost cap needed")
+    print("  Code-Review Hook — Verification Suite")
+    print("  Providers: OpenRouter → Cerebras → Groq  (first key wins)")
     if LIVE:
-        print(f"  Live key : {LIVE_KEY[:12]}...{LIVE_KEY[-4:]}")
+        print(f"  Live provider : {LIVE_PROVIDER}  ({LIVE_KEY[:12]}...)")
     else:
-        print("  Mode     : mock only  (OPENROUTER_API_KEY not set)")
+        print("  Mode          : mock only  (no API keys set)")
     print("═"*60)
 
     test_exclusions()
     test_error_resilience()
-    test_happy_paths()
+
+    test_provider_mock("openrouter", "OPENROUTER_API_KEY", "fake-or",
+                       "OpenRouter", "laguna-m.1")
+    test_provider_mock("cerebras",   "CEREBRAS_API_KEY",   "fake-cb",
+                       "Cerebras",   "llama3.1-70b")
+    test_provider_mock("groq",       "GROQ_API_KEY",       "fake-gq",
+                       "Groq",       "llama-3.3")
+
+    test_priority_fallback()
     test_live()
 
     _srv.shutdown()
