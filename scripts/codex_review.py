@@ -2,11 +2,7 @@
 """AI code-review hook for Claude Code.
 
 PostToolUse hook triggered on Edit/Write to production Python files.
-Auto-selects the first available API key in priority order:
-
-  1. GEMINI_API_KEY   → auto-selects tier based on monthly spend (see below)
-  2. ANTHROPIC_API_KEY → claude-haiku-4-5
-  3. OPENAI_API_KEY   → gpt-4o-mini
+Uses GEMINI_API_KEY (already required by this project — no extra account needed).
 
 Gemini cost-cap tiers (monthly accumulated spend tracked in
 ~/.codex_review_usage.json, resets each calendar month):
@@ -34,31 +30,20 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-# ── Provider auto-detection ───────────────────────────────────────────────────
+# ── API key ───────────────────────────────────────────────────────────────────
 
 GEMINI_KEY     = os.getenv("GEMINI_API_KEY", "")
-ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
-OPENAI_KEY     = os.getenv("OPENAI_API_KEY", "")
 MODEL_OVERRIDE = os.getenv("CODEX_REVIEW_MODEL", "")
 MAX_LINES      = int(os.getenv("CODEX_REVIEW_MAX_LINES", "300"))
 
-if GEMINI_KEY:
-    _PROVIDER = "gemini"
-    _KEY      = GEMINI_KEY
-elif ANTHROPIC_KEY:
-    _PROVIDER = "anthropic"
-    _KEY      = ANTHROPIC_KEY
-elif OPENAI_KEY:
-    _PROVIDER = "openai"
-    _KEY      = OPENAI_KEY
-else:
+if not GEMINI_KEY:
     sys.exit(0)   # no key configured → silent no-op
 
-# ── Gemini cost-cap tier system ───────────────────────────────────────────────
+# ── Cost-cap tier system ──────────────────────────────────────────────────────
 # (spend_ceiling_usd, model_id, input_$/M, output_$/M)
 # First entry whose ceiling exceeds current month's spend wins.
 
-_GEMINI_TIERS: list[tuple[float, str, float, float]] = [
+_TIERS: list[tuple[float, str, float, float]] = [
     (15.0, "gemini-2.5-flash",      0.30, 2.50),
     (20.0, "gemini-2.0-flash",      0.10, 0.40),
     (1e9,  "gemini-2.0-flash-lite", 0.075, 0.30),
@@ -89,28 +74,21 @@ def _save_usage(usage: dict) -> None:
 
 
 def _tier_for_cost(cost: float) -> tuple[str, float, float]:
-    for ceiling, model, inp, out in _GEMINI_TIERS:
+    for ceiling, model, inp, out in _TIERS:
         if cost < ceiling:
             return model, inp, out
-    return _GEMINI_TIERS[-1][1], _GEMINI_TIERS[-1][2], _GEMINI_TIERS[-1][3]
+    return _TIERS[-1][1], _TIERS[-1][2], _TIERS[-1][3]
 
 
 # Resolve model and per-token pricing
-_INPUT_PER_M = _OUTPUT_PER_M = 0.0
-_usage: dict = {}
+_usage = _load_usage()
 
-if _PROVIDER == "gemini":
-    _usage = _load_usage()
-    if MODEL_OVERRIDE:
-        _MODEL = MODEL_OVERRIDE
-        matched = next((t for t in _GEMINI_TIERS if t[1] == MODEL_OVERRIDE), None)
-        _INPUT_PER_M, _OUTPUT_PER_M = (matched[2], matched[3]) if matched else (0.30, 2.50)
-    else:
-        _MODEL, _INPUT_PER_M, _OUTPUT_PER_M = _tier_for_cost(_usage["cost_usd"])
-elif _PROVIDER == "anthropic":
-    _MODEL = MODEL_OVERRIDE or "claude-haiku-4-5-20251001"
+if MODEL_OVERRIDE:
+    _MODEL = MODEL_OVERRIDE
+    matched = next((t for t in _TIERS if t[1] == MODEL_OVERRIDE), None)
+    _INPUT_PER_M, _OUTPUT_PER_M = (matched[2], matched[3]) if matched else (0.30, 2.50)
 else:
-    _MODEL = MODEL_OVERRIDE or "gpt-4o-mini"
+    _MODEL, _INPUT_PER_M, _OUTPUT_PER_M = _tier_for_cost(_usage["cost_usd"])
 
 # ── File filtering ────────────────────────────────────────────────────────────
 
@@ -155,106 +133,45 @@ PROMPT = (
     f"```python\n{content}\n```"
 )
 
-# ── Provider-specific request builders ───────────────────────────────────────
+# ── API call ──────────────────────────────────────────────────────────────────
 
-def _gemini_request() -> urllib.request.Request:
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{_MODEL}:generateContent?key={_KEY}"
-    )
-    body = json.dumps({
-        "contents": [{"parts": [{"text": PROMPT}]}],
-        "generationConfig": {"maxOutputTokens": 200, "temperature": 0.1},
-    }).encode()
-    return urllib.request.Request(url, data=body,
-                                  headers={"Content-Type": "application/json"},
-                                  method="POST")
-
-
-def _anthropic_request() -> urllib.request.Request:
-    body = json.dumps({
-        "model": _MODEL,
-        "max_tokens": 200,
-        "temperature": 0.1,
-        "messages": [{"role": "user", "content": PROMPT}],
-    }).encode()
-    return urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        headers={
-            "x-api-key": _KEY,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-
-def _openai_request() -> urllib.request.Request:
-    body = json.dumps({
-        "model": _MODEL,
-        "messages": [{"role": "user", "content": PROMPT}],
-        "max_tokens": 200,
-        "temperature": 0.1,
-    }).encode()
-    return urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {_KEY}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-
-def _parse_response(data: dict) -> str:
-    if _PROVIDER == "gemini":
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    if _PROVIDER == "anthropic":
-        return data["content"][0]["text"].strip()
-    return data["choices"][0]["message"]["content"].strip()   # openai
-
-
-# ── Call API ──────────────────────────────────────────────────────────────────
-
-_builders = {"gemini": _gemini_request, "anthropic": _anthropic_request,
-             "openai": _openai_request}
+url = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"{_MODEL}:generateContent?key={GEMINI_KEY}"
+)
+body = json.dumps({
+    "contents": [{"parts": [{"text": PROMPT}]}],
+    "generationConfig": {"maxOutputTokens": 200, "temperature": 0.1},
+}).encode()
+req = urllib.request.Request(url, data=body,
+                             headers={"Content-Type": "application/json"},
+                             method="POST")
 
 try:
-    req = _builders[_PROVIDER]()
     with urllib.request.urlopen(req, timeout=15) as resp:
         raw = json.loads(resp.read())
-    review = _parse_response(raw)
+    review = raw["candidates"][0]["content"]["parts"][0]["text"].strip()
 except (urllib.error.URLError, KeyError, IndexError,
         json.JSONDecodeError, TimeoutError):
     sys.exit(0)   # any failure → silent, non-blocking
 
-# ── Update Gemini cost tracking ───────────────────────────────────────────────
+# ── Update cost tracking ──────────────────────────────────────────────────────
 
-if _PROVIDER == "gemini":
-    meta    = raw.get("usageMetadata", {})
-    in_tok  = int(meta.get("promptTokenCount", 0))
-    out_tok = int(meta.get("candidatesTokenCount", 0))
-    cost    = (in_tok * _INPUT_PER_M + out_tok * _OUTPUT_PER_M) / 1_000_000
-    _usage["input_tokens"]  = _usage.get("input_tokens", 0) + in_tok
-    _usage["output_tokens"] = _usage.get("output_tokens", 0) + out_tok
-    _usage["cost_usd"]      = round(_usage.get("cost_usd", 0.0) + cost, 6)
-    _save_usage(_usage)
+meta    = raw.get("usageMetadata", {})
+in_tok  = int(meta.get("promptTokenCount", 0))
+out_tok = int(meta.get("candidatesTokenCount", 0))
+cost    = (in_tok * _INPUT_PER_M + out_tok * _OUTPUT_PER_M) / 1_000_000
+_usage["input_tokens"]  = _usage.get("input_tokens", 0) + in_tok
+_usage["output_tokens"] = _usage.get("output_tokens", 0) + out_tok
+_usage["cost_usd"]      = round(_usage.get("cost_usd", 0.0) + cost, 6)
+_save_usage(_usage)
 
 # ── Print annotation ──────────────────────────────────────────────────────────
 
 icon = "✓" if review.startswith("✓") else "🔍"
-
-if _PROVIDER == "gemini":
-    provider_tag  = f"Gemini/{_MODEL}"
-    monthly_note  = f"  [month: ${_usage['cost_usd']:.3f}]"
-else:
-    provider_tag  = {"anthropic": "Claude", "openai": "GPT-4o-mini"}[_PROVIDER]
-    monthly_note  = ""
-
 print(
-    f"\n{icon} [{provider_tag}] review — {os.path.basename(file_path)}{monthly_note}:\n"
+    f"\n{icon} [Gemini/{_MODEL}] review — {os.path.basename(file_path)}"
+    f"  [month: ${_usage['cost_usd']:.3f}]:\n"
     f"{review}\n",
     flush=True,
 )
