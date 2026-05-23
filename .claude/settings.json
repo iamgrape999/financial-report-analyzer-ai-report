@@ -12,6 +12,24 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/codex_review.py 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/codex_review.py 2>/dev/null || true"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
