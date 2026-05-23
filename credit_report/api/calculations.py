@@ -27,9 +27,20 @@ from credit_report.calculation_engine.mapping.mapping_rules import (
     get_approved_rules,
     submit_mapping_rule,
 )
+from credit_report.models import Report
 from credit_report.security.auth import get_current_user
+from credit_report.security.models import User
 
 logger = logging.getLogger(__name__)
+
+
+async def _assert_calc_access(db: AsyncSession, report_id: str, current_user: User) -> None:
+    result = await db.execute(select(Report).where(Report.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report or report.is_deleted:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if current_user.role != "admin" and report.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
 
 async def get_calc_results_for_prompt(
@@ -130,8 +141,9 @@ async def list_fx_rates(
     report_id: str,
     include_stale: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await _assert_calc_access(db, report_id, current_user)
     q = select(FXRate).where(FXRate.report_id == report_id)
     if not include_stale:
         q = q.where(FXRate.is_stale == False)  # noqa: E712
@@ -144,8 +156,9 @@ async def upsert_fx_rate(
     report_id: str,
     payload: FXRateIn,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await _assert_calc_access(db, report_id, current_user)
     rate = await set_rate(
         db, report_id, payload.from_currency, payload.to_currency,
         payload.rate, payload.rate_date, payload.source,
@@ -177,8 +190,9 @@ async def list_calculations(
     report_id: str,
     stale_only: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await _assert_calc_access(db, report_id, current_user)
     q = select(CalculationResult).where(CalculationResult.report_id == report_id)
     if stale_only:
         q = q.where(CalculationResult.is_stale == True)
@@ -260,9 +274,10 @@ async def _run_recalculate_core(db: AsyncSession, report_id: str) -> tuple[int, 
 async def recalculate(
     report_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Auto-compute all derivable financial ratios from the report's CanonicalFacts."""
+    await _assert_calc_access(db, report_id, current_user)
     computed, ep_pairs = await _run_recalculate_core(db, report_id)
     await db.commit()
     logger.info("recalculate: report=%s ep_pairs=%d computed=%d", report_id, ep_pairs, computed)
@@ -304,9 +319,10 @@ async def compute_ltv_acr(
     report_id: str,
     payload: LTVACRIn,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Compute LTV / ACR table from facility + depreciation parameters."""
+    await _assert_calc_access(db, report_id, current_user)
     from credit_report.calculation_engine.ltv_acr import (
         build_ltv_table,
         balloon_ltv_summary,
@@ -442,8 +458,9 @@ class MappingRuleOut(BaseModel):
 async def get_unmapped(
     report_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await _assert_calc_access(db, report_id, current_user)
     return await get_unmapped_queue(db, report_id)
 
 
@@ -452,8 +469,9 @@ async def create_mapping_rule(
     report_id: str,
     payload: MappingRuleIn,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await _assert_calc_access(db, report_id, current_user)
     rule = await submit_mapping_rule(
         db, report_id, payload.source_label, payload.canonical_metric,
         payload.category, current_user.id, payload.notes,
@@ -474,8 +492,9 @@ async def create_mapping_rule(
 async def list_mapping_rules(
     report_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await _assert_calc_access(db, report_id, current_user)
     return await get_approved_rules(db, report_id)
 
 
@@ -484,8 +503,9 @@ async def approve_rule(
     report_id: str,
     rule_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    await _assert_calc_access(db, report_id, current_user)
     try:
         rule = await approve_mapping_rule(db, rule_id, current_user.id)
         await db.commit()

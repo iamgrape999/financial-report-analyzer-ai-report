@@ -44,8 +44,12 @@ async def _safe_add_columns(conn) -> None:
         try:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}"))
             logger.info("_safe_add_columns: added %s.%s", table, col)
-        except Exception:
-            pass  # Column already exists — expected on subsequent startups
+        except Exception as e:
+            msg = str(e).lower()
+            if "duplicate column" in msg or "already exists" in msg:
+                pass  # expected on subsequent startups
+            else:
+                logger.warning("_safe_add_columns: unexpected error adding %s.%s: %s", table, col, e)
 
     # Widen varchar-limited columns to TEXT on PostgreSQL.
     # create_all never alters existing columns, so older production DBs retain
@@ -61,8 +65,12 @@ async def _safe_add_columns(conn) -> None:
     for stmt in _widen:
         try:
             await conn.execute(text(stmt))
-        except Exception:
-            pass  # SQLite: unsupported; PostgreSQL already TEXT: no-op
+        except Exception as e:
+            msg = str(e).lower()
+            if "syntax error" in msg or "not supported" in msg or "unsupported" in msg or "near" in msg:
+                pass  # SQLite doesn't support ALTER COLUMN TYPE — expected
+            else:
+                logger.warning("_safe_add_columns: unexpected error widening column: %s", e)
 
     # Deduplicate section_inputs and section_outputs: keep the row with the lowest id
     # per (report_id, section_no). This runs index-first: if the unique index already
@@ -268,7 +276,22 @@ async def root():
 async def ui():
     return FileResponse(
         "static/index.html",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            # Restrict resource loading to same origin + CDN allowlist.
+            # 'unsafe-inline' is required for the single-file SPA's inline scripts/styles.
+            "Content-Security-Policy": (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "img-src 'self' data:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none';"
+            ),
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+        },
     )
 
 
