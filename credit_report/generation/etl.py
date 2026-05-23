@@ -1515,8 +1515,27 @@ def _has_any_value(obj) -> bool:
     return True  # scalar non-None value
 
 
+_NAN_INF_RE = __import__("re").compile(r"\b(NaN|-?Infinity)\b")
+
+
+def _sanitize_special_floats(raw: str) -> str:
+    """Replace JavaScript-style NaN/Infinity with null before JSON parsing.
+
+    Python's json.loads rejects these valid-in-JS values, which Gemini may
+    occasionally emit.  Replacing with null ensures the surrounding object is
+    still parsed and only the affected leaf becomes None.
+    """
+    sanitized = _NAN_INF_RE.sub("null", raw)
+    if sanitized != raw:
+        logger.warning("[ETL] JSON: replaced NaN/Infinity tokens with null in output")
+    return sanitized
+
+
 def _parse_json_tolerant(raw: str, doc_type: str) -> dict | None:
     """Parse JSON, with fallback to recover truncated output."""
+    # Normalise NaN/Infinity before attempting parse
+    raw = _sanitize_special_floats(raw)
+
     # Normal parse
     try:
         parsed = json.loads(raw)

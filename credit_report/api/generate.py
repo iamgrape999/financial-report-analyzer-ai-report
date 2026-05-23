@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from credit_report.audit.events import write_event
 from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, GEMINI_API_KEY
 from credit_report.database import get_db
 from credit_report.generation.evidence import extract_text_from_file, save_document_binary, save_document_text
@@ -29,6 +30,7 @@ from credit_report.generation.pipeline import (
 from credit_report.models import Report, SectionInput, SectionOutput
 from credit_report.security.auth import get_current_user, require_analyst
 from credit_report.security.models import User
+from credit_report.security.rate_limit import rate_limit_check
 
 logger = logging.getLogger(__name__)
 
@@ -165,14 +167,42 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 class _ProgressBus:
-    """In-process pub-sub for SSE progress events keyed by task_id."""
+    """In-process pub-sub for SSE progress events keyed by task_id.
+
+    Improvements over the naive dict approach:
+    - LRU capacity cap (_MAX_QUEUES) evicts oldest queue when full
+    - TTL eviction (_QUEUE_TTL) prevents orphaned queues from zombified tasks
+    - Cancellation flag: stream() sets it on client disconnect so the background
+      ETL coroutine can check is_cancelled() and abort between chunks
+    """
+
+    _MAX_QUEUES = 1_000
+    _QUEUE_TTL = 3_600  # seconds — orphan cleanup
 
     def __init__(self) -> None:
-        self._queues: dict[str, asyncio.Queue] = {}
+        self._queues: OrderedDict[str, asyncio.Queue] = OrderedDict()
+        self._created_at: dict[str, float] = {}
+        self._cancelled: set[str] = set()
+
+    def _evict_stale(self) -> None:
+        now = time.monotonic()
+        stale = [k for k, ts in self._created_at.items() if now - ts > self._QUEUE_TTL]
+        for k in stale:
+            self._queues.pop(k, None)
+            self._created_at.pop(k, None)
+            self._cancelled.discard(k)
 
     def create(self, task_id: str) -> asyncio.Queue:
+        self._evict_stale()
         q: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self._queues[task_id] = q
+        self._created_at[task_id] = time.monotonic()
+        # LRU cap: drop the oldest entry when over budget
+        if len(self._queues) > self._MAX_QUEUES:
+            oldest_id, _ = next(iter(self._queues.items()))
+            self._queues.pop(oldest_id, None)
+            self._created_at.pop(oldest_id, None)
+            self._cancelled.discard(oldest_id)
         return q
 
     def push(self, task_id: str, event: dict) -> None:
@@ -185,17 +215,25 @@ class _ProgressBus:
 
     def close(self, task_id: str) -> None:
         q = self._queues.pop(task_id, None)
+        self._created_at.pop(task_id, None)
         if q:
             try:
                 q.put_nowait(None)
             except asyncio.QueueFull:
                 pass
 
+    def cancel(self, task_id: str) -> None:
+        """Signal the background ETL/generation task to stop cleanly."""
+        self._cancelled.add(task_id)
+
+    def is_cancelled(self, task_id: str) -> bool:
+        return task_id in self._cancelled
+
     async def stream(self, task_id: str) -> AsyncGenerator[str, None]:
         """Yield SSE strings until None sentinel is received.
 
-        Cleans up the queue in a finally block so that early client disconnects
-        do not leave orphaned queues in memory indefinitely.
+        The finally block removes the queue AND sets the cancellation flag so
+        the background task stops between chunks when the client disconnects.
         """
         q = self._queues.get(task_id)
         if not q:
@@ -213,6 +251,9 @@ class _ProgressBus:
                 yield _sse(event.get("type", "progress"), event)
         finally:
             self._queues.pop(task_id, None)
+            self._created_at.pop(task_id, None)
+            # Signal cancellation so the background task aborts between chunks
+            self._cancelled.add(task_id)
 
 
 _progress_bus = _ProgressBus()
@@ -365,6 +406,7 @@ async def upload_document(
     """Upload a document (PDF, DOCX, PPTX, TXT, JPG, PNG, etc.) for a report."""
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
+    rate_limit_check(f"upload:{current_user.id}", max_requests=10, window_seconds=3600)
 
     if document_type not in DOCUMENT_TYPES:
         document_type = "other"
@@ -480,6 +522,7 @@ async def etl_document_endpoint(
 
     report = await _require_report(db, report_id)
     _assert_can_view(report, current_user)
+    rate_limit_check(f"etl:{current_user.id}", max_requests=5, window_seconds=1800)
 
     result = await db.execute(
         select(SectionDocument).where(
@@ -531,11 +574,17 @@ async def etl_document_endpoint(
     except ValueError as exc:
         logger.warning("etl_document_endpoint: config error doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
+        await write_event(db, action="etl.failed", actor_user_id=current_user.id,
+                          actor_role=current_user.role, report_id=report_id,
+                          target_type="document", target_id=doc_id, reason=str(exc))
         await db.commit()  # commit before raise — get_db rolls back on exception
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         logger.exception("etl_document_endpoint: ETL failed doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
+        await write_event(db, action="etl.failed", actor_user_id=current_user.id,
+                          actor_role=current_user.role, report_id=report_id,
+                          target_type="document", target_id=doc_id, reason=str(exc))
         await db.commit()  # commit before raise — get_db rolls back on exception
         raise HTTPException(status_code=500, detail=f"ETL extraction failed: {exc}")
 
@@ -561,6 +610,12 @@ async def etl_document_endpoint(
                 "etl_document_endpoint: auto-registered %d facts doc=%s report=%s",
                 facts_registered, doc_id, report_id,
             )
+        else:
+            logger.warning("etl_document_endpoint: zero facts extracted doc=%s report=%s", doc_id, report_id)
+            await write_event(db, action="etl.zero_facts", actor_user_id=current_user.id,
+                              actor_role=current_user.role, report_id=report_id,
+                              target_type="document", target_id=doc_id,
+                              reason="ETL succeeded but extracted zero mappable facts")
     except Exception as _freg_err:
         logger.warning(
             "etl_document_endpoint: fact auto-registration failed doc=%s report=%s: %s",
@@ -615,6 +670,7 @@ async def etl_document_stream(
 
     report = await _require_report(db, report_id)
     _assert_can_view(report, current_user)
+    rate_limit_check(f"etl:{current_user.id}", max_requests=5, window_seconds=1800)
 
     result = await db.execute(
         select(SectionDocument).where(
@@ -632,6 +688,7 @@ async def etl_document_stream(
 
     # Capture values needed in background task
     user_id = current_user.id
+    user_role = current_user.role
     doc_type = doc.document_type or "other"
     doc_dir = _safe_report_dir(report_id)
     txt_path = doc_dir / f"{doc_id}.txt"
@@ -753,6 +810,10 @@ async def etl_document_stream(
                         i += _ETL_CHUNK_SIZE - _ETL_CHUNK_OVERLAP
 
                     for c_idx, chunk in enumerate(chunks):
+                        # Abort if client disconnected — prevents burning Gemini tokens
+                        if _progress_bus.is_cancelled(task_id):
+                            logger.info("[ETL-STREAM] task=%s cancelled by client disconnect at chunk %d", task_id, c_idx + 1)
+                            return
                         _progress_bus.push(task_id, {
                             "type": "etl_chunk",
                             "chunk": c_idx + 1,
@@ -830,6 +891,18 @@ async def etl_document_stream(
                         if facts_data:
                             await fact_repo.upsert_facts(bg_db, facts_data)
                             facts_registered = len(facts_data)
+                        else:
+                            logger.warning("[ETL-STREAM] zero facts extracted doc=%s report=%s", doc_id, report_id)
+                            await write_event(
+                                bg_db,
+                                action="etl.zero_facts",
+                                actor_user_id=user_id,
+                                actor_role=user_role,
+                                report_id=report_id,
+                                target_type="document",
+                                target_id=doc_id,
+                                reason="ETL succeeded but extracted zero mappable facts",
+                            )
 
                         # Auto-populate SectionInput rows so generation can proceed immediately
                         try:
@@ -870,6 +943,20 @@ async def etl_document_stream(
                     "type": "error",
                     "message": f"ETL failed: {exc}",
                 })
+                try:
+                    await write_event(
+                        bg_db,
+                        action="etl.failed",
+                        actor_user_id=user_id,
+                        actor_role=user_role,
+                        report_id=report_id,
+                        target_type="document",
+                        target_id=doc_id,
+                        reason=str(exc),
+                    )
+                    await bg_db.commit()
+                except Exception:
+                    logger.warning("[ETL-STREAM] audit write failed for task=%s", task_id)
             finally:
                 _progress_bus.close(task_id)
 

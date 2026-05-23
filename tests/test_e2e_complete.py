@@ -143,7 +143,7 @@ class TestAuth:
     async def test_login_wrong_password(self, ac):
         r = await ac.post(f"{AUTH}/login", data={"username": "admin@example.com", "password": "wrong"})
         assert r.status_code == 401
-        assert "Incorrect password" in r.json()["detail"]
+        assert "Invalid email or password" in r.json()["detail"]
 
     async def test_login_unknown_email(self, ac):
         r = await ac.post(f"{AUTH}/login", data={"username": "nobody@example.com", "password": "pw"})

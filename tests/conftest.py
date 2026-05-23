@@ -110,3 +110,20 @@ def create_test_environment():
         await _seed_admin()
 
     asyncio.run(_create_tables_and_seed())
+
+
+@pytest.fixture(autouse=True)
+def reset_in_memory_security_state():
+    """Reset per-process in-memory security state between tests.
+
+    The rate limiter and brute-force tracker are module-level dicts that
+    persist across tests in the same process.  Resetting them prevents
+    earlier tests from causing 429s in later ones.
+    """
+    from credit_report.security.rate_limit import reset_all as rl_reset
+    from credit_report.api.auth import _failed
+    rl_reset()
+    _failed.clear()
+    yield
+    rl_reset()
+    _failed.clear()

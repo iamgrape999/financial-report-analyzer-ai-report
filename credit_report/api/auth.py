@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.audit.events import write_event
@@ -103,18 +103,17 @@ async def login(
                         user.email, submitted_email)
 
     if user is None:
-        # List all stored emails (masked) to diagnose mismatch
-        all_result = await db.execute(select(User.email))
-        all_emails = [e for (e,) in all_result.all()]
-        masked = [f"{e[:3]}***{e[e.find('@'):]}" if "@" in e else "***" for e in all_emails]
-        logger.warning(
-            "login: no user found for email=%r ip=%s — stored accounts: %s",
-            submitted_email, ip, masked,
-        )
+        # Run a dummy verify to equalise timing between "no user" and "wrong password".
+        # This prevents an attacker from using response time to distinguish the two cases.
+        # Must use a real pbkdf2_sha256 hash — passlib raises UnknownHashError on malformed input.
+        _DUMMY_HASH = "$pbkdf2-sha256$29000$k5KyNoawtnaOcc6Z855Tig$Jv4ACuhcOqVbXpmHnYvrjaFz0I/CmlTIVj0VSGEYUQk"
+        verify_password(submitted_pw, _DUMMY_HASH)
+        # Log with masked email only — do not enumerate stored accounts in production logs
+        logger.warning("login: no user found for email=%r ip=%s", submitted_email, ip)
         _record_failure(ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"No account found for '{submitted_email}'. Check your email address.",
+            detail="Invalid email or password.",
         )
 
     pw_ok = verify_password(submitted_pw, user.hashed_password)
@@ -125,7 +124,7 @@ async def login(
         logger.warning("login: wrong password user=%s email=%r ip=%s", user.id, user.email, ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password.",
+            detail="Invalid email or password.",
         )
 
     if not user.is_active:
@@ -239,6 +238,20 @@ async def update_user_role(
         raise HTTPException(status_code=404, detail="User not found")
 
     old_role = target.role
+
+    # Prevent removing the last active admin — the service would be permanently locked out.
+    if old_role == "admin" and role != "admin":
+        count_result = await db.execute(
+            select(func.count()).where(User.role == "admin", User.is_active == True)
+        )
+        active_admin_count = count_result.scalar_one()
+        if active_admin_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot demote the last active admin. "
+                       "Promote another user to admin first.",
+            )
+
     target.role = role
     logger.info("update_user_role: user=%s %r → %r by=%s", user_id, old_role, role, current_user.id)
 
