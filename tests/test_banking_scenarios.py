@@ -1167,17 +1167,20 @@ class TestOptimisticLocking:
     async def test_block_patch_with_correct_version_succeeds(self, ac, admin_hdrs, report):
         """Block optimistic lock: correct version → 200."""
         rid = report["id"]
-        await _seed_section(rid, section_no=7)
-        # Get list of blocks
-        r = await ac.get(f"{RPTS}/{rid}/blocks", headers=admin_hdrs)
-        if r.status_code != 200 or not r.json():
-            pytest.skip("No blocks available for optimistic lock test")
-        block = r.json()[0]
-        bid = block["id"]
-        version = block.get("version", 1)
+        # Seed a block directly so the test doesn't depend on background generation
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.block_ast.models import ReportBlock
+        bid = f"blk_{rid[:8]}"
+        async with AsyncSessionLocal() as db:
+            db.add(ReportBlock(
+                id=bid, report_id=rid, section_no=7, block_type="paragraph",
+                content="Paragraph for optimistic lock test.",
+                source_fact_ids="[]", is_stale=False, version=1,
+            ))
+            await db.commit()
         r2 = await ac.patch(f"{RPTS}/{rid}/blocks/{bid}",
                             json={"content": "Updated content.", "reason": "test",
-                                  "expected_version": version},
+                                  "expected_version": 1},
                             headers=admin_hdrs)
         assert r2.status_code in (200, 409), (
             f"Block PATCH returned unexpected status: {r2.status_code} {r2.text}"

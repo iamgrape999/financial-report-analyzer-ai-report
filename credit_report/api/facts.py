@@ -31,10 +31,11 @@ async def _assert_report_visible(db: AsyncSession, report_id: str) -> None:
 
 
 async def _assert_report_access(db: AsyncSession, report_id: str, current_user: User) -> None:
-    """Raise 404/403 if the user cannot mutate this report's facts.
+    """Raise 404/403/409 if the user cannot mutate this report's facts.
 
     Admins can access any report; analysts may only mutate facts on reports
     they own.  Reviewers use _assert_report_visible instead (no ownership gate).
+    Approved reports are immutable — mutations are rejected with 409.
     """
     result = await db.execute(select(Report).where(Report.id == report_id))
     report = result.scalar_one_or_none()
@@ -42,6 +43,8 @@ async def _assert_report_access(db: AsyncSession, report_id: str, current_user: 
         raise HTTPException(status_code=404, detail="Report not found")
     if current_user.role != "admin" and report.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports are immutable")
 
 
 @router.get("", response_model=list[FactResponse])

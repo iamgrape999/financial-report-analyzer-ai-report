@@ -794,13 +794,16 @@ class TestFactsAndConflicts:
     async def report_with_facts(self, ac, admin_hdrs):
         rpt = await _create_report(ac, admin_hdrs)
         rid = rpt["id"]
-        await _save_input(ac, admin_hdrs, rid, 7, {
-            "7A_borrower_financials": {
-                "entity_name": "EMA",
-                "periods": [{"label": "FY2024", "revenue_usd_m": 500.0,
-                             "ebitda_usd_m": 100.0, "net_income_usd_m": 60.0}],
-            }
-        })
+        # Seed facts directly — ETL won't run with a mock API key
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.fact_store.repository import upsert_facts
+        async with AsyncSessionLocal() as db:
+            await upsert_facts(db, [
+                {"report_id": rid, "metric_name": "revenue", "entity": "EMA",
+                 "period": "FY2024", "value": 500.0, "value_text": "500",
+                 "state": "extracted", "source_type": "pdf_extraction"},
+            ])
+            await db.commit()
         return rpt
 
     async def test_list_facts_returns_list(self, ac, admin_hdrs, report_with_facts):
@@ -832,7 +835,7 @@ class TestFactsAndConflicts:
         fact = facts[0]
         r = await ac.patch(
             f"{RPTS}/{rid}/facts/{fact['id']}",
-            json={"value": 999.0, "version": fact.get("version", 1)},
+            json={"value": 999.0, "reason": "test patch", "expected_version": fact.get("version", 1)},
             headers=admin_hdrs,
         )
         assert r.status_code in (200, 409)
@@ -946,8 +949,18 @@ class TestBlockEditingAndImprove:
     async def report_with_blocks(self, ac, admin_hdrs):
         rpt = await _create_report(ac, admin_hdrs)
         rid = rpt["id"]
-        with _mock_gemini("## §4 Corporate History\n\nEMA is a shipping company."):
-            await ac.post(f"{RPTS}/{rid}/generate/4", headers=admin_hdrs)
+        # Seed a block directly — background generation may not finish before assertions
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.block_ast.models import ReportBlock
+        async with AsyncSessionLocal() as db:
+            db.add(ReportBlock(
+                id=f"blk_{rid[:8]}", report_id=rid, section_no=4,
+                block_type="paragraph",
+                content="EMA is a shipping company.",
+                source_fact_ids="[]",
+                is_stale=False, version=1,
+            ))
+            await db.commit()
         return rpt
 
     async def test_list_blocks_returns_list(self, ac, admin_hdrs, report_with_blocks):

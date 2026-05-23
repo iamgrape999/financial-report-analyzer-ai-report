@@ -200,6 +200,8 @@ async def delete_report(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     _assert_owner_or_admin(report, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports cannot be deleted")
 
     report.is_deleted = True
     await write_event(

@@ -1141,17 +1141,19 @@ class TestBlocksRBAC:
     async def test_patch_block_emits_audit_event(self, ac, admin_hdrs, report):
         """PATCH /blocks/{id} must write a block.edited audit event."""
         rid = report["id"]
-        # Generate section to produce blocks
-        with _mock_gemini("## §4\n\nContent.\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"):
-            await ac.post(f"{RPTS}/{rid}/generate/4", headers=admin_hdrs)
-        blocks_r = await ac.get(f"{RPTS}/{rid}/blocks", headers=admin_hdrs)
-        if not blocks_r.json():
-            pytest.skip("No blocks generated — skipping audit trail test")
-        block = blocks_r.json()[0]
+        # Seed a block directly — background generation may not complete before assertions
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.block_ast.models import ReportBlock
+        bid = f"blk_audit_{rid[:8]}"
+        async with AsyncSessionLocal() as db:
+            db.add(ReportBlock(
+                id=bid, report_id=rid, section_no=4, block_type="paragraph",
+                content="Content.", source_fact_ids="[]", is_stale=False, version=1,
+            ))
+            await db.commit()
         await ac.patch(
-            f"{RPTS}/{rid}/blocks/{block['id']}",
-            json={"content": "Updated content.", "reason": "review fix",
-                  "expected_version": block["version"]},
+            f"{RPTS}/{rid}/blocks/{bid}",
+            json={"content": "Updated content.", "reason": "review fix", "expected_version": 1},
             headers=admin_hdrs,
         )
         audit_r = await ac.get(f"{RPTS}/{rid}/audit", headers=admin_hdrs)

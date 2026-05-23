@@ -129,19 +129,17 @@ async def _register_reviewer(ac, admin_hdrs) -> dict:
 async def _seed_fact(ac, hdrs, report_id: str, *, metric: str = "revenue",
                      value: float = 100.0, source: str = "etl",
                      state: str = "extracted") -> dict:
-    """PUT a single fact into a report via the inputs endpoint."""
-    r = await ac.put(f"{RPTS}/{report_id}/inputs/1",
-                     json={"section_no": 1,
-                           "input_json": {
-                               "facts": [{
-                                   "metric_name": metric, "entity": "TestCo",
-                                   "period": "FY2024", "value": value,
-                                   "source_type": source, "state": state,
-                               }]
-                           }},
-                     headers=hdrs)
-    assert r.status_code == 200, f"seed_fact failed: {r.text}"
-    # Fetch the fact from the facts API
+    """Seed a single fact directly into the DB and return it via the facts API."""
+    from credit_report.database import AsyncSessionLocal
+    from credit_report.fact_store.repository import upsert_facts
+    async with AsyncSessionLocal() as db:
+        await upsert_facts(db, [{
+            "report_id": report_id, "metric_name": metric,
+            "entity": "TestCo", "period": "FY2024",
+            "value": value, "value_text": str(value),
+            "source_type": source, "state": state,
+        }])
+        await db.commit()
     r2 = await ac.get(f"{RPTS}/{report_id}/facts", headers=hdrs)
     facts = [f for f in r2.json() if f["metric_name"] == metric]
     return facts[0] if facts else {}
@@ -297,27 +295,36 @@ class TestConflictLifecycle:
         revenue_conflicts = [c for c in conflicts if c.metric_name == "ebitda"]
         assert len(revenue_conflicts) == 0, "Same source upsert must not create a conflict"
 
+    async def _seed_conflict(self, rid: str, metric: str = "net_income") -> dict | None:
+        """Seed two conflicting facts and return the conflict dict, or None if detection fails."""
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.fact_store.repository import upsert_facts
+        from credit_report.fact_store.models import FactConflict
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as db:
+            await upsert_facts(db, [
+                {"report_id": rid, "metric_name": metric, "entity": "Co", "period": "FY2024",
+                 "value": 100.0, "value_text": "100", "source_type": "pdf_extraction", "state": "extracted"},
+                {"report_id": rid, "metric_name": metric, "entity": "Co", "period": "FY2024",
+                 "value": 180.0, "value_text": "180", "source_type": "ocr_extraction", "state": "extracted"},
+            ])
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(
+                select(FactConflict).where(FactConflict.report_id == rid,
+                                           FactConflict.metric_name == metric))
+            c = r.scalars().first()
+            if not c:
+                return None
+            return {"id": c.id, "fact_a_id": c.fact_a_id, "fact_b_id": c.fact_b_id}
+
     async def test_resolve_conflict_updates_fact_states(self, ac, admin_hdrs, report):
         """After resolution, chosen fact → validated, rejected → deprecated."""
         rid = report["id"]
-        rev_hdrs = await _register_reviewer(ac, admin_hdrs)
 
-        # Seed two conflicting facts
-        await ac.put(f"{RPTS}/{rid}/inputs/1",
-                     json={"section_no": 1, "input_json": {"facts": [
-                         {"metric_name": "net_income", "entity": "Co", "period": "FY2024",
-                          "value": 100.0, "source_type": "etl"},
-                         {"metric_name": "net_income", "entity": "Co", "period": "FY2024",
-                          "value": 180.0, "source_type": "analyst_input_json"},
-                     ]}}, headers=admin_hdrs)
-
-        # Get conflicts
-        r = await ac.get(f"{RPTS}/{rid}/facts/conflicts", headers=admin_hdrs)
-        assert r.status_code == 200
-        conflicts = r.json()
-        if not conflicts:
-            pytest.skip("No conflict detected — values may not differ enough to trigger one")
-        conflict = conflicts[0]
+        conflict = await self._seed_conflict(rid, "net_income")
+        if not conflict:
+            pytest.skip("No conflict detected")
 
         # Resolve: choose fact_a, reject fact_b
         chosen = conflict["fact_a_id"]
@@ -339,19 +346,9 @@ class TestConflictLifecycle:
         """BUG FIX: mark-unresolved must clear resolved_by AND resolved_at, not just chosen_fact_id."""
         rid = report["id"]
 
-        await ac.put(f"{RPTS}/{rid}/inputs/1",
-                     json={"section_no": 1, "input_json": {"facts": [
-                         {"metric_name": "ltv", "entity": "Co", "period": "FY2024",
-                          "value": 0.5, "source_type": "etl"},
-                         {"metric_name": "ltv", "entity": "Co", "period": "FY2024",
-                          "value": 0.8, "source_type": "analyst_input_json"},
-                     ]}}, headers=admin_hdrs)
-
-        r = await ac.get(f"{RPTS}/{rid}/facts/conflicts", headers=admin_hdrs)
-        conflicts = r.json()
-        if not conflicts:
+        conflict = await self._seed_conflict(rid, "ltv")
+        if not conflict:
             pytest.skip("No conflict detected")
-        conflict = conflicts[0]
         cid = conflict["id"]
 
         # Resolve first
@@ -391,24 +388,15 @@ class TestConflictLifecycle:
     async def test_mark_unresolved_response_has_correct_shape(self, ac, admin_hdrs, report):
         """M2 fix: mark-unresolved response must match MarkUnresolvedResponse schema."""
         rid = report["id"]
-        await ac.put(f"{RPTS}/{rid}/inputs/1",
-                     json={"section_no": 1, "input_json": {"facts": [
-                         {"metric_name": "dscr", "entity": "Co", "period": "FY2024",
-                          "value": 1.2, "source_type": "etl"},
-                         {"metric_name": "dscr", "entity": "Co", "period": "FY2024",
-                          "value": 2.5, "source_type": "analyst_input_json"},
-                     ]}}, headers=admin_hdrs)
-
-        r = await ac.get(f"{RPTS}/{rid}/facts/conflicts", headers=admin_hdrs)
-        conflicts = r.json()
-        if not conflicts:
+        conflict = await self._seed_conflict(rid, "dscr")
+        if not conflict:
             pytest.skip("No conflict")
-        cid = conflicts[0]["id"]
+        cid = conflict["id"]
 
         # Resolve, then mark unresolved
         await ac.post(f"{RPTS}/{rid}/facts/conflicts/{cid}/resolve",
-                      json={"chosen_fact_id": conflicts[0]["fact_a_id"],
-                            "rejected_fact_ids": [conflicts[0]["fact_b_id"]],
+                      json={"chosen_fact_id": conflict["fact_a_id"],
+                            "rejected_fact_ids": [conflict["fact_b_id"]],
                             "resolution_reason": "x"},
                       headers=admin_hdrs)
         r = await ac.post(f"{RPTS}/{rid}/facts/conflicts/{cid}/mark-unresolved",
@@ -584,8 +572,7 @@ class TestBlockValidateAuditTrail:
         # Check audit log contains block.validated event
         r = await ac.get(f"{BASE}/audit/events",
                           params={"page_size": 50}, headers=admin_hdrs)
-        if r.status_code != 200:
-            pytest.skip("Audit endpoint unavailable")
+        assert r.status_code == 200, f"Global audit endpoint failed: {r.status_code} {r.text}"
         events = r.json().get("events", [])
         validated_events = [e for e in events
                              if e.get("action") == "block.validated"
@@ -908,8 +895,7 @@ class TestPasswordFlows:
 
         r = await ac.get(f"{BASE}/audit/events", params={"page_size": 100},
                          headers=admin_hdrs)
-        if r.status_code != 200:
-            pytest.skip("Audit endpoint unavailable")
+        assert r.status_code == 200, f"Global audit endpoint failed: {r.status_code} {r.text}"
         events = r.json().get("events", [])
         role_events = [e for e in events
                        if e.get("action") == "auth.role_change"
@@ -1035,17 +1021,13 @@ class TestFullReportWorkflow:
         r = await ac.post(f"{RPTS}/{rid}/submit-for-review", headers=admin_hdrs)
         assert r.status_code == 200
 
-        # Admin approves
-        rev_hdrs = await _register_reviewer(ac, admin_hdrs)
-        r = await ac.post(f"{RPTS}/{rid}/approve", headers=rev_hdrs)
-        # Approver role check — if reviewer can't approve, skip
-        if r.status_code == 403:
-            pytest.skip("reviewer role cannot approve — need approver role for this test")
-        assert r.status_code == 200
+        # Admin approves (admin role can always approve)
+        r = await ac.post(f"{RPTS}/{rid}/approve", headers=admin_hdrs)
+        assert r.status_code == 200, f"approve failed: {r.text}"
 
         # Try to delete — must fail
         r = await ac.delete(f"{RPTS}/{rid}", headers=admin_hdrs)
-        assert r.status_code in (400, 403, 422), (
+        assert r.status_code in (400, 403, 409, 422), (
             f"Approved report must not be deletable, got {r.status_code}: {r.text}"
         )
 
@@ -1464,8 +1446,7 @@ class TestAuditTrailCompleteness:
         rid = r.json()["id"]
 
         r = await ac.get(f"{BASE}/audit/events", params={"page_size": 50}, headers=admin_hdrs)
-        if r.status_code != 200:
-            pytest.skip("Audit endpoint unavailable")
+        assert r.status_code == 200, f"Global audit endpoint failed: {r.status_code} {r.text}"
         events = r.json().get("events", [])
         creation_events = [e for e in events
                            if e.get("report_id") == rid and "creat" in e.get("action", "")]
@@ -1480,8 +1461,7 @@ class TestAuditTrailCompleteness:
                       headers=hdrs)
 
         r = await ac.get(f"{BASE}/audit/events", params={"page_size": 100}, headers=admin_hdrs)
-        if r.status_code != 200:
-            pytest.skip("Audit endpoint unavailable")
+        assert r.status_code == 200, f"Global audit endpoint failed: {r.status_code} {r.text}"
         events = r.json().get("events", [])
         pw_events = [e for e in events if "password_change" in e.get("action", "")]
         assert pw_events, "Password change must produce an auth.password_change audit event"
@@ -1503,8 +1483,7 @@ class TestAuditTrailCompleteness:
         await ac.post(f"{RPTS}/{rid}/blocks/{block_id}/validate", headers=admin_hdrs)
 
         r = await ac.get(f"{BASE}/audit/events", params={"page_size": 100}, headers=admin_hdrs)
-        if r.status_code != 200:
-            pytest.skip("Audit endpoint unavailable")
+        assert r.status_code == 200, f"Global audit endpoint failed: {r.status_code} {r.text}"
         events = r.json().get("events", [])
         validate_events = [e for e in events
                            if e.get("action") == "block.validated"

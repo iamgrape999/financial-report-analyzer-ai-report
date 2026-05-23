@@ -1189,6 +1189,8 @@ async def generate_section(
 
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports cannot be regenerated")
 
     # Fast preflight: dependency check (uses request session for immediate 409 response)
     missing = await check_hard_dependencies(db, report_id, section_no)

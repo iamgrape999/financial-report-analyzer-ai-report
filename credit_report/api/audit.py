@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports/{report_id}/audit", tags=["audit"])
 
+# Global audit router — admin-only endpoint to browse all events (not scoped to a report)
+global_router = APIRouter(prefix="/audit", tags=["audit"])
+
 
 async def _assert_audit_access(db: AsyncSession, report_id: str, current_user: User) -> None:
     result = await db.execute(select(Report).where(Report.id == report_id))
@@ -56,4 +59,32 @@ async def get_audit_trail(
         total=total,
         page=skip // limit + 1 if limit else 1,
         page_size=limit,
+    )
+
+
+@global_router.get("/events", response_model=AuditListResponse)
+async def get_global_audit_events(
+    page_size: int = Query(default=50, ge=1, le=500),
+    page: int = Query(default=1, ge=1, le=2_147_483_647),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin-only: browse all audit events across every report (newest first)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    skip = (page - 1) * page_size
+    result = await db.execute(
+        select(AuditEvent)
+        .order_by(AuditEvent.timestamp.desc())
+        .offset(skip)
+        .limit(page_size)
+    )
+    events = list(result.scalars().all())
+    count_result = await db.execute(select(func.count()).select_from(AuditEvent))
+    total = count_result.scalar_one()
+    return AuditListResponse(
+        events=[AuditEventSchema.model_validate(e) for e in events],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
