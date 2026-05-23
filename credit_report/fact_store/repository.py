@@ -165,6 +165,10 @@ async def upsert_facts(db: AsyncSession, facts_data: list[dict]) -> list[Canonic
     for fd in facts_data:
         f = await upsert_fact(db, fd)
         results.append(f)
+        # Flush so the peer SELECT in _detect_and_create_conflicts can see this
+        # newly added fact (session uses autoflush=False; without explicit flush
+        # the SELECT returns nothing and same-batch cross-source conflicts are missed).
+        await db.flush()
         # Detect cross-source conflicts (non-blocking — never raises)
         if f.state not in ("conflicted", "deprecated"):
             try:

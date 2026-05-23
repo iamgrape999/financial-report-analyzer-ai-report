@@ -258,6 +258,18 @@ class _ProgressBus:
 
 _progress_bus = _ProgressBus()
 
+# Maps ETL task_id → report_id so etl_stream_events can verify report ownership.
+# Bounded to 10 000 entries (same order-of-magnitude as _ProgressBus._MAX_QUEUES).
+_ETL_TASK_REPORT: "OrderedDict[str, str]" = OrderedDict()
+_ETL_TASK_REPORT_MAX = 10_000
+
+
+def _register_etl_task(task_id: str, report_id: str) -> None:
+    _ETL_TASK_REPORT[task_id] = report_id
+    _ETL_TASK_REPORT.move_to_end(task_id)
+    if len(_ETL_TASK_REPORT) > _ETL_TASK_REPORT_MAX:
+        _ETL_TASK_REPORT.popitem(last=False)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -685,6 +697,7 @@ async def etl_document_stream(
 
     task_id = str(uuid.uuid4())
     _progress_bus.create(task_id)
+    _register_etl_task(task_id, report_id)
 
     # Capture values needed in background task
     user_id = current_user.id
@@ -1019,7 +1032,16 @@ async def etl_stream_events(
     db: AsyncSession = Depends(get_db),
 ):
     """SSE endpoint — stream ETL progress events for a given task_id (EventSource-compatible)."""
-    await _sse_user(request, token=token, ticket=ticket, db=db)
+    user = await _sse_user(request, token=token, ticket=ticket, db=db)
+    # IDOR guard: verify this task was issued for the report in the URL path.
+    # Unknown task_id (not in map) falls through — the stream will close immediately
+    # with an empty result, which is safe (task may have expired or been evicted).
+    mapped_report_id = _ETL_TASK_REPORT.get(task_id)
+    if mapped_report_id and mapped_report_id != report_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Also verify the caller can access this report.
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, user)
     return StreamingResponse(
         _progress_bus.stream(task_id),
         media_type="text/event-stream",
