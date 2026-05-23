@@ -22,8 +22,20 @@ from credit_report.security.models import User
 router = APIRouter(prefix="/reports/{report_id}/facts", tags=["facts"])
 
 
+async def _assert_report_visible(db: AsyncSession, report_id: str) -> None:
+    """Raise 404 if the report does not exist or is soft-deleted."""
+    result = await db.execute(select(Report).where(Report.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report or report.is_deleted:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+
 async def _assert_report_access(db: AsyncSession, report_id: str, current_user: User) -> None:
-    """Raise 404/403 if the user cannot read this report's facts."""
+    """Raise 404/403 if the user cannot mutate this report's facts.
+
+    Admins can access any report; analysts may only mutate facts on reports
+    they own.  Reviewers use _assert_report_visible instead (no ownership gate).
+    """
     result = await db.execute(select(Report).where(Report.id == report_id))
     report = result.scalar_one_or_none()
     if not report or report.is_deleted:
@@ -91,6 +103,7 @@ async def update_fact_value(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
+    await _assert_report_access(db, report_id, current_user)
     fact = await repo.get_fact(db, fact_id)
     if not fact or fact.report_id != report_id:
         raise HTTPException(status_code=404, detail="Fact not found")
@@ -131,6 +144,7 @@ async def override_fact(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
+    await _assert_report_access(db, report_id, current_user)
     fact = await repo.get_fact(db, fact_id)
     if not fact or fact.report_id != report_id:
         raise HTTPException(status_code=404, detail="Fact not found")
@@ -174,6 +188,7 @@ async def approve_fact(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_reviewer),
 ):
+    await _assert_report_visible(db, report_id)
     fact = await repo.get_fact(db, fact_id)
     if not fact or fact.report_id != report_id:
         raise HTTPException(status_code=404, detail="Fact not found")
@@ -216,6 +231,7 @@ async def deprecate_fact(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_reviewer),
 ):
+    await _assert_report_visible(db, report_id)
     fact = await repo.get_fact(db, fact_id)
     if not fact or fact.report_id != report_id:
         raise HTTPException(status_code=404, detail="Fact not found")

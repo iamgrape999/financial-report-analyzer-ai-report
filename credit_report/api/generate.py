@@ -880,24 +880,41 @@ async def etl_document_stream(
 async def _sse_user(
     request: Request,
     token: Optional[str] = Query(default=None),
+    ticket: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Resolve current user from Bearer header OR ?token= query param (needed for EventSource)."""
+    """Resolve current user for SSE endpoints.
+
+    Preferred: ?ticket=<one-time-ticket> obtained from POST /auth/sse-ticket.
+    The ticket is consumed immediately so it never replays even if captured in logs.
+    Legacy fallback: ?token=<jwt> or Authorization: Bearer <jwt> (deprecated for SSE).
+    """
     from credit_report.security.auth import decode_token
     from credit_report.security.models import User as _User
-    bearer = None
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        bearer = auth_header[7:].strip()
-    if not bearer and token:
-        bearer = token
-    if not bearer:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = decode_token(bearer)
-        user_id = payload.get("sub")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id: Optional[str] = None
+
+    if ticket:
+        from credit_report.security.sse_ticket import consume_ticket
+        user_id = consume_ticket(ticket)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired SSE ticket")
+    else:
+        bearer = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            bearer = auth_header[7:].strip()
+        if not bearer and token:
+            bearer = token
+            logger.warning("[SSE] ?token= query param is deprecated; use POST /auth/sse-ticket")
+        if not bearer:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        try:
+            payload = decode_token(bearer)
+            user_id = payload.get("sub")
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
     result = await db.execute(select(_User).where(_User.id == user_id))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
@@ -911,10 +928,11 @@ async def etl_stream_events(
     report_id: str,
     task_id: str,
     token: Optional[str] = Query(default=None),
+    ticket: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """SSE endpoint — stream ETL progress events for a given task_id (EventSource-compatible)."""
-    await _sse_user(request, token=token, db=db)
+    await _sse_user(request, token=token, ticket=ticket, db=db)
     return StreamingResponse(
         _progress_bus.stream(task_id),
         media_type="text/event-stream",
@@ -1289,10 +1307,11 @@ async def generation_stream_events(
     report_id: str,
     task_id: str,
     token: Optional[str] = Query(default=None),
+    ticket: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """SSE endpoint — stream section generation progress (EventSource-compatible)."""
-    await _sse_user(request, token=token, db=db)
+    await _sse_user(request, token=token, ticket=ticket, db=db)
     return StreamingResponse(
         _progress_bus.stream(task_id),
         media_type="text/event-stream",

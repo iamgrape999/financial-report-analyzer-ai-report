@@ -389,3 +389,16 @@ async def first_run_setup(
     await db.flush()
     logger.info("first_run_setup: created admin email=%r", admin.email)
     return {"message": f"Admin account created for {admin.email}. You can now log in."}
+
+
+@router.post("/sse-ticket", tags=["auth"])
+async def create_sse_ticket(current_user: User = Depends(get_current_user)):
+    """Issue a one-time 60-second SSE authentication ticket.
+
+    EventSource does not support Authorization headers; callers must obtain a
+    short-lived ticket via this endpoint and pass it as ?ticket=<value> to SSE
+    stream endpoints.  The ticket is consumed on first use and never reusable.
+    """
+    from credit_report.security.sse_ticket import issue_ticket
+    ticket = issue_ticket(str(current_user.id))
+    return {"ticket": ticket, "expires_in": 60}

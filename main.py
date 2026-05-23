@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -165,10 +166,17 @@ async def lifespan(app: FastAPI):
         raise
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        try:
+            await asyncio.wait_for(conn.run_sync(Base.metadata.create_all), timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.critical("Database create_all timed out after 30 s — aborting startup")
+            raise RuntimeError("Database DDL timeout during startup")
         logger.info("Database tables created / verified")
-        # Safe column additions for section_documents table (idempotent)
-        await _safe_add_columns(conn)
+        try:
+            await asyncio.wait_for(_safe_add_columns(conn), timeout=60.0)
+        except asyncio.TimeoutError:
+            logger.critical("_safe_add_columns timed out after 60 s — aborting startup")
+            raise RuntimeError("Database schema upgrade timeout during startup")
         logger.info("Database schema upgrade checks complete")
 
     await _seed_admin()

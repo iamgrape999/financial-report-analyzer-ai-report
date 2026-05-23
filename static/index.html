@@ -2425,6 +2425,16 @@ function H(){return{'Authorization':'Bearer '+token};}
 function HJ(){return{'Authorization':'Bearer '+token,'Content-Type':'application/json'};}
 function _getToken(){return token||'';}
 
+async function _getSseUrl(basePath){
+  // Obtain a one-time ticket so the JWT never appears in server logs via query string.
+  try{
+    const r=await fetch(API+'/auth/sse-ticket',{method:'POST',headers:H()});
+    if(r.ok){const {ticket}=await r.json();return basePath+'?ticket='+encodeURIComponent(ticket);}
+  }catch(_){}
+  // Fallback: legacy token param (deprecated — ticket endpoint unavailable)
+  return basePath+'?token='+encodeURIComponent(_getToken());
+}
+
 function loginClearErr(field){
   if(field==='email'){
     document.getElementById('loginEmail').classList.remove('is-invalid');
@@ -2762,9 +2772,10 @@ async function loadSectionOutput(sec){
 // ── Generation polling helpers ─────────────────────────────────────────────────
 async function _pollGenerationTask(taskId, secNo, maxWaitMs=300000){
   // Try SSE stream first; fall back to polling if EventSource fails
+  const _streamBase = API + '/reports/' + currentRid + '/generate/stream/' + taskId;
+  const _streamSseUrl = await _getSseUrl(_streamBase);
   return new Promise((resolve, reject) => {
-    const url = API + '/reports/' + currentRid + '/generate/stream/' + taskId;
-    const evs = new EventSource(url + '?token=' + encodeURIComponent(_getToken()));
+    const evs = new EventSource(_streamSseUrl);
     const timer = setTimeout(() => { evs.close(); reject(new Error('Generation timed out')); }, maxWaitMs);
 
     evs.onmessage = (e) => {
@@ -2951,7 +2962,7 @@ async function generateAll(){
     const taskId=d.task_id;
 
     // Wire SSE for live per-section updates
-    const sseUrl=API+'/reports/'+currentRid+'/generate/stream/'+taskId+'?token='+encodeURIComponent(_getToken());
+    const sseUrl=await _getSseUrl(API+'/reports/'+currentRid+'/generate/stream/'+taskId);
     await new Promise((resolve,reject)=>{
       const evs=new EventSource(sseUrl);
       const timer=setTimeout(()=>{evs.close();reject(new Error('Generation timed out'));},900000);
@@ -3481,9 +3492,9 @@ async function etlDocument(docId,filename){
     const taskId=startJson.task_id;
 
     // Listen to SSE stream
+    const _etlSseUrl=await _getSseUrl(API+'/reports/'+currentRid+'/documents/etl/stream/'+taskId);
     await new Promise((resolve,reject)=>{
-      const sseUrl=API+'/reports/'+currentRid+'/documents/etl/stream/'+taskId;
-      const evs=new EventSource(sseUrl+'?token='+encodeURIComponent(_getToken()));
+      const evs=new EventSource(_etlSseUrl);
       const timer=setTimeout(()=>{evs.close();reject(new Error('ETL timed out after 10 minutes'));},600000);
 
       evs.onmessage=(e)=>{
