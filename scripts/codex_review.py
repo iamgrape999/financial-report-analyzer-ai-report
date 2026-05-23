@@ -2,21 +2,22 @@
 """AI code-review hook for Claude Code.
 
 PostToolUse hook triggered on Edit/Write to production Python files.
-Uses GEMINI_API_KEY (already required by this project — no extra account needed).
+Uses OPENROUTER_API_KEY (already configured in this project) with
+free-tier models — zero cost per review.
 
-Gemini cost-cap tiers (monthly accumulated spend tracked in
-~/.codex_review_usage.json, resets each calendar month):
+Free model options (set CODEX_REVIEW_MODEL to switch):
+  poolside/laguna-m.1:free          ← best for code (coding agent, #15 Programming)
+  nvidia/nemotron-super-49b-v1:free ← strong general reasoning
+  openai/gpt-oss-120b:free          ← OpenAI open-weight 120B
+  deepseek/deepseek-chat:free       ← reliable fallback
 
-  < $15  → gemini-2.5-flash       ($0.30 / $2.50 per M in/out tokens)
-  $15–$20 → gemini-2.0-flash      ($0.10 / $0.40 per M in/out tokens)
-  ≥ $20  → gemini-2.0-flash-lite  ($0.075/ $0.30 per M in/out tokens)
-
-Monthly spend is shown in every annotation so you can track it.
+Default priority:
+  1. CODEX_REVIEW_MODEL env var (explicit override)
+  2. OPENROUTER_MODEL env var (reuse project's existing setting)
+  3. poolside/laguna-m.1:free (best for code review)
 
 Optional env vars:
-  CODEX_REVIEW_MODEL        — override model (disables cost-tier switching)
-  CODEX_REVIEW_MAX_LINES    — skip files longer than this (default: 300)
-  CODEX_REVIEW_USAGE_FILE   — path to usage JSON (default: ~/.codex_review_usage.json)
+  CODEX_REVIEW_MAX_LINES  — skip files longer than this (default: 300)
 
 Exit code: always 0 — never blocks Claude Code.
 """
@@ -27,68 +28,22 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime
-from pathlib import Path
 
 # ── API key ───────────────────────────────────────────────────────────────────
 
-GEMINI_KEY     = os.getenv("GEMINI_API_KEY", "")
-MODEL_OVERRIDE = os.getenv("CODEX_REVIEW_MODEL", "")
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 MAX_LINES      = int(os.getenv("CODEX_REVIEW_MAX_LINES", "300"))
 
-if not GEMINI_KEY:
+if not OPENROUTER_KEY:
     sys.exit(0)   # no key configured → silent no-op
 
-# ── Cost-cap tier system ──────────────────────────────────────────────────────
-# (spend_ceiling_usd, model_id, input_$/M, output_$/M)
-# First entry whose ceiling exceeds current month's spend wins.
+# ── Model selection ───────────────────────────────────────────────────────────
 
-_TIERS: list[tuple[float, str, float, float]] = [
-    (15.0, "gemini-2.5-flash",      0.30, 2.50),
-    (20.0, "gemini-2.0-flash",      0.10, 0.40),
-    (1e9,  "gemini-2.0-flash-lite", 0.075, 0.30),
-]
-
-_USAGE_PATH = Path(
-    os.getenv("CODEX_REVIEW_USAGE_FILE",
-              str(Path.home() / ".codex_review_usage.json"))
+_MODEL = (
+    os.getenv("CODEX_REVIEW_MODEL")          # 1. explicit override
+    or os.getenv("OPENROUTER_MODEL")          # 2. project's existing setting
+    or "poolside/laguna-m.1:free"             # 3. best free coding model
 )
-
-
-def _load_usage() -> dict:
-    try:
-        data = json.loads(_USAGE_PATH.read_text())
-        if data.get("month") == datetime.now().strftime("%Y-%m"):
-            return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {"month": datetime.now().strftime("%Y-%m"),
-            "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0}
-
-
-def _save_usage(usage: dict) -> None:
-    try:
-        _USAGE_PATH.write_text(json.dumps(usage, indent=2))
-    except OSError:
-        pass
-
-
-def _tier_for_cost(cost: float) -> tuple[str, float, float]:
-    for ceiling, model, inp, out in _TIERS:
-        if cost < ceiling:
-            return model, inp, out
-    return _TIERS[-1][1], _TIERS[-1][2], _TIERS[-1][3]
-
-
-# Resolve model and per-token pricing
-_usage = _load_usage()
-
-if MODEL_OVERRIDE:
-    _MODEL = MODEL_OVERRIDE
-    matched = next((t for t in _TIERS if t[1] == MODEL_OVERRIDE), None)
-    _INPUT_PER_M, _OUTPUT_PER_M = (matched[2], matched[3]) if matched else (0.30, 2.50)
-else:
-    _MODEL, _INPUT_PER_M, _OUTPUT_PER_M = _tier_for_cost(_usage["cost_usd"])
 
 # ── File filtering ────────────────────────────────────────────────────────────
 
@@ -133,45 +88,42 @@ PROMPT = (
     f"```python\n{content}\n```"
 )
 
-# ── API call ──────────────────────────────────────────────────────────────────
+# ── API call (OpenRouter — OpenAI-compatible format) ──────────────────────────
 
-url = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{_MODEL}:generateContent?key={GEMINI_KEY}"
-)
 body = json.dumps({
-    "contents": [{"parts": [{"text": PROMPT}]}],
-    "generationConfig": {"maxOutputTokens": 200, "temperature": 0.1},
+    "model": _MODEL,
+    "messages": [{"role": "user", "content": PROMPT}],
+    "max_tokens": 200,
+    "temperature": 0.1,
 }).encode()
-req = urllib.request.Request(url, data=body,
-                             headers={"Content-Type": "application/json"},
-                             method="POST")
+
+req = urllib.request.Request(
+    "https://openrouter.ai/api/v1/chat/completions",
+    data=body,
+    headers={
+        "Authorization": f"Bearer {OPENROUTER_KEY}",
+        "Content-Type":  "application/json",
+        "HTTP-Referer":  "https://github.com/iamgrape999/financial-report-analyzer-ai-report",
+        "X-Title":       "CathyChang AI Code Review",
+    },
+    method="POST",
+)
 
 try:
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=20) as resp:
         raw = json.loads(resp.read())
-    review = raw["candidates"][0]["content"]["parts"][0]["text"].strip()
+    review = raw["choices"][0]["message"]["content"].strip()
 except (urllib.error.URLError, KeyError, IndexError,
         json.JSONDecodeError, TimeoutError):
     sys.exit(0)   # any failure → silent, non-blocking
 
-# ── Update cost tracking ──────────────────────────────────────────────────────
-
-meta    = raw.get("usageMetadata", {})
-in_tok  = int(meta.get("promptTokenCount", 0))
-out_tok = int(meta.get("candidatesTokenCount", 0))
-cost    = (in_tok * _INPUT_PER_M + out_tok * _OUTPUT_PER_M) / 1_000_000
-_usage["input_tokens"]  = _usage.get("input_tokens", 0) + in_tok
-_usage["output_tokens"] = _usage.get("output_tokens", 0) + out_tok
-_usage["cost_usd"]      = round(_usage.get("cost_usd", 0.0) + cost, 6)
-_save_usage(_usage)
-
 # ── Print annotation ──────────────────────────────────────────────────────────
 
-icon = "✓" if review.startswith("✓") else "🔍"
+icon         = "✓" if review.startswith("✓") else "🔍"
+model_short  = _MODEL.split("/")[-1].replace(":free", "")   # e.g. "laguna-m.1"
+
 print(
-    f"\n{icon} [Gemini/{_MODEL}] review — {os.path.basename(file_path)}"
-    f"  [month: ${_usage['cost_usd']:.3f}]:\n"
+    f"\n{icon} [OpenRouter/{model_short}] review — {os.path.basename(file_path)}:\n"
     f"{review}\n",
     flush=True,
 )
