@@ -25,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime
 
 ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT    = os.path.join(ROOT, "scripts", "codex_review.py")
@@ -62,12 +63,18 @@ _WARN  = json.dumps({"choices":[{"message":{"content":
     "• `db.flush()` missing before conflict detection query.\n"
     "• No approved-report guard on write endpoints."}}]})
 
-# Gemini response shape
-_CLEAN_G = json.dumps({"candidates":[{"content":{"parts":[{"text":"✓ No critical issues."}]}}]})
-_WARN_G  = json.dumps({"candidates":[{"content":{"parts":[{"text":
-    "• Missing `await db.flush()` before conflict detection.\n"
-    "• `AuditEvent.timestamp` not indexed — full-table sort.\n"
-    "• No approved-report guard on PATCH /blocks."}]}}]})
+# Gemini response shape (includes usageMetadata for cost tracking)
+_CLEAN_G = json.dumps({
+    "candidates": [{"content": {"parts": [{"text": "✓ No critical issues."}]}}],
+    "usageMetadata": {"promptTokenCount": 4500, "candidatesTokenCount": 10, "totalTokenCount": 4510},
+})
+_WARN_G  = json.dumps({
+    "candidates": [{"content": {"parts": [{"text":
+        "• Missing `await db.flush()` before conflict detection.\n"
+        "• `AuditEvent.timestamp` not indexed — full-table sort.\n"
+        "• No approved-report guard on PATCH /blocks."}]}}],
+    "usageMetadata": {"promptTokenCount": 4500, "candidatesTokenCount": 50, "totalTokenCount": 4550},
+})
 
 # Anthropic response shape
 _CLEAN_A = json.dumps({"content":[{"text":"✓ No critical issues."}]})
@@ -206,6 +213,19 @@ def test_error_resilience() -> None:
         os.unlink(patched)
 
 
+def _temp_usage(cost_usd: float = 0.0, month: str = "") -> str:
+    """Write a temp usage JSON file and return its path."""
+    tf = tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False)
+    json.dump({
+        "month": month or datetime.now().strftime("%Y-%m"),
+        "cost_usd": cost_usd,
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }, tf)
+    tf.flush(); tf.close()
+    return tf.name
+
+
 def test_provider_mock(provider: str, env_key: str, env_val: str,
                        clean_body: str, warn_body: str,
                        provider_tag: str) -> None:
@@ -214,6 +234,13 @@ def test_provider_mock(provider: str, env_key: str, env_val: str,
     other_keys = {k: "" for k in ("GEMINI_API_KEY","ANTHROPIC_API_KEY","OPENAI_API_KEY")
                   if k != env_key}
     env = {env_key: env_val, **other_keys}
+
+    # Gemini: isolate usage file so tests don't pollute ~/.codex_review_usage.json
+    usage_file = None
+    if provider == "gemini":
+        usage_file = _temp_usage()
+        env["CODEX_REVIEW_USAGE_FILE"] = usage_file
+
     try:
         print(f"\n  [clean] {provider_tag} returns ✓ No critical issues")
         _QUEUE.clear(); _QUEUE.append(clean_body)
@@ -236,6 +263,56 @@ def test_provider_mock(provider: str, env_key: str, env_val: str,
         print(f"       Output:\n{p.stdout.strip()}")
     finally:
         os.unlink(patched)
+        if usage_file:
+            os.unlink(usage_file)
+
+
+def test_gemini_cost_tiers() -> None:
+    section("E — Gemini cost-cap tier switching")
+
+    scenarios = [
+        (0.0,  "gemini-2.5-flash",      "Tier 1 (cost=$0.00 → <$15)"),
+        (15.0, "gemini-2.0-flash",      "Tier 2 (cost=$15.00 → $15-$20)"),
+        (20.0, "gemini-2.0-flash-lite", "Tier 3 (cost=$20.00 → ≥$20)"),
+    ]
+
+    for cost, expected_model, desc in scenarios:
+        print(f"\n  [{desc}]")
+        usage_file = _temp_usage(cost_usd=cost)
+        patched    = _patched("gemini")
+        try:
+            _QUEUE.clear(); _QUEUE.append(_CLEAN_G)
+            p = _run(patched, file_path=PROD_FILE, extra_env={
+                "GEMINI_API_KEY": "fake-gemini",
+                "ANTHROPIC_API_KEY": "", "OPENAI_API_KEY": "",
+                "CODEX_REVIEW_USAGE_FILE": usage_file,
+            })
+            # Use "/model]" pattern to avoid "gemini-2.0-flash" matching "gemini-2.0-flash-lite"
+            check("exit 0",              p.returncode == 0)
+            check(f"uses {expected_model}", f"/{expected_model}]" in p.stdout, p.stdout[:200])
+            check("shows month cost",    "month: $" in p.stdout, p.stdout[:200])
+            print(f"       Output: {p.stdout.strip()}")
+        finally:
+            os.unlink(patched)
+            os.unlink(usage_file)
+
+    print("\n  [month rollover resets to Tier 1]")
+    usage_file = _temp_usage(cost_usd=99.0, month="2020-01")   # stale month, huge cost
+    patched    = _patched("gemini")
+    try:
+        _QUEUE.clear(); _QUEUE.append(_CLEAN_G)
+        p = _run(patched, file_path=PROD_FILE, extra_env={
+            "GEMINI_API_KEY": "fake-gemini",
+            "ANTHROPIC_API_KEY": "", "OPENAI_API_KEY": "",
+            "CODEX_REVIEW_USAGE_FILE": usage_file,
+        })
+        check("exit 0",                    p.returncode == 0)
+        check("uses 2.5-flash after reset", "/gemini-2.5-flash]" in p.stdout, p.stdout[:200])
+        check("cost near zero",            "month: $0.0" in p.stdout, p.stdout[:200])
+        print(f"       Output: {p.stdout.strip()}")
+    finally:
+        os.unlink(patched)
+        os.unlink(usage_file)
 
 
 def test_live() -> None:
@@ -297,6 +374,7 @@ def main() -> None:
     test_provider_mock("openai",    "OPENAI_API_KEY",    "fake-openai",
                        _CLEAN,   _WARN,   "GPT-4o-mini")
 
+    test_gemini_cost_tiers()
     test_live()
 
     _srv.shutdown()
