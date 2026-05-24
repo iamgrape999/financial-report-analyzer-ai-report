@@ -3,7 +3,7 @@
   "name": "CUB Credit Report Automator",
   "version": "1.0.0",
   "description": "98% automated credit report generation — Cathay United Bank",
-  "permissions": ["storage", "tabs", "scripting"],
+  "permissions": ["storage", "tabs", "scripting", "alarms"],
   "host_permissions": [
     "https://financial-report-analyzer-zi6o.onrender.com/*",
     "http://localhost:8000/*",

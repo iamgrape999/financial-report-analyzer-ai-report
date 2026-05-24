@@ -2,6 +2,11 @@
  * CUB Credit Report Automator — Service Worker
  * All REST API calls run here (no CORS issues in background context).
  * Sends progress events back to popup via chrome.runtime.sendMessage.
+ *
+ * Generation polling uses chrome.alarms so the service worker survives
+ * Chrome's 30-second inactivity termination across multi-minute tasks.
+ * State is persisted in chrome.storage.local; the SW can be revived
+ * mid-generation if Chrome terminates it between alarm firings.
  */
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,38 +59,123 @@ async function login(baseUrl, email, password) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!resp.ok) throw new Error("Login failed — check email/password.");
+  if (!resp.ok) throw new Error("Login failed — check email/password in Settings.");
   const data = await resp.json();
   return data.access_token;
 }
 
-// ── ETL polling ──────────────────────────────────────────────────────────────
+// ── Generation alarm (MV3-safe polling) ─────────────────────────────────────
+// Storage keys during active generation:
+//   _gen_task   — current task UUID being polled
+//   _gen_report — report UUID
+//   _gen_token  — JWT for API calls
+//   _gen_base   — base URL
+//   _gen_sec    — section number currently being generated
+//   _gen_queue  — remaining section numbers [7,1,3,…]
+//   _gen_done   — count of successfully completed sections
 
-async function pollGeneration(reportId, taskId, token, baseUrl, timeoutMs = 300000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 4000));
-    try {
-      const s = await api("GET", `/reports/${reportId}/generate/status/${taskId}`, undefined, token, baseUrl);
-      if (s.status === "done")  return s;
-      if (s.status === "error") throw new Error(`Generation failed: ${s.detail || ""}`);
-    } catch (e) {
-      if (e.message.startsWith("Generation failed")) throw e;
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== "_gen_poll") return;
+
+  const s = await chrome.storage.local.get([
+    "_gen_task", "_gen_report", "_gen_token", "_gen_base",
+    "_gen_sec", "_gen_queue", "_gen_done",
+  ]);
+
+  if (!s._gen_report) { chrome.alarms.clear("_gen_poll"); return; }
+
+  // No current task → trigger the next section in the queue
+  if (!s._gen_task) {
+    const queue = s._gen_queue || [];
+    const done  = s._gen_done  || 0;
+    if (!queue.length) {
+      await _genClear();
+      emit("generate", "done", `${done} section(s) generated`);
+      emit("done", "done", "98% automation complete ✓");
+      return;
     }
+    const sec = queue[0];
+    emit("generate", "running", `§${sec} (${done + 1}/10)…`);
+    try {
+      const r = await api("POST", `/reports/${s._gen_report}/generate/${sec}?gen_language=zh`, {}, s._gen_token, s._gen_base);
+      await chrome.storage.local.set({ _gen_task: r.task_id, _gen_sec: sec, _gen_queue: queue.slice(1) });
+    } catch (e) {
+      emit("generate", "running", `§${sec} skipped: ${e.message}`);
+      await chrome.storage.local.set({ _gen_task: null, _gen_sec: sec, _gen_queue: queue.slice(1) });
+    }
+    return;
   }
-  throw new Error("Generation timed out (5 min)");
+
+  // Poll the current task
+  try {
+    const status = await api("GET", `/reports/${s._gen_report}/generate/status/${s._gen_task}`, undefined, s._gen_token, s._gen_base);
+
+    if (status.status === "done") {
+      const done  = (s._gen_done  || 0) + 1;
+      const queue = s._gen_queue || [];
+      emit("generate", "running", `§${s._gen_sec} done (${done}/10)`);
+
+      if (!queue.length) {
+        await _genClear();
+        emit("generate", "done", "all 10 sections generated");
+        emit("done", "done", "98% automation complete ✓");
+      } else {
+        // Immediately trigger next section in the same alarm cycle
+        const sec = queue[0];
+        emit("generate", "running", `§${sec} (${done + 1}/10)…`);
+        try {
+          const r = await api("POST", `/reports/${s._gen_report}/generate/${sec}?gen_language=zh`, {}, s._gen_token, s._gen_base);
+          await chrome.storage.local.set({ _gen_task: r.task_id, _gen_sec: sec, _gen_queue: queue.slice(1), _gen_done: done });
+        } catch (e) {
+          emit("generate", "running", `§${sec} skipped: ${e.message}`);
+          await chrome.storage.local.set({ _gen_task: null, _gen_sec: sec, _gen_queue: queue.slice(1), _gen_done: done });
+        }
+      }
+
+    } else if (status.status === "error") {
+      emit("generate", "running", `§${s._gen_sec} error: ${status.detail || "unknown"} — continuing`);
+      // Mark task done, leave queue intact; next alarm fires the next section
+      await chrome.storage.local.set({ _gen_task: null, _gen_done: (s._gen_done || 0) });
+    }
+    // status === "running" → wait for next alarm
+  } catch (_e) {
+    // Transient network error; SW may have been revived mid-session —
+    // next alarm will retry automatically
+  }
+});
+
+async function _genClear() {
+  await chrome.storage.local.remove([
+    "_gen_task", "_gen_report", "_gen_token", "_gen_base",
+    "_gen_sec", "_gen_queue", "_gen_done",
+  ]);
+  chrome.alarms.clear("_gen_poll");
 }
 
 // ── Step implementations ──────────────────────────────────────────────────────
 
 async function stepLogin() {
   emit("login", "running");
-  const { baseUrl, email, password } = await cfg();
-  if (!baseUrl || !email || !password) throw new Error("Configure Base URL, Email and Password in Settings first.");
-  const token = await login(baseUrl, email, password);
-  await saveToken(token);
+  const { baseUrl, email, password, token: cached } = await cfg();
+  if (!baseUrl || !email) throw new Error("Configure Base URL and Email in Settings.");
+
+  // Token-first: reuse cached JWT to avoid relying on stored password every call
+  if (cached) {
+    try {
+      await api("GET", "/reports?limit=1", undefined, cached, baseUrl);
+      emit("login", "done", `${email} (session active)`);
+      return cached;
+    } catch (e) {
+      if (!e.message.startsWith("HTTP 401")) throw e;
+      // 401 = expired; fall through to fresh login
+    }
+  }
+
+  if (!password) throw new Error("Session expired — re-enter Password in Settings.");
+  const newToken = await login(baseUrl, email, password);
+  await saveToken(newToken);
   emit("login", "done", email);
-  return token;
+  return newToken;
 }
 
 async function stepEtlAll(reportId) {
@@ -128,15 +218,14 @@ async function stepAutoConflicts(reportId) {
   const { baseUrl, token } = await cfg();
   emit("conflicts", "running");
   const res = await api("POST", `/reports/${reportId}/facts/conflicts/auto-resolve-priority`, {}, token, baseUrl);
-  const msg = `${res.resolved_count} auto-resolved, ${res.skipped_count} need review`;
-  emit("conflicts", "done", msg);
+  emit("conflicts", "done", `${res.resolved_count} auto-resolved, ${res.skipped_count} need review`);
   return res;
 }
 
 async function stepGeminiGapFill(reportId, companyName) {
   const { baseUrl, token, geminiKey } = await cfg();
-  if (!geminiKey) { emit("gapfill", "skip", "no GEMINI_API_KEY in settings"); return; }
-  emit("gapfill", "running", "searching web for missing fields…");
+  if (!geminiKey) { emit("gapfill", "skip", "no Gemini key — skipped"); return; }
+  emit("gapfill", "running", "⚠ uses model training knowledge, not live data — verify all values");
 
   let filled = 0;
   for (let sec = 1; sec <= 10; sec++) {
@@ -149,12 +238,12 @@ async function stepGeminiGapFill(reportId, companyName) {
     if (!empty.length) continue;
 
     const fieldList = empty.map(s => `${s.field_path} (${s.metric_name}, ${s.period || ""})`).join("\n");
-    const prompt = `Company: ${companyName}\nSection ${sec} of a bank credit report is missing these financial fields:\n${fieldList}\n\nFind realistic values from your knowledge. Return ONLY valid JSON: {"field_path": numeric_or_string_value, ...}`;
+    const prompt = `Company: ${companyName}\nSection ${sec} of a bank credit report is missing:\n${fieldList}\n\nReturn ONLY valid JSON with plausible placeholder values (flag uncertain with _UNVERIFIED suffix): {"field_path": value, ...}`;
 
     let gapData = {};
     try {
       const gResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
         {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
@@ -169,7 +258,6 @@ async function stepGeminiGapFill(reportId, companyName) {
 
     if (!Object.keys(gapData).length) continue;
 
-    // Load existing section input, merge, save
     let current = {};
     try {
       const existing = await api("GET", `/reports/${reportId}/inputs/${sec}`, undefined, token, baseUrl);
@@ -182,29 +270,41 @@ async function stepGeminiGapFill(reportId, companyName) {
 
     await api("PUT", `/reports/${reportId}/inputs/${sec}`, { section_no: sec, input_json: current }, token, baseUrl);
     filled += Object.keys(gapData).length;
-    emit("gapfill", "running", `§${sec}: +${Object.keys(gapData).length} fields`);
+    emit("gapfill", "running", `§${sec}: +${Object.keys(gapData).length} placeholders (VERIFY BEFORE SUBMIT)`);
   }
-  emit("gapfill", "done", `${filled} fields filled from web knowledge`);
+  emit("gapfill", "done", `${filled} placeholder(s) filled — all require manual verification`);
 }
 
 async function stepGenerate(reportId) {
   const { baseUrl, token } = await cfg();
-  emit("generate", "running");
+  emit("generate", "running", "§4 (1/10)…");
   const ORDER = [4, 7, 1, 3, 2, 5, 6, 8, 9, 10];
-  let done = 0;
-  for (const sec of ORDER) {
-    emit("generate", "running", `§${sec} (${++done}/10)…`);
-    let taskId;
-    try {
-      const r = await api("POST", `/reports/${reportId}/generate/${sec}?gen_language=zh`, {}, token, baseUrl);
-      taskId = r.task_id;
-    } catch (e) {
-      emit("generate", "running", `§${sec} skipped: ${e.message}`);
-      continue;
-    }
-    await pollGeneration(reportId, taskId, token, baseUrl);
+
+  // Trigger first section synchronously so we can surface immediate errors
+  let firstTaskId;
+  try {
+    const r = await api("POST", `/reports/${reportId}/generate/${ORDER[0]}?gen_language=zh`, {}, token, baseUrl);
+    firstTaskId = r.task_id;
+  } catch (e) {
+    emit("generate", "error", e.message);
+    throw e;
   }
-  emit("generate", "done", "all 10 sections generated");
+
+  // Persist generation state — the alarm handler advances the queue even if
+  // the service worker is restarted mid-generation by Chrome
+  await chrome.storage.local.set({
+    _gen_task:   firstTaskId,
+    _gen_report: reportId,
+    _gen_token:  token,
+    _gen_base:   baseUrl,
+    _gen_sec:    ORDER[0],
+    _gen_queue:  ORDER.slice(1),
+    _gen_done:   0,
+  });
+
+  // Poll every ~8 seconds via alarm (survives SW restarts unlike setTimeout)
+  chrome.alarms.create("_gen_poll", { periodInMinutes: 0.13 });
+  // Caller returns here; progress/done events arrive later from the alarm handler
 }
 
 // ── Deep path helpers ─────────────────────────────────────────────────────────
@@ -240,14 +340,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await stepAutoConflicts(reportId);
         if (companyName) await stepGeminiGapFill(reportId, companyName);
         await stepGenerate(reportId);
-        emit("done", "done", "98% automation complete ✓");
+        // Generation continues in background via _gen_poll alarm.
+        // "done" emit arrives later from the alarm handler.
         sendResponse({ ok: true });
 
-      } else if (action === "etl")         { await stepLogin(); await stepEtlAll(reportId);             sendResponse({ ok: true });
-      } else if (action === "suggestions") { await stepLogin(); await stepApplySuggestions(reportId);   sendResponse({ ok: true });
-      } else if (action === "conflicts")   { await stepLogin(); await stepAutoConflicts(reportId);      sendResponse({ ok: true });
-      } else if (action === "gapfill")     { await stepLogin(); await stepGeminiGapFill(reportId, companyName); sendResponse({ ok: true });
-      } else if (action === "generate")    { await stepLogin(); await stepGenerate(reportId);           sendResponse({ ok: true });
+      } else if (action === "etl")         { await stepLogin(); await stepEtlAll(reportId);                        sendResponse({ ok: true });
+      } else if (action === "suggestions") { await stepLogin(); await stepApplySuggestions(reportId);              sendResponse({ ok: true });
+      } else if (action === "conflicts")   { await stepLogin(); await stepAutoConflicts(reportId);                 sendResponse({ ok: true });
+      } else if (action === "gapfill")     { await stepLogin(); await stepGeminiGapFill(reportId, companyName);    sendResponse({ ok: true });
+      } else if (action === "generate")    { await stepLogin(); await stepGenerate(reportId); sendResponse({ ok: true });
 
       } else if (action === "ai_suggest_conflict") {
         const { baseUrl, token } = await cfg();
@@ -274,5 +375,5 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ok: false, error: e.message });
     }
   })();
-  return true; // keep channel open for async response
+  return true; // keep message channel open for async response
 });

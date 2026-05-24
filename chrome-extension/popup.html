@@ -174,15 +174,21 @@
     <input type="email" id="email" placeholder="analyst@cub.com" />
   </div>
   <div class="field">
-    <label>Password</label>
+    <label>Password <span class="info">(only needed when JWT expires)</span></label>
     <input type="password" id="password" placeholder="••••••••" />
+    <p class="info" style="color:#f87171;font-size:10px;margin-top:3px">
+      Stored unencrypted locally. Clear this field after first login on shared machines.
+    </p>
   </div>
   <div class="field">
-    <label>Gemini API Key <span class="info">(optional — for gap fill)</span></label>
+    <label>Gemini API Key
+      <span class="info">(optional — gap-fill uses model training knowledge,
+        NOT live market data; all filled values must be verified)</span>
+    </label>
     <input type="password" id="geminiKey" placeholder="AIza..." />
   </div>
   <button class="btn btn-primary" id="saveSettingsBtn">💾 Save Settings</button>
-  <p class="info" style="margin-top:8px">Keys stored locally in chrome.storage — never sent anywhere except the configured Base URL and Google API.</p>
+  <p class="info" style="margin-top:8px">Email, base URL and Gemini key persisted in chrome.storage.local. Password is only used to obtain a JWT and can be cleared afterwards.</p>
 </div>
 
 <script src="popup.js"></script>
