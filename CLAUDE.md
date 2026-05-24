@@ -66,6 +66,24 @@ tests/                       2 700+ pytest tests, all must stay green
 | `DAILY_TOKEN_LIMIT` | `4_000_000` | Per-user per-day; multiplied by role |
 | `ENVIRONMENT` | `development` | Set `production` on Render |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | see `.env.example` | Seeded on startup |
+| `GEMINI_REVIEWER_API_KEY` | *(optional)* | Separate key for the code-review hook; blank = disabled |
+| `GEMINI_REVIEWER_MODEL` | `gemini-2.5-flash` | Reviewer model; swap in Render env without redeploy |
+| `GEMINI_REVIEWER_MAX_LINES` | `300` | Files larger than this are skipped by the hook |
+
+---
+
+## AI code-review hook
+
+`scripts/codex_review.py` fires automatically on every `Edit`/`Write` to
+production Python files via a Claude Code `PostToolUse` hook (`.claude/settings.json`).
+
+- Reads the file just written, redacts secrets (`AIza…`, `sk-…`, `Bearer …`), and sends it to Gemini
+- Prints ≤ 3 bullets for serious issues, or `✓ No critical issues.`
+- Retries once on HTTP 429; surfaces other HTTP errors to stderr
+- Always exits 0 — never blocks the coding session
+
+Enable by setting `GEMINI_REVIEWER_API_KEY` (must start with `AIza`, ≥ 35 chars).
+Verify with: `python3 scripts/test_codex_review.py` (37 assertions, ~2 s, no API cost).
 
 ---
 

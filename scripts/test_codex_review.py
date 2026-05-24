@@ -58,7 +58,22 @@ class _MockHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_POST(self) -> None:  # noqa: N802
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+
+        # M2: validate request so the test suite catches production regressions
+        try:
+            payload = json.loads(raw)
+            assert self.headers.get("x-goog-api-key"), "missing x-goog-api-key header"
+            assert self.headers.get("Content-Type") == "application/json"
+            _ = payload["contents"][0]["parts"][0]["text"]  # must be present
+        except (AssertionError, KeyError, IndexError, json.JSONDecodeError) as exc:
+            err = json.dumps({"error": {"message": str(exc), "code": 400}}).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(err)
+            return
+
         body = (_QUEUE.pop(0) if _QUEUE else _CLEAN)
         if isinstance(body, str):
             body = body.encode()
@@ -143,7 +158,7 @@ def test_exclusions() -> None:
 
     print("\n  [5] File exceeds MAX_LINES (limit=10)")
     p = _run(SCRIPT, file_path=BIG_FILE,
-             extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY, "CODEX_REVIEW_MAX_LINES": "10"})
+             extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY, "GEMINI_REVIEWER_MAX_LINES": "10"})
     check("exit 0", p.returncode == 0)
     check("prints skip notice", "skipped" in p.stdout.lower(), p.stdout[:100])
 
@@ -170,6 +185,23 @@ def test_error_resilience() -> None:
                  extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
         check("exit 0", p.returncode == 0)
         check("no Traceback", "Traceback" not in p.stdout + p.stderr)
+    finally:
+        os.unlink(patched)
+
+    print("\n  [9] Missing x-goog-api-key → mock returns 400, stderr note, exit 0")
+    patched = _patched()
+    try:
+        with open(patched) as f:
+            src = f.read()
+        # Strip the header to trigger mock's M2 validation
+        src = src.replace('"x-goog-api-key": _GEMINI_KEY', '"x-goog-api-key": ""')
+        with open(patched, "w") as f:
+            f.write(src)
+        p = _run(patched, file_path=PROD_FILE,
+                 extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
+        check("exit 0",          p.returncode == 0)
+        check("no Traceback",    "Traceback" not in p.stdout + p.stderr)
+        check("stderr HTTP 400", "HTTP 400" in p.stderr, p.stderr[:200])
     finally:
         os.unlink(patched)
 
