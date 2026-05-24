@@ -32,8 +32,10 @@ MAX_LINES = int(os.getenv("CODEX_REVIEW_MAX_LINES", "300"))
 
 # ── Provider auto-detection ───────────────────────────────────────────────────
 
-_GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
-_GEMINI_MODEL = os.getenv("CODEX_REVIEW_MODEL") or "gemini-2.5-pro"
+_GEMINI_KEY   = os.getenv("GEMINI_REVIEWER_API_KEY", "")
+_GEMINI_MODEL = (os.getenv("CODEX_REVIEW_MODEL")
+                 or os.getenv("GEMINI_REVIEWER_MODEL")
+                 or "gemini-2.5-pro")
 
 _OAI_CANDIDATES = [
     ("OpenRouter", os.getenv("OPENROUTER_API_KEY", ""),

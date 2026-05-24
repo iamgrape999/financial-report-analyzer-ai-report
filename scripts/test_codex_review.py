@@ -7,7 +7,7 @@ Usage
   python3 scripts/test_codex_review.py
 
   # Live test (uses whichever key is set — Gemini preferred):
-  GEMINI_API_KEY=AIza...         python3 scripts/test_codex_review.py
+  GEMINI_REVIEWER_API_KEY=AIza...   python3 scripts/test_codex_review.py
   OPENROUTER_API_KEY=sk-or-...   python3 scripts/test_codex_review.py
   CEREBRAS_API_KEY=csk-...       python3 scripts/test_codex_review.py
   GROQ_API_KEY=gsk_...           python3 scripts/test_codex_review.py
@@ -36,7 +36,7 @@ TEST_FILE = os.path.join(ROOT, "tests", "test_gap_coverage.py")
 HTML_FILE = os.path.join(ROOT, "static", "index.html")
 
 # Detect live provider (mirrors hook priority)
-_GM_KEY  = os.getenv("GEMINI_API_KEY", "")
+_GM_KEY  = os.getenv("GEMINI_REVIEWER_API_KEY", "")
 _OR_KEY  = os.getenv("OPENROUTER_API_KEY", "")
 _CB_KEY  = os.getenv("CEREBRAS_API_KEY", "")
 _GQ_KEY  = os.getenv("GROQ_API_KEY", "")
@@ -148,10 +148,10 @@ def _run(script: str, *, file_path: str = "",
 
 
 _NO_KEYS = {
-    "GEMINI_API_KEY":     "",
-    "OPENROUTER_API_KEY": "",
-    "CEREBRAS_API_KEY":   "",
-    "GROQ_API_KEY":       "",
+    "GEMINI_REVIEWER_API_KEY": "",
+    "OPENROUTER_API_KEY":      "",
+    "CEREBRAS_API_KEY":        "",
+    "GROQ_API_KEY":            "",
 }
 
 
@@ -168,29 +168,29 @@ def test_exclusions() -> None:
     check("no output", p.stdout.strip() == "")
 
     print("\n  [2] No file path set")
-    p = _run(SCRIPT, extra_env={"GEMINI_API_KEY": "fake"})
+    p = _run(SCRIPT, extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [3] HTML file excluded")
-    p = _run(SCRIPT, file_path=HTML_FILE, extra_env={"GEMINI_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=HTML_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [4] Test file excluded")
-    p = _run(SCRIPT, file_path=TEST_FILE, extra_env={"GEMINI_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=TEST_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [5] File exceeds MAX_LINES (limit=10)")
     p = _run(SCRIPT, file_path=BIG_FILE,
-             extra_env={"GEMINI_API_KEY": "fake", "CODEX_REVIEW_MAX_LINES": "10"})
+             extra_env={"GEMINI_REVIEWER_API_KEY": "fake", "CODEX_REVIEW_MAX_LINES": "10"})
     check("exit 0", p.returncode == 0)
     check("prints skip notice", "skipped" in p.stdout.lower(), p.stdout[:100])
 
     print("\n  [6] Nonexistent file → silent")
     p = _run(SCRIPT, file_path=os.path.join(ROOT, "credit_report", "ghost.py"),
-             extra_env={"GEMINI_API_KEY": "fake"})
+             extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
@@ -199,7 +199,7 @@ def test_error_resilience() -> None:
     section("B — Error resilience  (API failures must never crash)")
 
     print("\n  [7] Unreachable Gemini URL → silent")
-    p = _run(SCRIPT, file_path=PROD_FILE, extra_env={**_NO_KEYS, "GEMINI_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=PROD_FILE, extra_env={**_NO_KEYS, "GEMINI_REVIEWER_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no Traceback", "Traceback" not in p.stdout + p.stderr)
 
@@ -208,7 +208,7 @@ def test_error_resilience() -> None:
     try:
         _QUEUE.clear(); _QUEUE.append(b"not-json{")  # type: ignore[arg-type]
         p = _run(patched, file_path=PROD_FILE,
-                 extra_env={**_NO_KEYS, "GEMINI_API_KEY": "fake"})
+                 extra_env={**_NO_KEYS, "GEMINI_REVIEWER_API_KEY": "fake"})
         check("exit 0", p.returncode == 0)
         check("no Traceback", "Traceback" not in p.stdout + p.stderr)
     finally:
@@ -269,7 +269,7 @@ def test_priority_fallback() -> None:
     try:
         _QUEUE.clear(); _QUEUE.append(_CLEAN_GEMINI)
         p = _run(patched, file_path=PROD_FILE, extra_env={
-            "GEMINI_API_KEY":     "fake-gemini",
+            "GEMINI_REVIEWER_API_KEY": "fake-gemini",
             "OPENROUTER_API_KEY": "fake-openrouter",
             "CEREBRAS_API_KEY":   "fake-cerebras",
             "GROQ_API_KEY":       "fake-groq",
@@ -334,7 +334,7 @@ def test_live() -> None:
         print(
             "\n  ⚠️  No API key found — live section skipped.\n"
             "\n  Gemini works from Claude Code iOS/web (Anthropic sandbox):\n"
-            "    GEMINI_API_KEY=AIza...   ← set this in your .env\n"
+            "    GEMINI_REVIEWER_API_KEY=AIza...   ← set this in Render env\n"
             "\n  These work from local CLI only (sandbox blocks them):\n"
             "    OPENROUTER_API_KEY=sk-or-...\n"
             "    CEREBRAS_API_KEY=csk-...\n"
@@ -382,7 +382,7 @@ def main() -> None:
     test_exclusions()
     test_error_resilience()
 
-    test_provider_mock("gemini",     "GEMINI_API_KEY",     "fake-gm",
+    test_provider_mock("gemini",     "GEMINI_REVIEWER_API_KEY", "fake-gm",
                        "Gemini",     "gemini-2.5-pro")
     test_provider_mock("openrouter", "OPENROUTER_API_KEY", "fake-or",
                        "OpenRouter", "laguna-m.1")
