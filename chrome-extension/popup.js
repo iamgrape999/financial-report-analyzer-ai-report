@@ -15,19 +15,17 @@ document.querySelectorAll(".tab").forEach(tab => {
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 async function loadSettings() {
-  const data = await chrome.storage.local.get(["baseUrl", "email", "password", "geminiKey"]);
-  if (data.baseUrl)   document.getElementById("baseUrl").value   = data.baseUrl;
-  if (data.email)     document.getElementById("email").value     = data.email;
-  if (data.password)  document.getElementById("password").value  = data.password;
-  if (data.geminiKey) document.getElementById("geminiKey").value = data.geminiKey;
+  const data = await chrome.storage.local.get(["baseUrl", "email", "password"]);
+  if (data.baseUrl)  document.getElementById("baseUrl").value  = data.baseUrl;
+  if (data.email)    document.getElementById("email").value    = data.email;
+  if (data.password) document.getElementById("password").value = data.password;
 }
 
 document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
   await chrome.storage.local.set({
-    baseUrl:   document.getElementById("baseUrl").value.trim().replace(/\/$/, ""),
-    email:     document.getElementById("email").value.trim(),
-    password:  document.getElementById("password").value,
-    geminiKey: document.getElementById("geminiKey").value.trim(),
+    baseUrl:  document.getElementById("baseUrl").value.trim().replace(/\/$/, ""),
+    email:    document.getElementById("email").value.trim(),
+    password: document.getElementById("password").value,
   });
   const btn = document.getElementById("saveSettingsBtn");
   btn.textContent = "✅ Saved!";

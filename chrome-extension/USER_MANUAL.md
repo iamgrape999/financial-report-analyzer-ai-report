@@ -73,9 +73,14 @@ Click the toolbar icon → **Settings** tab.
 | Base URL | `https://your-host.onrender.com` or `http://localhost:8000` | Saved to disk |
 | Email | Analyst account email | Saved to disk |
 | Password | Account password | Saved to disk (see security note below) |
-| Gemini API Key | `AIza…` from Google AI Studio | Saved to disk |
 
 Click **Save Settings**.
+
+**Note**: a Gemini API key is no longer stored in the extension. All
+LLM calls (ETL, generation, and gap-fill) are routed through the
+backend server using the server's own key. This keeps all financial
+data inside the enterprise network perimeter and satisfies FSC (Taiwan)
+and MAS (Singapore) data-residency requirements.
 
 ### Security note on password storage
 
@@ -149,9 +154,13 @@ requires an explicit analyst click.
 
 ## 6. Gap-fill: risks and required verification
 
-The gap-fill step calls Gemini directly from the browser using your API
-key. Gemini answers from its **training-data knowledge** (cutoff August
-2025 for `gemini-2.5-flash`). It does **not** fetch live market data,
+Gap-fill calls `POST /api/credit-report/reports/{rid}/gap-fill` on the
+backend, which forwards the request to Gemini using the server's API key.
+No financial data leaves the enterprise network perimeter — the browser
+never contacts `generativelanguage.googleapis.com` directly.
+
+Gemini answers from its **training-data knowledge** (cutoff August 2025
+for `gemini-2.5-flash`). It does **not** fetch live market data,
 Bloomberg feeds, or real-time financial filings.
 
 **Consequence**: any values Gemini fills in are approximations or, for
@@ -160,18 +169,26 @@ only as scaffolding — a starting point for the analyst to replace with
 verified figures.
 
 To make the risk visible in the UI:
-- Gap-fill emit messages include "VERIFY BEFORE SUBMIT"
-- The filled values in the prompt are requested with a `_UNVERIFIED`
-  suffix flag so the analyst can grep for them in the section inputs
+- Gap-fill messages include "VERIFY BEFORE SUBMIT"
+- String values uncertain to Gemini are returned with an `_UNVERIFIED`
+  suffix so the analyst can search for them in the section inputs
+
+**Debt and leverage fields — critical warning**: YAML field-mapping
+configs map facts to **interest-bearing debt** components (bank loans,
+bonds, finance leases), not to `total_liabilities`. Any gap-fill value
+for a leverage or coverage ratio must be cross-checked against the
+borrower's audited financials to confirm the correct debt perimeter.
+Confusing total liabilities with interest-bearing debt corrupts DSCR,
+net debt/EBITDA, and LTV calculations.
 
 **When to use gap-fill**: for older, well-documented companies where
 Gemini's knowledge is likely accurate and the values are low-stakes
-(e.g. company founding date, registered country). **Do not** rely on
-gap-fill for revenue, EBITDA, debt ratios, or any figure dated after
-the model's knowledge cutoff.
+(e.g. company founding date, registered country, fleet count).
+**Do not** rely on gap-fill for revenue, EBITDA, debt ratios, or any
+figure dated after the model's knowledge cutoff.
 
-**When to skip gap-fill**: leave the Company Name field blank. The step
-is skipped entirely when no Gemini API key is stored in Settings.
+**When to skip gap-fill**: leave the Company Name field blank. The
+step is skipped entirely when the field is empty.
 
 ---
 
@@ -181,17 +198,21 @@ Chrome MV3 service workers terminate after 30 seconds of inactivity.
 A 10-section report takes 4–10 minutes to generate. The extension
 solves this using `chrome.alarms`:
 
-1. `stepGenerate()` triggers §4 synchronously, stores the task UUID,
-   section queue, JWT, and base URL in `chrome.storage.local`, then
-   creates a `_gen_poll` alarm set to fire every ~8 seconds.
+1. `stepGenerate()` triggers §4 synchronously, writes **all** generation
+   state as a single atomic object (`_gen_state`) to `chrome.storage.local`,
+   then creates a `_gen_poll` alarm set to fire every ~8 seconds.
 2. The alarm fires even if Chrome terminates the service worker —
    Chrome wakes a new SW instance, which reads the persisted state
    and continues polling.
 3. When a section completes, the alarm handler immediately triggers the
-   next section in the queue ([4→7→1→3→2→5→6→8→9→10]) and updates
-   storage.
+   next section in the queue ([4→7→1→3→2→5→6→8→9→10]) and writes
+   the updated state atomically (single `chrome.storage.local.set` call).
 4. When all 10 sections complete, the alarm is cleared and the final
    `emit("done", ...)` fires.
+
+**Why atomic state matters**: writing all fields as one object prevents
+the popup from reading a partially-updated state (e.g. new task_id but
+old section number) if it opens between two individual key writes.
 
 You can close the popup during generation. Progress events arrive when
 you reopen it. If generation stalls (check `chrome://extensions` →
@@ -253,8 +274,9 @@ npx playwright test tests/e2e/extension.spec.js
 | `HTTP 401` on any step | JWT expired | Enter password in Settings; the token-first logic will refresh it |
 | `HTTP 422: no extractable text` | Upload was image-only PDF | Re-upload a better-quality PDF; or use a text-layer PDF |
 | Generation alarm never completes | Section generation failed server-side | Open service worker console (`chrome://extensions` → Inspect) for error detail; click **Generate** to restart |
-| Gap-fill skipped | No Gemini key in Settings | Expected — add your key only if you want placeholder gap-fill |
+| Gap-fill skipped | Company Name field is blank | Expected — fill the Company Name field to enable gap-fill |
 | Gap-fill produced wrong values | Gemini hallucinated | Expected for recent fiscal data — verify against actual filings |
+| Gap-fill returns 503 | Server GEMINI_API_KEY not set | Contact the backend admin to configure `GEMINI_API_KEY` on the server |
 | "Detect" fills wrong report ID | SPA URL format not recognised | Paste the UUID manually from the browser URL bar |
 | Popup shows idle steps when generation is running | Popup was closed during generation | Progress emits resume when popup reopens; the alarm continues in background |
 
@@ -266,7 +288,7 @@ npx playwright test tests/e2e/extension.spec.js
 |---|---|
 | Marine industry only | YAML field-mapping configs only cover marine (`fact_mapping_config/marine/`). Other industries need new YAMLs. |
 | Gap-fill uses training data | Gemini has no live data access. All filled values are approximations and must be verified. |
-| Token storage | JWT cached in `chrome.storage.local` (unencrypted). Clear the password field after first login on non-personal machines. |
+| Token storage | JWT cached in `chrome.storage.local` (unencrypted). Clear the password field after first login on non-personal machines. No Gemini API key is stored client-side. |
 | Same-source conflicts are advisory | The extension never auto-resolves conflicts between two values from the same source type. |
 | Report approval | The extension leaves reports in `draft` status. Approval requires an analyst action in the web UI. |
 
@@ -276,12 +298,13 @@ npx playwright test tests/e2e/extension.spec.js
 
 - **Credentials**: Stored in `chrome.storage.local` — see §4 for the
   recommended practice of clearing the password after first login.
-- **Gemini key**: Sent only to `generativelanguage.googleapis.com` via
-  the `x-goog-api-key` header (inspect `service-worker.js` line ~160
-  to verify — it is never placed in a URL query string).
+- **Gemini key**: Not stored client-side. All LLM calls (ETL, generation,
+  gap-fill) are proxied through the backend server using the server's
+  own `GEMINI_API_KEY`. Financial data never leaves the enterprise network.
 - **Permissions**: The extension declares `storage`, `tabs`, `scripting`,
-  and `alarms` only, plus host permissions for your backend and
-  `generativelanguage.googleapis.com`. No `<all_urls>` access.
+  and `alarms` only, plus host permissions for your backend only.
+  No `<all_urls>` access. `generativelanguage.googleapis.com` is no
+  longer in `host_permissions`.
 - **Backend rate limits**: ETL is limited to 5 requests per 30 minutes
   per user; uploads to 10 per hour. The extension respects these.
 - **Audit trail**: every ETL run, fact upsert, conflict resolution, and

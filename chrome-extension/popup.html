@@ -110,7 +110,7 @@
   </div>
 
   <div class="field">
-    <label>Company Name (for web gap-fill)</label>
+    <label>Company Name <span class="info">(optional — leave blank to skip gap-fill)</span></label>
     <input type="text" id="companyName" placeholder="e.g. Evergreen Marine Corp" />
   </div>
 
@@ -180,15 +180,8 @@
       Stored unencrypted locally. Clear this field after first login on shared machines.
     </p>
   </div>
-  <div class="field">
-    <label>Gemini API Key
-      <span class="info">(optional — gap-fill uses model training knowledge,
-        NOT live market data; all filled values must be verified)</span>
-    </label>
-    <input type="password" id="geminiKey" placeholder="AIza..." />
-  </div>
   <button class="btn btn-primary" id="saveSettingsBtn">💾 Save Settings</button>
-  <p class="info" style="margin-top:8px">Email, base URL and Gemini key persisted in chrome.storage.local. Password is only used to obtain a JWT and can be cleared afterwards.</p>
+  <p class="info" style="margin-top:8px">Email and base URL persisted in chrome.storage.local. Password is only used to obtain a JWT and can be cleared afterwards. Gap-fill uses the server's Gemini key — no client API key required.</p>
 </div>
 
 <script src="popup.js"></script>

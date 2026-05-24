@@ -238,3 +238,26 @@ class ApplySuggestionsResponse(BaseModel):
     applied_paths: list[str]
     skipped_paths: list[str]
     conflict_paths: list[str]
+
+
+# ── Gap-fill (server-proxied Gemini, no client key) ───────────────────────────
+
+class GapFillRequest(BaseModel):
+    company_name: str
+    sections: Optional[list[int]] = None  # None = all 1-10
+
+
+class GapFillSectionResult(BaseModel):
+    section_no: int
+    filled_count: int
+    skipped_count: int
+
+
+class GapFillResponse(BaseModel):
+    company_name: str
+    total_filled: int
+    sections: list[GapFillSectionResult]
+    warning: str = (
+        "All gap-fill values are Gemini training-data estimates — "
+        "verify every figure against primary sources before approving."
+    )

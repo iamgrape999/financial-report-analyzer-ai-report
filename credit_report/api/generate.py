@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re as _re
 import time
 import uuid
 from collections import OrderedDict
 from functools import partial
-from typing import AsyncGenerator, Optional
+from pathlib import Path as _Path
+from typing import Any, AsyncGenerator, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -17,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.audit.events import write_event
 from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, GEMINI_API_KEY
+from credit_report.schemas import GapFillRequest, GapFillResponse, GapFillSectionResult
 from credit_report.database import get_db
 from credit_report.generation.evidence import extract_text_from_file, save_document_binary, save_document_text
 from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
@@ -1431,6 +1434,193 @@ async def generate_full_report(
         task_id, report_id, user_id, sections_with_data,
     )
     return GenerateTaskResult(task_id=task_id, status="running")
+
+
+# ── Gap-fill helpers ──────────────────────────────────────────────────────────
+
+def _path_get(obj: dict, path: str) -> Any:
+    """Walk dot-notation path into nested dict; return None if missing."""
+    cur: Any = obj
+    for part in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _path_set(obj: dict, path: str, value: Any) -> None:
+    """Write value at dot-notation path, creating intermediate dicts."""
+    parts = path.split(".")
+    cur = obj
+    for part in parts[:-1]:
+        if not isinstance(cur.get(part), dict):
+            cur[part] = {}
+        cur = cur[part]
+    cur[parts[-1]] = value
+
+
+_GAPFILL_YAML_BASE = _Path(__file__).parent.parent / "fact_store" / "fact_mapping_config"
+
+_SAFE_INDUSTRY_RE = _re.compile(r'^[a-z_]{1,40}$')
+
+
+def _load_section_yaml_paths(industry: str, section_no: int) -> list[str]:
+    """Return all field `path` values from the YAML config for a section."""
+    if not _SAFE_INDUSTRY_RE.match(industry):
+        return []
+    yaml_path = _GAPFILL_YAML_BASE / industry / f"section_{section_no}.yaml"
+    if not yaml_path.exists():
+        return []
+    try:
+        import yaml as _yaml
+        raw = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        return [entry["path"] for entry in raw.get("facts", []) if "path" in entry]
+    except Exception:
+        return []
+
+
+# ── Gap-fill endpoint ─────────────────────────────────────────────────────────
+
+@router.post("/gap-fill", response_model=GapFillResponse)
+async def gap_fill_report(
+    report_id: str,
+    payload: GapFillRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Server-proxied Gemini gap-fill.
+
+    Fills empty section-input fields using Gemini's training-knowledge estimate
+    for the named company.  All filled values are flagged as UNVERIFIED and must
+    be verified against primary sources before the report is approved.
+    No client-side Gemini API key is required.
+    """
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured on the server.",
+        )
+
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, current_user)
+
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports cannot be modified")
+
+    industry = (report.industry or "marine").lower()
+    target_sections = payload.sections if payload.sections else list(range(1, 11))
+    target_sections = [s for s in target_sections if 1 <= s <= 10]
+
+    from credit_report.generation.claude_client import call_gemini_raw
+
+    section_results: list[GapFillSectionResult] = []
+    total_filled = 0
+
+    for sec_no in target_sections:
+        paths = _load_section_yaml_paths(industry, sec_no)
+        if not paths:
+            section_results.append(GapFillSectionResult(section_no=sec_no, filled_count=0, skipped_count=0))
+            continue
+
+        # Load current input
+        current = await _load_section_input(db, report_id, sec_no)
+
+        # Only ask Gemini to fill truly empty paths (None or missing)
+        empty_paths = [p for p in paths if _path_get(current, p) is None]
+        if not empty_paths:
+            section_results.append(GapFillSectionResult(section_no=sec_no, filled_count=0, skipped_count=len(paths)))
+            continue
+
+        field_list = "\n".join(f"- {p}" for p in empty_paths[:20])
+        system_prompt = (
+            "You are a financial data assistant. Return ONLY valid JSON — no markdown fences, "
+            "no explanations. Use null for fields you cannot estimate with reasonable confidence."
+        )
+        user_prompt = (
+            f"Company: {payload.company_name}\n"
+            f"Section {sec_no} of a bank credit report is missing values for these fields:\n"
+            f"{field_list}\n\n"
+            "Return a flat JSON object mapping each field path to its best estimated value. "
+            "Flag uncertain values by appending _UNVERIFIED to string values. "
+            "Use null for fields you have no basis to estimate."
+        )
+
+        try:
+            raw_text = await call_gemini_raw(system_prompt, user_prompt, max_tokens=600)
+        except Exception as exc:
+            logger.warning("gap_fill_report: Gemini call failed section=%d: %s", sec_no, exc)
+            section_results.append(GapFillSectionResult(section_no=sec_no, filled_count=0, skipped_count=len(empty_paths)))
+            continue
+
+        # Parse JSON from response (Gemini may include preamble text)
+        gap_data: dict = {}
+        m = _re.search(r'\{[\s\S]+\}', raw_text)
+        if m:
+            try:
+                gap_data = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                pass
+
+        filled_count = 0
+        for path, val in gap_data.items():
+            if val is None:
+                continue
+            # Only fill if path is one we asked about and the field is still empty
+            if path in empty_paths and _path_get(current, path) is None:
+                _path_set(current, path, val)
+                filled_count += 1
+
+        if filled_count > 0:
+            # Persist updated section input
+            result = await db.execute(
+                select(SectionInput).where(
+                    SectionInput.report_id == report_id,
+                    SectionInput.section_no == sec_no,
+                ).order_by(SectionInput.id.desc())
+            )
+            si = result.scalars().first()
+            if si:
+                si.input_json = json.dumps(current, ensure_ascii=False)
+                si.saved_by = current_user.id
+            else:
+                db.add(SectionInput(
+                    id=str(uuid.uuid4()),
+                    report_id=report_id,
+                    section_no=sec_no,
+                    input_json=json.dumps(current, ensure_ascii=False),
+                    saved_by=current_user.id,
+                ))
+            await db.flush()
+
+        total_filled += filled_count
+        section_results.append(GapFillSectionResult(
+            section_no=sec_no,
+            filled_count=filled_count,
+            skipped_count=len(empty_paths) - filled_count,
+        ))
+
+    await write_event(
+        db,
+        action="section_input.gap_filled",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="report",
+        target_id=report_id,
+        reason=f"gap-fill company={payload.company_name!r} total_filled={total_filled}",
+    )
+    await db.commit()
+
+    logger.info(
+        "gap_fill_report: report=%s company=%r sections=%s total_filled=%d user=%s",
+        report_id, payload.company_name, target_sections, total_filled, current_user.id,
+    )
+
+    return GapFillResponse(
+        company_name=payload.company_name,
+        total_filled=total_filled,
+        sections=section_results,
+    )
 
 
 @router.get("/generate/stream/{task_id}")

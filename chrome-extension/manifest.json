@@ -6,8 +6,7 @@
   "permissions": ["storage", "tabs", "scripting", "alarms"],
   "host_permissions": [
     "https://financial-report-analyzer-zi6o.onrender.com/*",
-    "http://localhost:8000/*",
-    "https://generativelanguage.googleapis.com/*"
+    "http://localhost:8000/*"
   ],
   "background": {
     "service_worker": "service-worker.js",
