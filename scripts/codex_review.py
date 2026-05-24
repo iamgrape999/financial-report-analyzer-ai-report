@@ -25,7 +25,7 @@ MAX_LINES = int(os.getenv("CODEX_REVIEW_MAX_LINES", "300"))
 # ── Provider ──────────────────────────────────────────────────────────────────
 
 _GEMINI_KEY   = os.getenv("GEMINI_REVIEWER_API_KEY", "")
-_GEMINI_MODEL = os.getenv("GEMINI_REVIEWER_MODEL") or "gemini-2.5-pro"
+_GEMINI_MODEL = os.getenv("GEMINI_REVIEWER_MODEL") or "gemini-3.5-flash"
 
 if not _GEMINI_KEY:
     sys.exit(0)  # no key → silent no-op

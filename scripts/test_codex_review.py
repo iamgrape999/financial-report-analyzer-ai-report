@@ -179,12 +179,12 @@ def test_happy_paths() -> None:
         _QUEUE.clear(); _QUEUE.append(_CLEAN)
         p = _run(patched, file_path=PROD_FILE,
                  extra_env={"GEMINI_REVIEWER_API_KEY": "fake",
-                             "GEMINI_REVIEWER_MODEL":  "gemini-2.5-pro"})
+                             "GEMINI_REVIEWER_MODEL":  "gemini-3.5-flash"})
         check("exit 0",         p.returncode == 0)
         check("prints ✓",       "✓" in p.stdout,           p.stdout[:200])
         check("shows filename", "events.py" in p.stdout)
         check("shows Gemini",   "Gemini/" in p.stdout)
-        check("shows model",    "gemini-2.5-pro" in p.stdout)
+        check("shows model",    "gemini-3.5-flash" in p.stdout)
         check("no 🔍",          "🔍" not in p.stdout)
         print(f"       Output: {p.stdout.strip()}")
 
@@ -205,15 +205,23 @@ def test_happy_paths() -> None:
 
 
 def test_model_override() -> None:
-    section("D — GEMINI_REVIEWER_MODEL swap")
+    section("D — GEMINI_REVIEWER_MODEL swap (all supported models)")
     patched = _patched()
+    models = [
+        "gemini-3.5-flash",        # default — best for coding/agentic tasks
+        "gemini-3.1-pro-preview",  # SOTA reasoning
+        "gemini-3-flash-preview",  # frontier + grounding
+        "gemini-3.1-flash-lite",   # highest volume, lowest cost
+        "gemini-2.5-pro",          # previous gen pro
+        "gemini-2.5-flash",        # previous gen flash
+    ]
     try:
-        for model in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"):
+        for model in models:
             _QUEUE.clear(); _QUEUE.append(_CLEAN)
             p = _run(patched, file_path=PROD_FILE,
                      extra_env={"GEMINI_REVIEWER_API_KEY": "fake",
                                  "GEMINI_REVIEWER_MODEL":  model})
-            check(f"model={model}", model in p.stdout, p.stdout[:100])
+            check(f"model={model}", model in p.stdout, p.stdout[:120])
     finally:
         os.unlink(patched)
 
