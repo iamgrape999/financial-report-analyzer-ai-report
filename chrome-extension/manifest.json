@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "CUB Credit Report Automator",
+  "version": "1.0.0",
+  "description": "98% automated credit report generation — Cathay United Bank",
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://financial-report-analyzer-zi6o.onrender.com/*",
+    "http://localhost:8000/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CUB Automator"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://financial-report-analyzer-zi6o.onrender.com/*",
+        "http://localhost:8000/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

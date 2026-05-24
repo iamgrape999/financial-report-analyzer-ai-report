@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CUB Credit Report Automator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         width: 380px; background: #0f172a; color: #e2e8f0; font-size: 13px; }
+
+  .header { background: linear-gradient(135deg, #1e3a5f, #1e40af);
+            padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
+  .header h1 { font-size: 14px; font-weight: 700; color: #fff; }
+  .header .badge { background: #10b981; color: #fff; border-radius: 4px;
+                   font-size: 10px; padding: 2px 6px; }
+
+  .tab-bar { display: flex; background: #1e293b; border-bottom: 1px solid #334155; }
+  .tab { flex: 1; padding: 8px; text-align: center; cursor: pointer; font-size: 12px;
+         color: #94a3b8; transition: all .15s; border-bottom: 2px solid transparent; }
+  .tab.active { color: #60a5fa; border-bottom-color: #3b82f6; background: #0f172a; }
+
+  .panel { display: none; padding: 12px 14px; }
+  .panel.active { display: block; }
+
+  .field { margin-bottom: 10px; }
+  .field label { display: block; color: #94a3b8; font-size: 11px; margin-bottom: 4px; }
+  .field input { width: 100%; background: #1e293b; border: 1px solid #334155;
+                 border-radius: 6px; padding: 6px 10px; color: #e2e8f0; font-size: 12px; }
+  .field input:focus { outline: none; border-color: #3b82f6; }
+
+  .row { display: flex; gap: 8px; }
+  .row .field { flex: 1; }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px;
+         border-radius: 6px; border: none; cursor: pointer; font-size: 12px;
+         font-weight: 600; transition: opacity .15s; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary  { background: #2563eb; color: #fff; width: 100%; justify-content: center; }
+  .btn-success  { background: #059669; color: #fff; width: 100%; justify-content: center; margin-bottom: 6px; }
+  .btn-warning  { background: #d97706; color: #fff; flex: 1; justify-content: center; }
+  .btn-sm       { padding: 4px 10px; font-size: 11px; }
+  .btn-outline  { background: transparent; border: 1px solid #475569; color: #94a3b8; flex: 1; justify-content: center; }
+
+  .steps { margin-top: 10px; }
+  .step { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0;
+          border-bottom: 1px solid #1e293b; }
+  .step:last-child { border-bottom: none; }
+  .step-icon { font-size: 14px; width: 20px; flex-shrink: 0; margin-top: 1px; }
+  .step-body { flex: 1; min-width: 0; }
+  .step-name { font-weight: 600; color: #e2e8f0; }
+  .step-detail { color: #64748b; font-size: 11px; margin-top: 2px; word-break: break-all; }
+  .step.done   .step-icon::before { content: "✅"; }
+  .step.running .step-icon::before { content: "⏳"; }
+  .step.error   .step-icon::before { content: "❌"; }
+  .step.skip    .step-icon::before { content: "⏭️"; }
+  .step.idle    .step-icon::before { content: "○"; color: #475569; }
+
+  .conflict-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+                   padding: 10px; margin-bottom: 8px; }
+  .conflict-metric { font-weight: 700; color: #f1f5f9; margin-bottom: 6px; }
+  .conflict-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .conflict-val { background: #0f172a; border-radius: 4px; padding: 3px 8px;
+                  font-family: monospace; font-size: 12px; }
+  .val-a { color: #f87171; }
+  .val-b { color: #34d399; }
+  .ai-box { background: #0f172a; border-left: 3px solid #3b82f6; border-radius: 4px;
+            padding: 6px 8px; margin: 6px 0; font-size: 11px; color: #93c5fd; }
+  .conflict-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+  .badge-conf { border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700; }
+  .badge-high   { background: #065f46; color: #6ee7b7; }
+  .badge-medium { background: #78350f; color: #fcd34d; }
+  .badge-low    { background: #7f1d1d; color: #fca5a5; }
+
+  .info { color: #64748b; font-size: 11px; line-height: 1.5; }
+  .divider { border: none; border-top: 1px solid #1e293b; margin: 10px 0; }
+  .spinner { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .saved-tag { color: #10b981; font-size: 10px; margin-left: 6px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>⚡ CUB Credit Report Automator</h1>
+  </div>
+  <div class="badge" id="versionBadge">v1.0</div>
+</div>
+
+<div class="tab-bar">
+  <div class="tab active" data-tab="auto">🚀 Automate</div>
+  <div class="tab" data-tab="conflicts">⚠️ Conflicts</div>
+  <div class="tab" data-tab="settings">⚙️ Settings</div>
+</div>
+
+<!-- ── AUTOMATE PANEL ─────────────────────────────────────────────────────── -->
+<div class="panel active" id="panel-auto">
+  <div class="field">
+    <label>Report ID</label>
+    <div class="row">
+      <div class="field" style="flex:3">
+        <input type="text" id="reportId" placeholder="Paste UUID or auto-detect below" />
+      </div>
+      <div class="field" style="flex:1">
+        <button class="btn btn-outline btn-sm" id="detectBtn" style="width:100%;margin-top:0">Detect</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Company Name (for web gap-fill)</label>
+    <input type="text" id="companyName" placeholder="e.g. Evergreen Marine Corp" />
+  </div>
+
+  <button class="btn btn-success" id="fullAutoBtn">🚀 Full Automation (98%)</button>
+
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn btn-outline" id="etlBtn">📂 ETL</button>
+    <button class="btn btn-outline" id="suggestBtn">💡 Suggest</button>
+    <button class="btn btn-outline" id="generateBtn">📝 Generate</button>
+  </div>
+
+  <div class="steps" id="steps">
+    <div class="step idle" data-step="login">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">1. Login</div><div class="step-detail" id="d-login">–</div></div>
+    </div>
+    <div class="step idle" data-step="etl">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">2. OCR + ETL</div><div class="step-detail" id="d-etl">–</div></div>
+    </div>
+    <div class="step idle" data-step="suggestions">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">3. Field Suggestions</div><div class="step-detail" id="d-suggestions">–</div></div>
+    </div>
+    <div class="step idle" data-step="conflicts">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">4. Auto-Resolve Conflicts</div><div class="step-detail" id="d-conflicts">–</div></div>
+    </div>
+    <div class="step idle" data-step="gapfill">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">5. Gemini Gap Fill</div><div class="step-detail" id="d-gapfill">–</div></div>
+    </div>
+    <div class="step idle" data-step="generate">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">6. Generate §1–10</div><div class="step-detail" id="d-generate">–</div></div>
+    </div>
+    <div class="step idle" data-step="done">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">Complete</div><div class="step-detail" id="d-done">–</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CONFLICTS PANEL ────────────────────────────────────────────────────── -->
+<div class="panel" id="panel-conflicts">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-outline" id="loadConflictsBtn">🔄 Load Conflicts</button>
+    <button class="btn btn-warning" id="autoPriorityBtn">⚡ Auto-Resolve Priority</button>
+  </div>
+  <div id="conflictList"><p class="info">Click "Load Conflicts" to see open conflicts for the current report.</p></div>
+</div>
+
+<!-- ── SETTINGS PANEL ─────────────────────────────────────────────────────── -->
+<div class="panel" id="panel-settings">
+  <div class="field">
+    <label>Base URL</label>
+    <input type="text" id="baseUrl" placeholder="https://financial-report-analyzer-zi6o.onrender.com" />
+  </div>
+  <div class="field">
+    <label>Email</label>
+    <input type="email" id="email" placeholder="analyst@cub.com" />
+  </div>
+  <div class="field">
+    <label>Password</label>
+    <input type="password" id="password" placeholder="••••••••" />
+  </div>
+  <div class="field">
+    <label>Gemini API Key <span class="info">(optional — for gap fill)</span></label>
+    <input type="password" id="geminiKey" placeholder="AIza..." />
+  </div>
+  <button class="btn btn-primary" id="saveSettingsBtn">💾 Save Settings</button>
+  <p class="info" style="margin-top:8px">Keys stored locally in chrome.storage — never sent anywhere except the configured Base URL and Google API.</p>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
