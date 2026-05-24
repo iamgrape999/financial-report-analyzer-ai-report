@@ -34,6 +34,9 @@ HTML_FILE = os.path.join(ROOT, "static", "index.html")
 LIVE_KEY = os.getenv("GEMINI_REVIEWER_API_KEY", "")
 LIVE     = bool(LIVE_KEY)
 
+# Valid-format fake key for unit tests (passes M4 format check but never real)
+_FAKE_KEY = "AIzaFakeKeyForUnitTestingPurposesOnly"  # starts with AIza, ≥ 35 chars
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Mock HTTP server (Gemini response format)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,29 +127,29 @@ def test_exclusions() -> None:
     check("no output", p.stdout.strip() == "")
 
     print("\n  [2] No file path set")
-    p = _run(SCRIPT, extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
+    p = _run(SCRIPT, extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [3] HTML file excluded")
-    p = _run(SCRIPT, file_path=HTML_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=HTML_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [4] Test file excluded")
-    p = _run(SCRIPT, file_path=TEST_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=TEST_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [5] File exceeds MAX_LINES (limit=10)")
     p = _run(SCRIPT, file_path=BIG_FILE,
-             extra_env={"GEMINI_REVIEWER_API_KEY": "fake", "CODEX_REVIEW_MAX_LINES": "10"})
+             extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY, "CODEX_REVIEW_MAX_LINES": "10"})
     check("exit 0", p.returncode == 0)
     check("prints skip notice", "skipped" in p.stdout.lower(), p.stdout[:100])
 
     print("\n  [6] Nonexistent file → silent")
     p = _run(SCRIPT, file_path=os.path.join(ROOT, "credit_report", "ghost.py"),
-             extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
+             extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
@@ -155,7 +158,7 @@ def test_error_resilience() -> None:
     section("B — Error resilience  (failures must never crash)")
 
     print("\n  [7] Unreachable URL → silent")
-    p = _run(SCRIPT, file_path=PROD_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=PROD_FILE, extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
     check("exit 0", p.returncode == 0)
     check("no Traceback", "Traceback" not in p.stdout + p.stderr)
 
@@ -164,7 +167,7 @@ def test_error_resilience() -> None:
     try:
         _QUEUE.clear(); _QUEUE.append(b"not-json{")  # type: ignore[arg-type]
         p = _run(patched, file_path=PROD_FILE,
-                 extra_env={"GEMINI_REVIEWER_API_KEY": "fake"})
+                 extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY})
         check("exit 0", p.returncode == 0)
         check("no Traceback", "Traceback" not in p.stdout + p.stderr)
     finally:
@@ -178,7 +181,7 @@ def test_happy_paths() -> None:
         print("\n  [clean] Returns ✓ No critical issues")
         _QUEUE.clear(); _QUEUE.append(_CLEAN)
         p = _run(patched, file_path=PROD_FILE,
-                 extra_env={"GEMINI_REVIEWER_API_KEY": "fake",
+                 extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY,
                              "GEMINI_REVIEWER_MODEL":  "gemini-3.5-flash"})
         check("exit 0",         p.returncode == 0)
         check("prints ✓",       "✓" in p.stdout,           p.stdout[:200])
@@ -191,7 +194,7 @@ def test_happy_paths() -> None:
         print("\n  [warn] Returns issues found")
         _QUEUE.clear(); _QUEUE.append(_WARN)
         p = _run(patched, file_path=PROD_FILE,
-                 extra_env={"GEMINI_REVIEWER_API_KEY": "fake",
+                 extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY,
                              "GEMINI_REVIEWER_MODEL":  "gemini-2.5-flash"})
         check("exit 0",           p.returncode == 0)
         check("prints 🔍",        "🔍" in p.stdout,          p.stdout[:200])
@@ -219,7 +222,7 @@ def test_model_override() -> None:
         for model in models:
             _QUEUE.clear(); _QUEUE.append(_CLEAN)
             p = _run(patched, file_path=PROD_FILE,
-                     extra_env={"GEMINI_REVIEWER_API_KEY": "fake",
+                     extra_env={"GEMINI_REVIEWER_API_KEY": _FAKE_KEY,
                                  "GEMINI_REVIEWER_MODEL":  model})
             check(f"model={model}", model in p.stdout, p.stdout[:120])
     finally:

@@ -15,6 +15,11 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      # AI code-review hook (Claude Code PostToolUse). Leave blank to disable.
+      - key: GEMINI_REVIEWER_API_KEY
+        sync: false
+      - key: GEMINI_REVIEWER_MODEL
+        value: gemini-2.5-flash
       - key: GEMINI_OCR_MODEL
         value: gemini-2.5-flash-lite
       - key: GEMINI_ETL_MODEL
