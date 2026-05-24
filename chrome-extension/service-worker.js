@@ -67,8 +67,8 @@ async function pollGeneration(reportId, taskId, token, baseUrl, timeoutMs = 3000
     await new Promise(r => setTimeout(r, 4000));
     try {
       const s = await api("GET", `/reports/${reportId}/generate/status/${taskId}`, undefined, token, baseUrl);
-      if (s.status === "done")   return s;
-      if (s.status === "failed") throw new Error(`Generation failed: ${s.error || ""}`);
+      if (s.status === "done")  return s;
+      if (s.status === "error") throw new Error(`Generation failed: ${s.detail || ""}`);
     } catch (e) {
       if (e.message.startsWith("Generation failed")) throw e;
     }

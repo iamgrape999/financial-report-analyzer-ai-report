@@ -953,6 +953,8 @@ async def apply_field_suggestions(
         raise HTTPException(status_code=400, detail="section_no must be 1–10")
     if payload.apply_mode not in ("only_empty", "overwrite"):
         raise HTTPException(status_code=400, detail="apply_mode must be 'only_empty' or 'overwrite'")
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items to apply")
     if len(payload.items) > 500:
         raise HTTPException(status_code=400, detail="Too many items: max 500 per apply request")
 

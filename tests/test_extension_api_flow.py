@@ -207,18 +207,16 @@ class TestExtensionStep5FieldSuggestions:
                 assert "suggestions" in data
                 assert "total_facts_checked" in data
 
-    async def test_apply_suggestions_empty_is_noop(
+    async def test_apply_empty_items_rejected(
         self, client: AsyncClient, token: str, report_id: str
     ):
-        """POST apply with empty items list → 200 with 0 applied."""
+        """POST apply with empty items list → 400 (the extension skips empty calls client-side)."""
         resp = await client.post(
             f"/api/credit-report/reports/{report_id}/sections/1/field-suggestions/apply",
             json={"apply_mode": "only_empty", "items": []},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["applied_count"] == 0
+        assert resp.status_code == 400
 
 
 class TestExtensionStep6ConflictAutoResolve:
@@ -386,12 +384,12 @@ class TestExtensionFullFlow:
                 headers=auth_headers)
             assert r.status_code in (200, 404), f"§{sec} suggestions: {r.status_code}"
 
-        # 5. Apply suggestions (empty list is safe)
+        # 5. Apply suggestions (empty list is rejected by API — extension skips this client-side)
         r = await client.post(
             f"/api/credit-report/reports/{rid}/sections/1/field-suggestions/apply",
             json={"apply_mode": "only_empty", "items": []},
             headers=auth_headers)
-        assert r.status_code == 200
+        assert r.status_code == 400  # validated; real extension only POSTs when items > 0
 
         # 6. Auto-resolve priority conflicts
         r = await client.post(

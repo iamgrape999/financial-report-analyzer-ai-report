@@ -15,17 +15,31 @@ const path = require('path');
 
 const EXT_PATH = path.resolve(__dirname, '../../chrome-extension');
 
-// Launch a persistent Chromium context with the extension loaded
+// Launch a persistent Chromium context with the extension loaded.
+// MV3 extensions don't register a service worker under Playwright's default
+// "old" headless mode — pass `--headless=new` explicitly so the worker spins up.
 async function launchWithExtension() {
   return chromium.launchPersistentContext('', {
-    headless: true,
+    headless: false,
     args: [
+      '--headless=new',
       `--load-extension=${EXT_PATH}`,
       `--disable-extensions-except=${EXT_PATH}`,
       '--no-sandbox',
       '--disable-setuid-sandbox',
     ],
   });
+}
+
+// Wait until the extension's MV3 service worker is registered.
+async function waitForServiceWorker(context, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const worker = context.serviceWorkers().find(w => w.url().includes('service-worker.js'));
+    if (worker) return worker;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  throw new Error('Extension service worker did not register within ' + timeoutMs + 'ms');
 }
 
 test.describe('CUB Extension: basic load', () => {
@@ -40,21 +54,12 @@ test.describe('CUB Extension: basic load', () => {
   });
 
   test('extension service worker registers without errors', async () => {
-    // The background service worker should appear in the service worker list
-    // Give it a moment to register
-    await new Promise(r => setTimeout(r, 1500));
-    const workers = context.serviceWorkers();
-    const extWorker = workers.find(w => w.url().includes('service-worker.js'));
+    const extWorker = await waitForServiceWorker(context);
     expect(extWorker, 'service-worker.js should be registered').toBeTruthy();
   });
 
   test('popup HTML loads all key elements', async () => {
-    // Find extension ID by looking at service worker URL
-    await new Promise(r => setTimeout(r, 1000));
-    const workers = context.serviceWorkers();
-    const extWorker = workers.find(w => w.url().includes('service-worker.js'));
-    expect(extWorker).toBeTruthy();
-
+    const extWorker = await waitForServiceWorker(context);
     const extId = extWorker.url().match(/chrome-extension:\/\/([^/]+)/)?.[1];
     expect(extId, 'extension ID should be extractable').toBeTruthy();
 
@@ -82,8 +87,7 @@ test.describe('CUB Extension: basic load', () => {
   });
 
   test('settings panel saves and reloads values', async () => {
-    const workers = context.serviceWorkers();
-    const extWorker = workers.find(w => w.url().includes('service-worker.js'));
+    const extWorker = await waitForServiceWorker(context);
     const extId = extWorker.url().match(/chrome-extension:\/\/([^/]+)/)?.[1];
 
     const page = await context.newPage();
@@ -112,8 +116,7 @@ test.describe('CUB Extension: basic load', () => {
   });
 
   test('tab switching shows correct panels', async () => {
-    const workers = context.serviceWorkers();
-    const extWorker = workers.find(w => w.url().includes('service-worker.js'));
+    const extWorker = await waitForServiceWorker(context);
     const extId = extWorker.url().match(/chrome-extension:\/\/([^/]+)/)?.[1];
 
     const page = await context.newPage();
@@ -137,8 +140,7 @@ test.describe('CUB Extension: basic load', () => {
   });
 
   test('full automation button is disabled when report ID is empty', async () => {
-    const workers = context.serviceWorkers();
-    const extWorker = workers.find(w => w.url().includes('service-worker.js'));
+    const extWorker = await waitForServiceWorker(context);
     const extId = extWorker.url().match(/chrome-extension:\/\/([^/]+)/)?.[1];
 
     const page = await context.newPage();
