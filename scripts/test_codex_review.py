@@ -6,12 +6,14 @@ Usage
   # Mock only (no API cost — always works):
   python3 scripts/test_codex_review.py
 
-  # Live test (uses whichever key is set — all free/cheap):
-  OPENROUTER_API_KEY=sk-or-...  python3 scripts/test_codex_review.py
-  CEREBRAS_API_KEY=csk-...      python3 scripts/test_codex_review.py
-  GROQ_API_KEY=gsk_...          python3 scripts/test_codex_review.py
+  # Live test (uses whichever key is set — Gemini preferred):
+  GEMINI_API_KEY=AIza...         python3 scripts/test_codex_review.py
+  OPENROUTER_API_KEY=sk-or-...   python3 scripts/test_codex_review.py
+  CEREBRAS_API_KEY=csk-...       python3 scripts/test_codex_review.py
+  GROQ_API_KEY=gsk_...           python3 scripts/test_codex_review.py
 
-Provider priority: OpenRouter → Cerebras → Groq (first key found wins).
+Provider priority: Gemini → OpenRouter → Cerebras → Groq (first key wins).
+Gemini is the only provider reachable from Claude Code iOS/web sandbox.
 
 Exit codes:  0 = all passed,  1 = failures
 """
@@ -34,11 +36,14 @@ TEST_FILE = os.path.join(ROOT, "tests", "test_gap_coverage.py")
 HTML_FILE = os.path.join(ROOT, "static", "index.html")
 
 # Detect live provider (mirrors hook priority)
+_GM_KEY  = os.getenv("GEMINI_API_KEY", "")
 _OR_KEY  = os.getenv("OPENROUTER_API_KEY", "")
 _CB_KEY  = os.getenv("CEREBRAS_API_KEY", "")
 _GQ_KEY  = os.getenv("GROQ_API_KEY", "")
 
-if _OR_KEY:
+if _GM_KEY:
+    LIVE_PROVIDER, LIVE_KEY = "Gemini",     _GM_KEY
+elif _OR_KEY:
     LIVE_PROVIDER, LIVE_KEY = "OpenRouter", _OR_KEY
 elif _CB_KEY:
     LIVE_PROVIDER, LIVE_KEY = "Cerebras",   _CB_KEY
@@ -50,16 +55,27 @@ else:
 LIVE = bool(LIVE_KEY)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Mock HTTP server  (OpenAI-compatible — same format all three providers use)
+# Mock HTTP server  (handles both Gemini and OpenAI-compatible formats)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _QUEUE: list[str] = []
 
+# OpenAI-compatible response format
 _CLEAN = json.dumps({"choices": [{"message": {"content": "✓ No critical issues."}}]})
 _WARN  = json.dumps({"choices": [{"message": {"content":
     "• `mark_resolved` does not verify report ownership — IDOR possible.\n"
     "• Missing `await db.flush()` before conflict state re-query.\n"
     "• No approved-report immutability guard on conflict endpoints."}}]})
+
+# Gemini response format
+_CLEAN_GEMINI = json.dumps({
+    "candidates": [{"content": {"parts": [{"text": "✓ No critical issues."}]}}]
+})
+_WARN_GEMINI = json.dumps({"candidates": [{"content": {"parts": [{"text":
+    "• `mark_resolved` does not verify report ownership — IDOR possible.\n"
+    "• Missing `await db.flush()` before conflict state re-query.\n"
+    "• No approved-report immutability guard on conflict endpoints."
+}]}}]})
 
 
 class _MockHandler(http.server.BaseHTTPRequestHandler):
@@ -83,6 +99,8 @@ threading.Thread(target=_srv.serve_forever, daemon=True).start()
 
 # Provider URLs to patch → mock server
 _PATCH_URLS = {
+    "gemini":     ("https://generativelanguage.googleapis.com",
+                   f"http://127.0.0.1:{_port}"),
     "openrouter": ("https://openrouter.ai/api/v1/chat/completions",
                    f"http://127.0.0.1:{_port}/v1/chat/completions"),
     "cerebras":   ("https://api.cerebras.ai/v1/chat/completions",
@@ -129,7 +147,12 @@ def _run(script: str, *, file_path: str = "",
                           capture_output=True, text=True)
 
 
-_NO_KEYS = {"OPENROUTER_API_KEY": "", "CEREBRAS_API_KEY": "", "GROQ_API_KEY": ""}
+_NO_KEYS = {
+    "GEMINI_API_KEY":     "",
+    "OPENROUTER_API_KEY": "",
+    "CEREBRAS_API_KEY":   "",
+    "GROQ_API_KEY":       "",
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,29 +168,29 @@ def test_exclusions() -> None:
     check("no output", p.stdout.strip() == "")
 
     print("\n  [2] No file path set")
-    p = _run(SCRIPT, extra_env={"OPENROUTER_API_KEY": "fake"})
+    p = _run(SCRIPT, extra_env={"GEMINI_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [3] HTML file excluded")
-    p = _run(SCRIPT, file_path=HTML_FILE, extra_env={"OPENROUTER_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=HTML_FILE, extra_env={"GEMINI_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [4] Test file excluded")
-    p = _run(SCRIPT, file_path=TEST_FILE, extra_env={"OPENROUTER_API_KEY": "fake"})
+    p = _run(SCRIPT, file_path=TEST_FILE, extra_env={"GEMINI_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
     print("\n  [5] File exceeds MAX_LINES (limit=10)")
     p = _run(SCRIPT, file_path=BIG_FILE,
-             extra_env={"OPENROUTER_API_KEY": "fake", "CODEX_REVIEW_MAX_LINES": "10"})
+             extra_env={"GEMINI_API_KEY": "fake", "CODEX_REVIEW_MAX_LINES": "10"})
     check("exit 0", p.returncode == 0)
     check("prints skip notice", "skipped" in p.stdout.lower(), p.stdout[:100])
 
     print("\n  [6] Nonexistent file → silent")
     p = _run(SCRIPT, file_path=os.path.join(ROOT, "credit_report", "ghost.py"),
-             extra_env={"OPENROUTER_API_KEY": "fake"})
+             extra_env={"GEMINI_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no output", p.stdout.strip() == "")
 
@@ -175,12 +198,23 @@ def test_exclusions() -> None:
 def test_error_resilience() -> None:
     section("B — Error resilience  (API failures must never crash)")
 
-    print("\n  [7] Unreachable API URL → silent")
-    p = _run(SCRIPT, file_path=PROD_FILE, extra_env={"OPENROUTER_API_KEY": "fake"})
+    print("\n  [7] Unreachable Gemini URL → silent")
+    p = _run(SCRIPT, file_path=PROD_FILE, extra_env={**_NO_KEYS, "GEMINI_API_KEY": "fake"})
     check("exit 0", p.returncode == 0)
     check("no Traceback", "Traceback" not in p.stdout + p.stderr)
 
-    print("\n  [8] Malformed JSON response → silent")
+    print("\n  [8] Malformed JSON from Gemini → silent")
+    patched = _patched("gemini")
+    try:
+        _QUEUE.clear(); _QUEUE.append(b"not-json{")  # type: ignore[arg-type]
+        p = _run(patched, file_path=PROD_FILE,
+                 extra_env={**_NO_KEYS, "GEMINI_API_KEY": "fake"})
+        check("exit 0", p.returncode == 0)
+        check("no Traceback", "Traceback" not in p.stdout + p.stderr)
+    finally:
+        os.unlink(patched)
+
+    print("\n  [9] Malformed JSON from OpenAI-compatible → silent")
     patched = _patched("openrouter")
     try:
         _QUEUE.clear(); _QUEUE.append(b"not-json{")  # type: ignore[arg-type]
@@ -195,23 +229,27 @@ def test_error_resilience() -> None:
 def test_provider_mock(provider_key: str, env_key: str, env_val: str,
                        provider_label: str, model_fragment: str) -> None:
     section(f"C.{provider_label} — Happy paths via mock server")
-    patched = _patched(provider_key)
-    env     = {**_NO_KEYS, env_key: env_val,
-               "CODEX_REVIEW_MODEL": f"test/{model_fragment}:free"}
+    is_gemini = provider_key == "gemini"
+    patched   = _patched(provider_key)
+    env       = {**_NO_KEYS, env_key: env_val,
+                 "CODEX_REVIEW_MODEL": model_fragment if is_gemini
+                 else f"test/{model_fragment}:free"}
     try:
         print(f"\n  [clean] {provider_label} returns ✓ No critical issues")
-        _QUEUE.clear(); _QUEUE.append(_CLEAN)
+        _QUEUE.clear()
+        _QUEUE.append(_CLEAN_GEMINI if is_gemini else _CLEAN)
         p = _run(patched, file_path=PROD_FILE, extra_env=env)
         check("exit 0",            p.returncode == 0)
         check("prints ✓",          "✓" in p.stdout,              p.stdout[:200])
         check("shows filename",    "events.py" in p.stdout)
         check("shows provider",    provider_label in p.stdout)
-        check("shows model",       model_fragment in p.stdout)
+        check("shows model",       model_fragment.split("/")[-1] in p.stdout)
         check("no 🔍",             "🔍" not in p.stdout)
         print(f"       Output: {p.stdout.strip()}")
 
         print(f"\n  [warn]  {provider_label} returns issues found")
-        _QUEUE.clear(); _QUEUE.append(_WARN)
+        _QUEUE.clear()
+        _QUEUE.append(_WARN_GEMINI if is_gemini else _WARN)
         p = _run(patched, file_path=PROD_FILE, extra_env=env)
         check("exit 0",            p.returncode == 0)
         check("prints 🔍",         "🔍" in p.stdout,              p.stdout[:200])
@@ -226,13 +264,45 @@ def test_provider_mock(provider_key: str, env_key: str, env_val: str,
 def test_priority_fallback() -> None:
     section("D — Provider priority fallback")
 
-    print("\n  [only Cerebras key set → uses Cerebras]")
+    print("\n  [Gemini takes top priority over all others]")
+    patched = _patched("gemini")
+    try:
+        _QUEUE.clear(); _QUEUE.append(_CLEAN_GEMINI)
+        p = _run(patched, file_path=PROD_FILE, extra_env={
+            "GEMINI_API_KEY":     "fake-gemini",
+            "OPENROUTER_API_KEY": "fake-openrouter",
+            "CEREBRAS_API_KEY":   "fake-cerebras",
+            "GROQ_API_KEY":       "fake-groq",
+            "CODEX_REVIEW_MODEL": "gemini-2.5-pro",
+        })
+        check("exit 0",         p.returncode == 0)
+        check("uses Gemini",    "Gemini/" in p.stdout, p.stdout[:200])
+        print(f"       Output: {p.stdout.strip()}")
+    finally:
+        os.unlink(patched)
+
+    print("\n  [only OpenRouter key → uses OpenRouter]")
+    patched = _patched("openrouter")
+    try:
+        _QUEUE.clear(); _QUEUE.append(_CLEAN)
+        p = _run(patched, file_path=PROD_FILE, extra_env={
+            **_NO_KEYS,
+            "OPENROUTER_API_KEY": "fake-openrouter",
+            "CODEX_REVIEW_MODEL": "test/or-model:free",
+        })
+        check("exit 0",             p.returncode == 0)
+        check("uses OpenRouter",    "OpenRouter/" in p.stdout, p.stdout[:200])
+        print(f"       Output: {p.stdout.strip()}")
+    finally:
+        os.unlink(patched)
+
+    print("\n  [only Cerebras key → uses Cerebras]")
     patched = _patched("cerebras")
     try:
         _QUEUE.clear(); _QUEUE.append(_CLEAN)
         p = _run(patched, file_path=PROD_FILE, extra_env={
             **_NO_KEYS,
-            "CEREBRAS_API_KEY": "fake-cerebras",
+            "CEREBRAS_API_KEY":   "fake-cerebras",
             "CODEX_REVIEW_MODEL": "test/cerebras-model:free",
         })
         check("exit 0",          p.returncode == 0)
@@ -241,33 +311,17 @@ def test_priority_fallback() -> None:
     finally:
         os.unlink(patched)
 
-    print("\n  [only Groq key set → uses Groq]")
+    print("\n  [only Groq key → uses Groq]")
     patched = _patched("groq")
     try:
         _QUEUE.clear(); _QUEUE.append(_CLEAN)
         p = _run(patched, file_path=PROD_FILE, extra_env={
             **_NO_KEYS,
-            "GROQ_API_KEY": "fake-groq",
+            "GROQ_API_KEY":       "fake-groq",
             "CODEX_REVIEW_MODEL": "test/groq-model:free",
         })
         check("exit 0",       p.returncode == 0)
         check("uses Groq",    "Groq/" in p.stdout, p.stdout[:200])
-        print(f"       Output: {p.stdout.strip()}")
-    finally:
-        os.unlink(patched)
-
-    print("\n  [OpenRouter takes priority over Cerebras + Groq]")
-    patched = _patched("openrouter")
-    try:
-        _QUEUE.clear(); _QUEUE.append(_CLEAN)
-        p = _run(patched, file_path=PROD_FILE, extra_env={
-            "OPENROUTER_API_KEY": "fake-openrouter",
-            "CEREBRAS_API_KEY":   "fake-cerebras",
-            "GROQ_API_KEY":       "fake-groq",
-            "CODEX_REVIEW_MODEL": "test/or-model:free",
-        })
-        check("exit 0",             p.returncode == 0)
-        check("uses OpenRouter",    "OpenRouter/" in p.stdout, p.stdout[:200])
         print(f"       Output: {p.stdout.strip()}")
     finally:
         os.unlink(patched)
@@ -279,10 +333,12 @@ def test_live() -> None:
     if not LIVE:
         print(
             "\n  ⚠️  No API key found — live section skipped.\n"
-            "\n  Set any one of these (all already in this project's .env):\n"
-            "    OPENROUTER_API_KEY=sk-or-...   (free models)\n"
-            "    CEREBRAS_API_KEY=csk-...        (ultra-fast)\n"
-            "    GROQ_API_KEY=gsk_...            (fast)\n"
+            "\n  Gemini works from Claude Code iOS/web (Anthropic sandbox):\n"
+            "    GEMINI_API_KEY=AIza...   ← set this in your .env\n"
+            "\n  These work from local CLI only (sandbox blocks them):\n"
+            "    OPENROUTER_API_KEY=sk-or-...\n"
+            "    CEREBRAS_API_KEY=csk-...\n"
+            "    GROQ_API_KEY=gsk_...\n"
         )
         return
 
@@ -304,7 +360,8 @@ def test_live() -> None:
     check("non-empty output",    p.stdout.strip() != "")
     check("annotation icon",     "✓" in p.stdout or "🔍" in p.stdout)
     check("shows filename",      "events.py" in p.stdout)
-    check("shows provider tag",  any(t in p.stdout for t in ("OpenRouter/", "Cerebras/", "Groq/")))
+    check("shows provider tag",  any(t in p.stdout for t in
+                                     ("Gemini/", "OpenRouter/", "Cerebras/", "Groq/")))
     check("finished < 30s",      elapsed < 30, f"took {elapsed:.1f}s")
 
 
@@ -315,7 +372,7 @@ def test_live() -> None:
 def main() -> None:
     print("\n" + "═"*60)
     print("  Code-Review Hook — Verification Suite")
-    print("  Providers: OpenRouter → Cerebras → Groq  (first key wins)")
+    print("  Priority: Gemini → OpenRouter → Cerebras → Groq")
     if LIVE:
         print(f"  Live provider : {LIVE_PROVIDER}  ({LIVE_KEY[:12]}...)")
     else:
@@ -325,6 +382,8 @@ def main() -> None:
     test_exclusions()
     test_error_resilience()
 
+    test_provider_mock("gemini",     "GEMINI_API_KEY",     "fake-gm",
+                       "Gemini",     "gemini-2.5-pro")
     test_provider_mock("openrouter", "OPENROUTER_API_KEY", "fake-or",
                        "OpenRouter", "laguna-m.1")
     test_provider_mock("cerebras",   "CEREBRAS_API_KEY",   "fake-cb",
