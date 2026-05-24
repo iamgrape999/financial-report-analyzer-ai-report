@@ -2,21 +2,13 @@
 """AI code-review hook for Claude Code.
 
 PostToolUse hook triggered on Edit/Write to production Python files.
-Provider priority (first key found wins):
 
-  1. GEMINI_API_KEY      → gemini-2.5-pro    ✅ works from iOS/web (Anthropic sandbox)
-  2. OPENROUTER_API_KEY  → poolside/laguna-m.1:free   (local CLI only)
-  3. CEREBRAS_API_KEY    → llama3.1-70b                (local CLI only)
-  4. GROQ_API_KEY        → llama-3.3-70b-versatile     (local CLI only)
+Set both vars in Render environment to enable:
+  GEMINI_REVIEWER_API_KEY  — your Gemini API key (leave blank → no reviews)
+  GEMINI_REVIEWER_MODEL    — model to use (default: gemini-2.5-pro)
 
-Gemini 2.5 Pro is stronger than Claude Sonnet 4.6 — ideal as a reviewer
-when Sonnet 4.6 is the daily coder.
-
-Override model for whichever provider wins:
-  CODEX_REVIEW_MODEL=<model-id>
-
-Skip files longer than:
-  CODEX_REVIEW_MAX_LINES=300  (default)
+If GEMINI_REVIEWER_API_KEY is not set, the hook exits silently — no review,
+no error, no fallback.
 
 Exit code: always 0 — never blocks Claude Code.
 """
@@ -30,29 +22,13 @@ import urllib.request
 
 MAX_LINES = int(os.getenv("CODEX_REVIEW_MAX_LINES", "300"))
 
-# ── Provider auto-detection ───────────────────────────────────────────────────
+# ── Provider ──────────────────────────────────────────────────────────────────
 
 _GEMINI_KEY   = os.getenv("GEMINI_REVIEWER_API_KEY", "")
-_GEMINI_MODEL = (os.getenv("CODEX_REVIEW_MODEL")
-                 or os.getenv("GEMINI_REVIEWER_MODEL")
-                 or "gemini-2.5-pro")
+_GEMINI_MODEL = os.getenv("GEMINI_REVIEWER_MODEL") or "gemini-2.5-pro"
 
-_OAI_CANDIDATES = [
-    ("OpenRouter", os.getenv("OPENROUTER_API_KEY", ""),
-     "https://openrouter.ai/api/v1/chat/completions",
-     os.getenv("OPENROUTER_MODEL") or "poolside/laguna-m.1:free"),
-    ("Cerebras",   os.getenv("CEREBRAS_API_KEY", ""),
-     "https://api.cerebras.ai/v1/chat/completions",
-     os.getenv("CEREBRAS_MODEL") or "llama3.1-70b"),
-    ("Groq",       os.getenv("GROQ_API_KEY", ""),
-     "https://api.groq.com/openai/v1/chat/completions",
-     os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"),
-]
-
-_OAI_MATCH = next((c for c in _OAI_CANDIDATES if c[1]), None)
-
-if not _GEMINI_KEY and not _OAI_MATCH:
-    sys.exit(0)  # no key configured → silent no-op
+if not _GEMINI_KEY:
+    sys.exit(0)  # no key → silent no-op
 
 # ── File filtering ────────────────────────────────────────────────────────────
 
@@ -100,45 +76,21 @@ PROMPT = (
 # ── API call ──────────────────────────────────────────────────────────────────
 
 try:
-    if _GEMINI_KEY:
-        # Gemini uses a different API format from OpenAI-compatible providers
-        _PROVIDER = "Gemini"
-        _MODEL    = _GEMINI_MODEL
-        _model_id = _MODEL.split("/")[-1]
-        url  = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{_model_id}:generateContent?key={_GEMINI_KEY}"
-        )
-        body = json.dumps({
-            "contents":       [{"parts": [{"text": PROMPT}]}],
-            "generationConfig": {"maxOutputTokens": 200, "temperature": 0.1},
-        }).encode()
-        req = urllib.request.Request(
-            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            raw = json.loads(resp.read())
-        review = raw["candidates"][0]["content"]["parts"][0]["text"].strip()
-
-    else:
-        # OpenAI-compatible providers (OpenRouter / Cerebras / Groq)
-        _PROVIDER, _KEY, _URL, _DEFAULT = _OAI_MATCH
-        _MODEL = os.getenv("CODEX_REVIEW_MODEL") or _DEFAULT
-        headers = {"Authorization": f"Bearer {_KEY}", "Content-Type": "application/json"}
-        if _PROVIDER == "OpenRouter":
-            headers["HTTP-Referer"] = "https://github.com/iamgrape999/financial-report-analyzer-ai-report"
-            headers["X-Title"]      = "CathyChang AI Code Review"
-        body = json.dumps({
-            "model":       _MODEL,
-            "messages":    [{"role": "user", "content": PROMPT}],
-            "max_tokens":  200,
-            "temperature": 0.1,
-        }).encode()
-        req = urllib.request.Request(_URL, data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            raw = json.loads(resp.read())
-        review = raw["choices"][0]["message"]["content"].strip()
-
+    model_id = _GEMINI_MODEL.split("/")[-1]
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model_id}:generateContent?key={_GEMINI_KEY}"
+    )
+    body = json.dumps({
+        "contents":         [{"parts": [{"text": PROMPT}]}],
+        "generationConfig": {"maxOutputTokens": 200, "temperature": 0.1},
+    }).encode()
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        raw = json.loads(resp.read())
+    review = raw["candidates"][0]["content"]["parts"][0]["text"].strip()
 except (urllib.error.URLError, KeyError, IndexError,
         json.JSONDecodeError, TimeoutError):
     sys.exit(0)  # any failure → silent, non-blocking
@@ -146,10 +98,10 @@ except (urllib.error.URLError, KeyError, IndexError,
 # ── Print annotation ──────────────────────────────────────────────────────────
 
 icon        = "✓" if review.startswith("✓") else "🔍"
-model_short = _MODEL.split("/")[-1].replace(":free", "")
+model_short = _GEMINI_MODEL.split("/")[-1]
 
 print(
-    f"\n{icon} [{_PROVIDER}/{model_short}] review — {os.path.basename(file_path)}:\n"
+    f"\n{icon} [Gemini/{model_short}] review — {os.path.basename(file_path)}:\n"
     f"{review}\n",
     flush=True,
 )
