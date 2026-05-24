@@ -172,6 +172,23 @@ class ResolveConflictRequest(BaseModel):
     resolution_reason: str
 
 
+class ConflictAISuggestion(BaseModel):
+    conflict_id: str
+    suggested_winner: str       # "fact_a" | "fact_b" | "uncertain"
+    suggested_fact_id: Optional[str]
+    confidence: int             # 0–100
+    risk_level: str             # "low" | "medium" | "high"
+    auto_resolvable: bool       # True only for cross-source (priority rule applies)
+    reason: str
+    resolution_suggestion: str  # pre-filled text for the resolve call
+
+
+class AutoResolvePriorityResponse(BaseModel):
+    resolved_count: int
+    skipped_count: int
+    resolved_conflict_ids: list[str]
+
+
 class FieldSuggestion(BaseModel):
     suggestion_id: str          # deterministic: sha of (report_id, section_no, field_path, fact_id)
     field_path: str             # dot-notation path into input_json
