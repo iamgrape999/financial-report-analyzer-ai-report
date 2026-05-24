@@ -16,8 +16,7 @@ if DATABASE_URL.startswith("postgresql://"):
 AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "false" if IS_PRODUCTION else "true").lower() == "true"
 
 # ── LLM ──────────────────────────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-CREDIT_REPORT_MODEL: str = os.getenv("CREDIT_REPORT_MODEL", "claude-sonnet-4-6")
+# All generation, OCR, and ETL run on Gemini. No Anthropic API key needed.
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 # GEMINI_MODEL is the base default; override OCR/ETL independently via their own env vars.
 # OCR needs native PDF bytes support → keep on a capable vision model (Flash or Pro).
