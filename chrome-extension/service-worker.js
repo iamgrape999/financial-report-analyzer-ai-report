@@ -310,7 +310,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: true, data: res });
 
       } else if (action === "list_reports") {
-        const { baseUrl, token } = await cfg();
+        const token = await stepLogin();
+        const { baseUrl } = await cfg();
         const res = await api("GET", "/reports?limit=100", undefined, token, baseUrl);
         sendResponse({ ok: true, data: Array.isArray(res) ? res : (res.items || res.reports || []) });
 

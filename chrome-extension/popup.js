@@ -22,11 +22,15 @@ async function loadSettings() {
 }
 
 document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
+  let rawUrl = document.getElementById("baseUrl").value.trim().replace(/\/$/, "");
+  // Strip any path (e.g. /app) — only keep scheme + host + port
+  try { rawUrl = new URL(rawUrl).origin; } catch (_) {}
   await chrome.storage.local.set({
-    baseUrl:  document.getElementById("baseUrl").value.trim().replace(/\/$/, ""),
+    baseUrl:  rawUrl,
     email:    document.getElementById("email").value.trim(),
     password: document.getElementById("password").value,
   });
+  document.getElementById("baseUrl").value = rawUrl; // show the cleaned value
   const btn = document.getElementById("saveSettingsBtn");
   btn.textContent = "✅ Saved!";
   setTimeout(() => { btn.textContent = "💾 Save Settings"; }, 1500);
@@ -233,5 +237,14 @@ loadSettings();
 // Auto-load report list on popup open if settings are configured
 (async function autoLoadReports() {
   const data = await chrome.storage.local.get(["baseUrl", "email"]);
-  if (data.baseUrl && data.email) loadReportList();
+  if (data.baseUrl && data.email) {
+    loadReportList();
+  } else {
+    // Guide new users to Settings
+    document.getElementById("reportSelect").innerHTML =
+      '<option value="">— configure Settings first —</option>';
+    // Switch to Settings tab so they see the form
+    const tab = document.querySelector('.tab[data-tab="settings"]');
+    if (tab) tab.click();
+  }
 })();
