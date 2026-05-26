@@ -782,6 +782,7 @@ let token=localStorage.getItem('token');
 let currentRole=localStorage.getItem('role');
 let currentEmail=localStorage.getItem('email');
 let currentRid=null;
+let currentIndustry='marine';
 let currentPanelSec=null;
 let sectionInputMap={};     // {n: {has_data, saved_at}}
 let sectionInputDataMap={}; // {n: parsed input_json object} — cached for quality checks
@@ -1246,7 +1247,7 @@ function isFieldFilled(data,path){
 }
 
 function getCompleteness(secNo,data){
-  const fields=REQUIRED_FIELDS[secNo]||[];
+  const fields=getRequiredFields(secNo);
   if(!fields.length)return{filled:0,total:0,pct:100,missing:[]};
   const missing=[];let filled=0;
   for(const f of fields){if(isFieldFilled(data,f.p))filled++;else missing.push(f);}
@@ -1260,7 +1261,7 @@ function renderCompleteness(secNo,data){
   // This handles stored JSON which may be in post-finalization (rows[]/risk_factors[]) format.
   const norm=expandPayload(secNo,data);
   const{filled,total,pct,missing}=getCompleteness(secNo,norm);
-  const allFields=REQUIRED_FIELDS[secNo]||[];if(!allFields.length){panel.style.display='none';return;}
+  const allFields=getRequiredFields(secNo);if(!allFields.length){panel.style.display='none';return;}
   const barColor=pct>=50?'#00703C':pct>=30?'#f59e0b':'#dc2626';
   const badgeCls=pct>=50?'bg-success':pct>=30?'bg-warning text-dark':'bg-secondary';
   panel.style.display='block';
@@ -1832,10 +1833,111 @@ const FIELD_DEFS={
   ]
 };
 
+// ── Corporate / non-marine overrides for sections 4 and 6 ────────────────────
+const FIELD_DEFS_CORP={
+  4:[
+    {p:'4A_borrower.company_name_en',l:'4A — Company Name (English)',lz:'4A — 公司名稱（英文）',t:'text',h:'e.g. TSMC Ltd.',hz:'例：台積電股份有限公司'},
+    {p:'4A_borrower.company_name_zh',l:'4A — Company Name (Chinese / 中文名稱)',lz:'4A — 公司名稱（中文）',t:'text',h:'e.g. 台積電股份有限公司',hz:'例：台積電股份有限公司'},
+    {p:'4A_borrower.legal_entity_type',l:'4A — Legal Entity Type',lz:'4A — 法律實體類型',t:'text',h:'e.g. Public Limited Company',hz:'例：股份有限公司'},
+    {p:'4A_borrower.registration_number',l:'4A — Registration / UEN Number',lz:'4A — 登記╱統一企業編號',t:'text',h:'e.g. 22099901',hz:'例：22099901'},
+    {p:'4A_borrower.incorporation_country',l:'4A — Country of Incorporation',lz:'4A — 設立國家',t:'text',h:'e.g. Taiwan',hz:'例：台灣'},
+    {p:'4A_borrower.incorporation_date',l:'4A — Incorporation Date',lz:'4A — 設立日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'4A_borrower.fiscal_year_end',l:'4A — Fiscal Year End',lz:'4A — 財政年度結束日',t:'text',h:'e.g. Dec-31',hz:'例：12月31日'},
+    {p:'4A_borrower.group_auditor',l:'4A — Group Auditor',lz:'4A — 集團核數師',t:'text',h:'e.g. Deloitte',hz:'例：勤業眾信'},
+    {p:'4B_ownership.shareholders',l:'4B — Shareholders (one per line: Name|Stake%|Country)',lz:'4B — 股東（每行一項：名稱｜持股%｜國家）',t:'lines',h:'Parent Corp|100|TW\nMinority Investor|5|SG',hz:'母公司|100|TW\n少數股東|5|SG'},
+    {p:'4B_ownership.ultimate_beneficial_owner',l:'4B — Ultimate Beneficial Owner (UBO)',lz:'4B — 最終實益所有人（UBO）',t:'text',h:'e.g. Morris Chang Foundation',hz:'例：張忠謀基金會'},
+    {p:'4B_ownership.ubo_stake_pct',l:'4B — UBO Effective Stake (%)',lz:'4B — UBO實際持股 (%)',t:'number',h:'e.g. 25',hz:'例：25'},
+    {p:'4C_management.ceo_name',l:'4C — CEO Name',lz:'4C — 執行長姓名',t:'text',h:'e.g. C.C. Wei',hz:'例：魏哲家'},
+    {p:'4C_management.ceo_title',l:'4C — CEO Title',lz:'4C — 執行長職稱',t:'text',h:'e.g. Chief Executive Officer',hz:'例：執行長'},
+    {p:'4C_management.ceo_background',l:'4C — CEO Background Summary',lz:'4C — 執行長背景摘要',t:'textarea',h:'e.g. 30+ years in semiconductor industry, MIT PhD',hz:'例：半導體業逾30年，麻省理工學院博士'},
+    {p:'4C_management.cfo_name',l:'4C — CFO Name',lz:'4C — 財務長姓名',t:'text',h:'e.g. Wendell Huang',hz:'例：黃仁昌'},
+    {p:'4C_management.cfo_title',l:'4C — CFO Title',lz:'4C — 財務長職稱',t:'text',h:'e.g. Chief Financial Officer',hz:'例：財務長'},
+    {p:'4C_management.cfo_background',l:'4C — CFO Background Summary',lz:'4C — 財務長背景摘要',t:'textarea',h:'e.g. 20 years in tech finance, CFA qualified',hz:'例：科技業財務20年，CFA資格'},
+    {p:'4D_business.primary_business',l:'4D — Primary Business Description',lz:'4D — 主要業務描述',t:'textarea',h:'e.g. World\'s largest dedicated semiconductor foundry, providing advanced wafer fabrication services.',hz:'例：全球最大專業晶圓代工廠，提供先進晶圓製造服務。'},
+    {p:'4D_business.key_markets',l:'4D — Key Markets / Geographies',lz:'4D — 主要市場╱地區',t:'text',h:'e.g. Asia, North America, Europe',hz:'例：亞洲、北美、歐洲'},
+    {p:'4D_business.operational_model',l:'4D — Operational Model',lz:'4D — 營運模式',t:'text',h:'e.g. Pure-play foundry (fabless customer model)',hz:'例：純代工（無晶圓廠客戶模式）'},
+    {p:'4D_business.global_ranking',l:'4D — Global Market Ranking',lz:'4D — 全球市場排名',t:'number',h:'e.g. 1 = largest globally',hz:'例：1 = 全球第1大'},
+    {p:'4D_business.market_share_pct',l:'4D — Market Share (%)',lz:'4D — 市佔率 (%)',t:'number',h:'e.g. 57.9',hz:'例：57.9'},
+    {p:'4E_financials.currency',l:'4E — Reporting Currency',lz:'4E — 申報幣別',t:'text',h:'e.g. USD or TWD',hz:'例：USD 或 TWD'},
+    {p:'4E_financials.fiscal_year',l:'4E — Financial Year Reference',lz:'4E — 財務年度參考',t:'text',h:'e.g. FY2024',hz:'例：FY2024'},
+    {p:'4E_financials.revenue',l:'4E — Revenue (latest FY, millions)',lz:'4E — 收入（最近財年，百萬）',t:'number',h:'e.g. 88960',hz:'例：88,960'},
+    {p:'4E_financials.ebitda',l:'4E — EBITDA (latest FY, millions)',lz:'4E — EBITDA（最近財年，百萬）',t:'number',h:'e.g. 52000',hz:'例：52,000'},
+    {p:'4F_operations.total_employees',l:'4F — Total Employees',lz:'4F — 員工總人數',t:'number',h:'e.g. 73000',hz:'例：73,000'},
+    {p:'4F_operations.annual_capex_usd_m',l:'4F — Annual CapEx (USD M)',lz:'4F — 年度資本支出 (USD M)',t:'number',h:'e.g. 32000',hz:'例：32,000'},
+    {p:'4F_operations.production_capacity',l:'4F — Production Capacity (with unit)',lz:'4F — 產能（含單位）',t:'text',h:'e.g. 13M wafers/year (12-inch equivalent)',hz:'例：每年1,300萬片（12吋約當）'},
+    {p:'4F_operations.capacity_utilization_pct',l:'4F — Capacity Utilization (%)',lz:'4F — 產能利用率 (%)',t:'number',h:'e.g. 85',hz:'例：85'},
+    {p:'4F_operations.rd_expense_usd_m',l:'4F — R&D Expense (USD M)',lz:'4F — 研發費用 (USD M)',t:'number',h:'e.g. 6000',hz:'例：6,000'},
+    {p:'4F_operations.revenue_breakdown',l:'4F — Revenue Breakdown (one per line: Segment|%)',lz:'4F — 收入分佈（每行一項：業務別｜%）',t:'lines',h:'Advanced Nodes (≤7nm)|60\nMature Nodes (>7nm)|35\nOther|5',hz:'先進製程（≤7nm）|60\n成熟製程（>7nm）|35\n其他|5'},
+    {p:'4J_peer_comparison',l:'4J — Peer Comparison (one per line: Company|Revenue USD M|MarketShare%|HQ)',lz:'4J — 同業比較（每行一項：公司｜收入 USD M｜市佔率%｜總部）',t:'lines',h:'Samsung Foundry|18000|12.4|Korea\nGlobalFoundries|7400|5.8|USA\nSMIC|8300|6.0|China',hz:'三星代工|18000|12.4|韓國\n格芯|7400|5.8|美國\n中芯|8300|6.0|中國'}
+  ],
+  6:[
+    {p:'6A_project.project_name',l:'6A — Project Name',lz:'6A — 專案名稱',t:'text',h:'e.g. Fab 21 Phase 2 Expansion',hz:'例：Fab 21 第二期擴廠'},
+    {p:'6A_project.project_type',l:'6A — Project Type',lz:'6A — 專案類型',t:'text',h:'e.g. Greenfield Fab / Expansion / Equipment Upgrade',hz:'例：新建晶圓廠╱擴廠╱設備升級'},
+    {p:'6A_project.total_project_cost_usd_m',l:'6A — Total Project Cost (USD M)',lz:'6A — 專案總成本 (USD M)',t:'number',h:'e.g. 2500',hz:'例：2,500'},
+    {p:'6A_project.cub_facility_usd_m',l:'6A — CUB Facility Amount (USD M)',lz:'6A — 國泰聯行授信金額 (USD M)',t:'number',h:'e.g. 500',hz:'例：500'},
+    {p:'6A_project.ltc_pct',l:'6A — Loan-to-Cost LTC (%)',lz:'6A — 貸款成本比LTC (%)',t:'number',h:'e.g. 20',hz:'例：20'},
+    {p:'6A_project.expected_completion_date',l:'6A — Expected Completion Date',lz:'6A — 預計完工日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'6A_project.location',l:'6A — Project Location',lz:'6A — 專案地點',t:'text',h:'e.g. Tainan Science Park, Taiwan',hz:'例：台灣台南科學園區'},
+    {p:'6A_project.technology_node',l:'6A — Technology / Product Description',lz:'6A — 技術╱產品說明',t:'text',h:'e.g. 3nm process node advanced logic chips',hz:'例：3奈米製程先進邏輯晶片'},
+    {p:'6B_contractor.name',l:'6B — Main Contractor / EPC Name',lz:'6B — 主要承包商╱EPC名稱',t:'text',h:'e.g. CTCI Corporation',hz:'例：中鼎工程股份有限公司'},
+    {p:'6B_contractor.hq',l:'6B — Contractor Headquarters',lz:'6B — 承包商總部',t:'text',h:'e.g. Taipei, Taiwan',hz:'例：台灣台北'},
+    {p:'6B_contractor.track_record_verbatim',l:'6B — Contractor Track Record (verbatim)',lz:'6B — 承包商業績記錄（逐字）',t:'textarea',h:'e.g. 30+ years of semiconductor fab construction; delivered 15+ fabs globally on schedule.',hz:'例：逾30年半導體廠建設經驗；按時交付全球15座以上晶圓廠。'},
+    {p:'6C_contract.contract_type',l:'6C — Contract Type',lz:'6C — 合約類型',t:'text',h:'e.g. Fixed-price EPC / Cost-plus / Lump-sum turnkey',hz:'例：固定價EPC╱成本加成╱整廠交鑰匙'},
+    {p:'6C_contract.contract_date',l:'6C — Contract Date',lz:'6C — 合約日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'6C_contract.expected_completion',l:'6C — Target Completion Date',lz:'6C — 目標完工日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'6C_contract.delay_penalty_verbatim',l:'6C — Delay Penalty Provision (verbatim)',lz:'6C — 逾期罰款條款（逐字）',t:'textarea',h:'e.g. Liquidated damages of 0.5% of contract value per week of delay, capped at 10%.',hz:'例：逾期違約金為合約金額0.5%/週，上限10%。'},
+    {p:'6D_milestones.m1_name',l:'6D — Milestone 1 Name',lz:'6D — 里程碑1名稱',t:'text',h:'e.g. Site Preparation Complete',hz:'例：場地準備完成'},
+    {p:'6D_milestones.m1_date',l:'6D — Milestone 1 Expected Date',lz:'6D — 里程碑1預計日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'6D_milestones.m1_pct',l:'6D — Milestone 1 % of Project Cost',lz:'6D — 里程碑1專案成本百分比',t:'number',h:'e.g. 5',hz:'例：5'},
+    {p:'6D_milestones.m2_name',l:'6D — Milestone 2 Name',lz:'6D — 里程碑2名稱',t:'text',h:'e.g. Civil Construction Complete',hz:'例：土建工程完成'},
+    {p:'6D_milestones.m2_date',l:'6D — Milestone 2 Expected Date',lz:'6D — 里程碑2預計日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'6D_milestones.m2_pct',l:'6D — Milestone 2 % of Project Cost',lz:'6D — 里程碑2專案成本百分比',t:'number',h:'e.g. 25',hz:'例：25'},
+    {p:'6D_milestones.m3_name',l:'6D — Milestone 3 Name',lz:'6D — 里程碑3名稱',t:'text',h:'e.g. Equipment Installation Complete',hz:'例：設備安裝完成'},
+    {p:'6D_milestones.m3_date',l:'6D — Milestone 3 Expected Date',lz:'6D — 里程碑3預計日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'6D_milestones.m3_pct',l:'6D — Milestone 3 % of Project Cost',lz:'6D — 里程碑3專案成本百分比',t:'number',h:'e.g. 70',hz:'例：70'},
+    {p:'6D_milestones.m4_name',l:'6D — Milestone 4 Name',lz:'6D — 里程碑4名稱',t:'text',h:'e.g. Trial Production & Ramp-up Complete',hz:'例：試產及量產爬坡完成'},
+    {p:'6D_milestones.m4_date',l:'6D — Milestone 4 Expected Date',lz:'6D — 里程碑4預計日期',t:'text',h:'YYYY-MM-DD',hz:'YYYY-MM-DD'},
+    {p:'6D_milestones.m4_pct',l:'6D — Milestone 4 % of Project Cost',lz:'6D — 里程碑4專案成本百分比',t:'number',h:'e.g. 100',hz:'例：100'},
+    {p:'6E_project_risks.construction_risk_verbatim',l:'6E — Construction / Execution Risk (verbatim)',lz:'6E — 建設╱執行風險（逐字）',t:'textarea',h:'e.g. Potential equipment delivery delays from key tool vendors (ASML, Applied Materials) given global lead times.',hz:'例：關鍵設備廠商（ASML、應用材料）全球交期可能導致設備交付延誤。'},
+    {p:'6E_project_risks.technology_risk_verbatim',l:'6E — Technology / Ramp Risk (verbatim)',lz:'6E — 技術╱量產風險（逐字）',t:'textarea',h:'e.g. Yield ramp on new process node may take 6-9 months longer than baseline scenario.',hz:'例：新製程良率爬升可能較基準情境延遲6至9個月。'},
+    {p:'6E_project_risks.market_risk_verbatim',l:'6E — Market / Demand Risk (verbatim)',lz:'6E — 市場╱需求風險（逐字）',t:'textarea',h:'e.g. End-market demand softness for AI accelerators may delay utilization ramp.',hz:'例：AI加速器終端市場需求疲軟可能延遲產能利用率爬升。'}
+  ]
+};
+
+const REQUIRED_FIELDS_CORP={
+  4:[
+    {p:'4A_borrower.company_name_en',l:'Company Name English (4A)'},
+    {p:'4B_ownership.shareholders',l:'Shareholders (4B)'},
+    {p:'4C_management.ceo_name',l:'CEO Name (4C)'},
+    {p:'4D_business.primary_business',l:'Primary Business (4D)'},
+    {p:'4E_financials.revenue',l:'Revenue Latest FY (4E)'},
+    {p:'4F_operations.total_employees',l:'Total Employees (4F)'},
+    {p:'4J_peer_comparison',l:'Peer Comparison (4J)'}
+  ],
+  6:[
+    {p:'6A_project.project_name',l:'Project Name (6A)'},
+    {p:'6A_project.total_project_cost_usd_m',l:'Total Project Cost (6A)'},
+    {p:'6B_contractor.name',l:'Contractor Name (6B)'},
+    {p:'6C_contract.contract_date',l:'Contract Date (6C)'},
+    {p:'6D_milestones.m1_name',l:'Milestone 1 Name (6D)'},
+    {p:'6A_project.expected_completion_date',l:'Expected Completion Date (6A)'}
+  ]
+};
+
+const _MARINE_INDUSTRIES=new Set(['marine','shipping']);
+function getFieldDefs(secNo){
+  if(!_MARINE_INDUSTRIES.has(currentIndustry)&&FIELD_DEFS_CORP[secNo])return FIELD_DEFS_CORP[secNo];
+  return FIELD_DEFS[secNo]||[];
+}
+function getRequiredFields(secNo){
+  if(!_MARINE_INDUSTRIES.has(currentIndustry)&&REQUIRED_FIELDS_CORP[secNo])return REQUIRED_FIELDS_CORP[secNo];
+  return REQUIRED_FIELDS[secNo]||[];
+}
+
 function _fid(sec,p){return`ff_${sec}_${p}`;}
 
 function renderFieldForm(secNo){
-  const defs=FIELD_DEFS[secNo]||[];
+  const defs=getFieldDefs(secNo);
   if(!defs.length)return'<p class="text-muted small col-12">No structured form defined for this section — use the Raw JSON tab.</p>';
   return defs.map(f=>{
     const id=_fid(secNo,f.p);let inp='';
@@ -1847,14 +1949,14 @@ function renderFieldForm(secNo){
     else if(f.t==='json')inp=`<textarea id="${id}" class="form-control form-control-sm json-ed" rows="4" placeholder="${esc(f.h||'JSON format')}"></textarea>`;
     else if(f.t==='bool')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">—</option><option value="true">${lang==='zh'?'是':'Yes'}</option><option value="false">${lang==='zh'?'否':'No'}</option></select>`;
     else if(f.t==='select')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">${lang==='zh'?'— 請選擇 —':'— Select —'}</option>${(f.opts||[]).map(o=>`<option value="${esc(o)}">${esc(lang==='zh'?(OPTS_ZH[o]||o):o)}</option>`).join('')}</select>`;
-    const req=REQUIRED_FIELDS[secNo]?.some(r=>r.p===f.p);
+    const req=getRequiredFields(secNo).some(r=>r.p===f.p);
     const lbl=lang==='zh'?(f.lz||f.l):f.l;
     return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${lbl}${req?'<span class="text-danger ms-1" title="Required for 50%">*</span>':''}</label>${inp}</div>`;
   }).join('');
 }
 
 function populateForm(secNo,data){
-  const defs=FIELD_DEFS[secNo]||[];
+  const defs=getFieldDefs(secNo);
   for(const f of defs){
     const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
     const v=getNestedValue(data,f.p);if(v===null||v===undefined){el.value='';continue;}
@@ -1866,7 +1968,7 @@ function populateForm(secNo,data){
 }
 
 function collectFormData(secNo){
-  const defs=FIELD_DEFS[secNo]||[];const result={};
+  const defs=getFieldDefs(secNo);const result={};
   for(const f of defs){
     const el=document.getElementById(_fid(secNo,f.p));if(!el)continue;
     const raw=el.value.trim();if(!raw)continue;
@@ -2621,6 +2723,7 @@ async function loadReportDetail(rid){
       return;
     }
     const rpt=await rRes.json();
+    currentIndustry=(rpt.industry||'marine').toLowerCase();
     const outputs=outRes.ok?await outRes.json():[];
     const docs=docRes.ok?await docRes.json():[];
     const inputs=inpRes.ok?await inpRes.json():[];
@@ -3957,7 +4060,7 @@ function fsmUndo(){
 
 function _fsmHighlightApplied(paths,secNo){
   for(const path of paths){
-    const defs=FIELD_DEFS[secNo]||[];
+    const defs=getFieldDefs(secNo);
     for(const f of defs){
       if(f.p===path||path.startsWith(f.p)){
         const el=document.getElementById(_fid(secNo,f.p));
