@@ -200,3 +200,15 @@ function renderConflictCard(c) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadSettings();
+
+// Auto-detect report ID when popup opens — no user action required
+(async function autoDetect() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    const resp = await chrome.tabs.sendMessage(tab.id, { type: "get_page_context" });
+    if (resp?.reportId && !document.getElementById("reportId").value) {
+      document.getElementById("reportId").value = resp.reportId;
+    }
+  } catch { /* not on the web app page — silently skip */ }
+})();
