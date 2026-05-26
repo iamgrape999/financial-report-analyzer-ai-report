@@ -2533,7 +2533,7 @@ async function doLogin(){
     _loginShowGeneralErr(e.message||'登入失敗，請再試一次。 / Login failed, please try again.');
   }finally{sp.classList.add('d-none');btn.disabled=false;}
 }
-function logout(){localStorage.clear();token=null;currentRole=null;currentEmail=null;currentRid=null;showView('viewLogin');document.getElementById('navUser').classList.add('d-none');}
+function logout(){localStorage.clear();token=null;currentRole=null;currentEmail=null;currentRid=null;window.__CUB_RID=null;showView('viewLogin');document.getElementById('navUser').classList.add('d-none');}
 
 // ── Views ─────────────────────────────────────────────────────────────────────
 function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');}
@@ -2589,7 +2589,7 @@ async function createReport(){
 
 // ── Report detail ─────────────────────────────────────────────────────────────
 async function loadReportDetail(rid){
-  currentRid=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];uploadedDocs=[];_etlExtractedData={};closePanel();
+  currentRid=rid;window.__CUB_RID=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];uploadedDocs=[];_etlExtractedData={};closePanel();
   showView('viewReport');
   document.getElementById('rptMeta').innerHTML=`<span class="text-muted">${tl('Loading…','載入中…')}</span>`;
   document.getElementById('secTable').innerHTML=`<tr><td colspan="7" class="text-center py-3 text-muted">${tl('Loading…','載入中…')}</td></tr>`;
