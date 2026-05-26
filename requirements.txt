@@ -42,6 +42,11 @@ pytest-asyncio
 pytest-rerunfailures>=16.0
 schemathesis>=3.27
 
+# ── Standalone ETL scripts (scripts/etl/ — not imported by the FastAPI app) ──
+# pymupdf: PDF page rendering for VLM chart extraction without poppler dependency.
+# Used by scripts/etl/etl_pipeline_v2.py (L2 layer) only; wheels are self-contained.
+PyMuPDF==1.27.2
+
 # ── Excluded packages (DO NOT ADD BACK without Render validation) ─────────────
 # weasyprint>=62.0  → needs libpango/libcairo/libgdk-pixbuf; unavailable on Render
 #                     Python runtime. PDF export returns HTTP 503 gracefully.
