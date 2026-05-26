@@ -33,7 +33,7 @@ DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
 }
 
 ETL_SYSTEM_PROMPT = """\
-You are a specialized data extraction AI for maritime / corporate credit reports at an international commercial bank.
+You are a specialized data extraction AI for corporate credit reports at an international commercial bank.
 
 Your task: read the provided document excerpt and extract structured JSON data for specific credit report sections.
 

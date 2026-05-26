@@ -1,0 +1,79 @@
+# Section 3 — Credit Ratings: fact extraction mappings
+# Paths match the FORM FIELD_DEFS flat format.
+# After _flatten_section3() ETL post-processing:
+#   3B_internal_ratings uses flat borrower_* / guarantor_* keys (not rows[])
+#   3A_external_ratings: no flat form paths — stored as array, not mapped here
+#   3C_mas_612 fields are stored directly (no flattening needed)
+facts:
+  # ── MAS 612 Classification ─────────────────────────────────────────────────
+  - id_template: "RATING-MAS612-{entity}-CURRENT"
+    path: "3C_mas_612.grade"
+    metric: "mas612_grade"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "grade"
+
+  - id_template: "RATING-MAS612-MSR-{entity}-CURRENT"
+    path: "3C_mas_612.msr_value"
+    metric: "mas612_msr_value"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "grade"
+
+  # ── Internal ratings — Borrower (flat paths after _flatten_section3) ───────
+  - id_template: "RATING-INTERNAL-CURRENT-BORROW-{entity}-CURRENT"
+    path: "3B_internal_ratings.borrower_current"
+    metric: "internal_rating_current"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-FY2024-BORROW-{entity}-FY2024"
+    path: "3B_internal_ratings.borrower_fy2024"
+    metric: "internal_rating_fy2024"
+    entity: "BORROWER"
+    period: "FY2024"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-FY2022-BORROW-{entity}-FY2022"
+    path: "3B_internal_ratings.borrower_fy2022_23"
+    metric: "internal_rating_fy2022_23"
+    entity: "BORROWER"
+    period: "FY2022"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-INTERIM-BORROW-{entity}-INTERIM"
+    path: "3B_internal_ratings.borrower_interim"
+    metric: "internal_rating_interim"
+    entity: "BORROWER"
+    period: "INTERIM"
+    unit: "grade"
+
+  # ── Internal ratings — Guarantor ──────────────────────────────────────────
+  - id_template: "RATING-INTERNAL-CURRENT-GUAR-{entity}-CURRENT"
+    path: "3B_internal_ratings.guarantor_current"
+    metric: "internal_rating_current"
+    entity: "GUARANTOR"
+    period: "CURRENT"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-FY2024-GUAR-{entity}-FY2024"
+    path: "3B_internal_ratings.guarantor_fy2024"
+    metric: "internal_rating_fy2024"
+    entity: "GUARANTOR"
+    period: "FY2024"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-FY2022-GUAR-{entity}-FY2022"
+    path: "3B_internal_ratings.guarantor_fy2022_23"
+    metric: "internal_rating_fy2022_23"
+    entity: "GUARANTOR"
+    period: "FY2022"
+    unit: "grade"
+
+  - id_template: "RATING-INTERNAL-INTERIM-GUAR-{entity}-INTERIM"
+    path: "3B_internal_ratings.guarantor_interim"
+    metric: "internal_rating_interim"
+    entity: "GUARANTOR"
+    period: "INTERIM"
+    unit: "grade"

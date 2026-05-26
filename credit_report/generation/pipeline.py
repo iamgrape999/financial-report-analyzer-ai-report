@@ -192,6 +192,7 @@ async def run_section_generation(
     # requiring the analyst to manually embed the type in each section's input JSON.
     report_result = await db.execute(select(Report).where(Report.id == report_id))
     _report = report_result.scalar_one_or_none()
+    _industry = (_report.industry or "marine").lower() if _report else "marine"
     if _report and _report.report_type:
         meta = input_json.setdefault("metadata", {})
         if "report_type" not in meta:
@@ -237,6 +238,7 @@ async def run_section_generation(
                 evidence_chunks=evidence_chunks,
                 preceding_outputs=preceding_outputs,
                 output_language=output_language,
+                industry=_industry,
             )
 
         markdown = _strip_qa_output(markdown)

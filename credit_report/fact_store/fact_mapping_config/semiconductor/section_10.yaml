@@ -1,0 +1,91 @@
+# Section 10 — Appendix (Group Exposure / Fleet Growth / Projections): fact extraction mappings
+# Paths match the actual FORM FIELD_DEFS paths:
+#   10A_group_exposure.* — group exposure totals
+#   10B_fleet_growth.* — fleet CAGR
+#   10C_projections.* — projection DSCRs (NOT 10C_financial_projections which doesn't exist)
+facts:
+  # ── Group Exposure ────────────────────────────────────────────────────────────
+  - id_template: "EXPOSURE-APPROVED-GROUP-LIMIT-{entity}-CURRENT"
+    path: "10A_group_exposure.approved_group_limit_usd_m"
+    metric: "approved_group_limit_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "EXPOSURE-PROPOSED-{entity}-CURRENT"
+    path: "10A_group_exposure.proposed_exposure_usd_m"
+    metric: "group_utilization_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "EXPOSURE-EXISTING-{entity}-CURRENT"
+    path: "10A_group_exposure.existing_exposure_usd_m"
+    metric: "credit_limit_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  # ── Fleet Growth ──────────────────────────────────────────────────────────────
+  - id_template: "FLEET-CAGR-{entity}-CURRENT"
+    path: "10B_fleet_growth.cagr_pct"
+    metric: "fleet_cagr_pct"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "pct"
+
+  # ── Projections — Base Case DSCRs ─────────────────────────────────────────────
+  - id_template: "PROJ-BASE-DSCR-FY1-{entity}-{period}"
+    path: "10C_projections.base_dscr_fy_1"
+    metric: "dscr_base_case"
+    entity: "BORROWER"
+    period: "FY2026F"
+    unit: "x"
+
+  - id_template: "PROJ-BASE-DSCR-FY2-{entity}-{period}"
+    path: "10C_projections.base_dscr_fy_2"
+    metric: "dscr_base_case"
+    entity: "BORROWER"
+    period: "FY2027F"
+    unit: "x"
+
+  - id_template: "PROJ-BASE-DSCR-FY3-{entity}-{period}"
+    path: "10C_projections.base_dscr_fy_3"
+    metric: "dscr_base_case"
+    entity: "BORROWER"
+    period: "FY2028F"
+    unit: "x"
+
+  # ── Projections — Stress Case DSCRs ──────────────────────────────────────────
+  - id_template: "PROJ-WORSE-DSCR-FY1-{entity}-{period}"
+    path: "10C_projections.worse_dscr_fy_1"
+    metric: "dscr_stress_case"
+    entity: "BORROWER"
+    period: "FY2026F"
+    unit: "x"
+
+  # ── Projections — Revenue ──────────────────────────────────────────────────────
+  - id_template: "PROJ-BASE-REVENUE-FY1-{entity}-{period}"
+    path: "10C_projections.base_revenue_fy_1"
+    metric: "revenue_base_case"
+    entity: "BORROWER"
+    period: "FY2026F"
+    unit: "million"
+
+  - id_template: "PROJ-WORSE-REVENUE-FY1-{entity}-{period}"
+    path: "10C_projections.worse_revenue_fy_1"
+    metric: "revenue_stress_case"
+    entity: "BORROWER"
+    period: "FY2026F"
+    unit: "million"
+
+  # ── Projections — Freight Rate Stress ─────────────────────────────────────────
+  - id_template: "PROJ-FREIGHT-DROP-{entity}-CURRENT"
+    path: "10C_projections.freight_rate_drop_pct"
+    metric: "stress_freight_rate_drop_pct"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "pct"

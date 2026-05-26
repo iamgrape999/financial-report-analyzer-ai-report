@@ -1,0 +1,31 @@
+# Section 6 — Project / Capex Analysis: fact extraction mappings (corporate/non-marine)
+facts:
+  # ── Project cost ──────────────────────────────────────────────────────────────
+  - id_template: "PROJ-TOTAL-COST-{entity}-CURRENT"
+    path: "6A_project.total_project_cost_usd_m"
+    metric: "total_project_cost_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "million USD"
+
+  - id_template: "PROJ-CUB-FACILITY-{entity}-CURRENT"
+    path: "6A_project.cub_facility_usd_m"
+    metric: "cub_facility_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "million USD"
+
+  - id_template: "PROJ-LTC-{entity}-CURRENT"
+    path: "6A_project.ltc_pct"
+    metric: "project_ltc_pct"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "percent"
+
+  # ── Timeline ──────────────────────────────────────────────────────────────────
+  - id_template: "PROJ-COMPLETION-DATE-{entity}-CURRENT"
+    path: "6A_project.expected_completion_date"
+    metric: "project_completion_date"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "date"

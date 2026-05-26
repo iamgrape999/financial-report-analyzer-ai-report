@@ -1,0 +1,52 @@
+# Section 9 — Credit Analysis Checklist & Recommendation: fact extraction mappings
+# Paths match the actual FORM FIELD_DEFS paths:
+#   9C_recommendation.* — recommendation numeric fields (most auto-fillable from §1/§5 facts)
+#   9A_checklist.* — a few structured fields (most are manual analyst inputs)
+# Most §9 fields are qualitative analyst decisions and cannot be auto-filled.
+facts:
+  # ── Recommendation — numeric fields (cross-section from §1/§5/§6 CanonicalFacts) ──
+  - id_template: "REC-FACILITY-AMT-{entity}-CURRENT"
+    path: "9C_recommendation.facility_amount_usd_m"
+    metric: "facility_amount_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"
+
+  - id_template: "REC-TENOR-YEARS-{entity}-CURRENT"
+    path: "9C_recommendation.tenor_years"
+    metric: "tenor_years"
+    entity: "FACILITY"
+    period: "CURRENT"
+    unit: "years"
+
+  - id_template: "REC-BALLOON-LTV-{entity}-CURRENT"
+    path: "9C_recommendation.balloon_ltv_pct"
+    metric: "ltv_at_maturity_pct"
+    entity: "VESSEL"
+    period: "CURRENT"
+    unit: "pct"
+
+  # ── Checklist — MAS612 classification (cross-section from §3 CanonicalFacts) ──
+  - id_template: "CHK-MAS612-{entity}-CURRENT"
+    path: "9A_checklist.mas612_classification"
+    metric: "mas612_grade"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "grade"
+
+  # ── Checklist — ACRA reference from §8 ──────────────────────────────────────
+  - id_template: "CHK-ITEM16-ENTITY-{entity}-CURRENT"
+    path: "9A_checklist.item16_entity_name"
+    metric: "acra_entity_name"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "text"
+
+  - id_template: "CHK-ITEM15-PREDELIVERY-{entity}-CURRENT"
+    path: "9A_checklist.item15_pre_delivery_usd_m"
+    metric: "unsecured_cap_usd_m"
+    entity: "FACILITY"
+    period: "CURRENT"
+    currency: "USD"
+    unit: "million"

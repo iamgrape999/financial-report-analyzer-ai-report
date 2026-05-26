@@ -17,6 +17,34 @@ Your task is to write one section of a formal Credit Risk Assessment Report. You
 - Format numbers with commas (e.g. USD 2,791m) and round to sensible precision
 """
 
+_INDUSTRY_ROLE: dict[str, str] = {
+    "marine":       "structured trade and corporate finance for the marine and shipping industry",
+    "shipping":     "structured trade and corporate finance for the marine and shipping industry",
+    "aviation":     "structured trade and corporate finance for the aviation industry, including aircraft finance, airline lending, and MRO facility analysis",
+    "real_estate":  "real estate finance, including commercial property, development loans, REIT lending, and construction finance",
+    "corporate":    "corporate finance for general industries, including manufacturing, technology, services, and conglomerate lending",
+    "semiconductor":"corporate and project finance for the semiconductor and technology industry, including fab construction, equipment financing, and chip design companies",
+    "finance":      "financial institutions finance, including bank lending, insurance company credit, and structured finance vehicles",
+    "other":        "corporate and structured finance",
+}
+
+
+def get_system_prompt(industry: str = "marine", output_language: str = "en") -> str:
+    role = _INDUSTRY_ROLE.get(industry.lower(), _INDUSTRY_ROLE["other"])
+    base = (
+        f"You are a senior credit analyst at an international commercial bank specialising in "
+        f"{role}.\n\n"
+        "Your task is to write one section of a formal Credit Risk Assessment Report. You must:\n"
+        "- Write in professional banking English\n"
+        "- Use precise financial terminology\n"
+        "- Include all relevant data from the analyst inputs\n"
+        "- Structure your output as clean Markdown (headings, tables, bullet lists where appropriate)\n"
+        "- Be factual and evidence-based — do not speculate or fabricate numbers\n"
+        "- If a figure is not provided in the input data, state \"not available\" rather than guessing\n"
+        "- Format numbers with commas (e.g. USD 2,791m) and round to sensible precision\n"
+    )
+    return base + (_ZH_INSTRUCTION if output_language == "zh" else "")
+
 SECTION_HEADINGS: dict[int, str] = {
     1: "Section 1 — Credit Facility & Key Terms",
     2: "Section 2 — Overall Comments",
@@ -1707,6 +1735,90 @@ def _normalize_section3_ratings(input_json: dict) -> dict:
     return result
 
 
+# ── Industry-specific section instruction overrides ───────────────────────────
+# For non-marine industries only §4 and §6 need substantial changes.
+# All other sections are structurally industry-neutral.
+
+_CORPORATE_SECTION4_OVERRIDE = (
+    "## A. Role\n"
+    "Credit report engine for CUB Singapore Branch. "
+    "§4 Corporate History and Overview — the most data-intensive section.\n\n"
+    "🔴 VOICE RULE: Write AS the credit analyst. Never use source-referencing phrases.\n\n"
+    "## B. Heading & Structure\n"
+    "Heading EXACTLY: **4. Corporate History and Overview** (bold, no §, no sub-number).\n"
+    "Output sub-sections C-1 through C-9 in order.\n\n"
+    "**C-1. Corporate Identity** — Table (Item | Detail): Legal Name, Registration No., "
+    "Country, Date, Exchange, Fiscal Year End, Auditor, Principal Office.\n\n"
+    "**C-2. Ownership & Group Structure** — Shareholders table (Name | Stake % | Country | Notes). "
+    "UBO statement. Group structure narrative (2-3 sentences).\n\n"
+    "**C-3. Key Management** — Table (Name | Title | Experience | Background). "
+    "Stability assessment sentence.\n\n"
+    "**C-4. Business Overview** — 2-3 paragraphs: primary business; geographies; "
+    "operating model; market position; revenue drivers and key products/services.\n\n"
+    "**C-5. Revenue & Financial Highlights** — Revenue breakdown table if available "
+    "(Segment | Revenue | % of Total). Latest year revenue, EBITDA, net income, net cash. "
+    "Key ratios: EBITDA margin %, net debt/EBITDA.\n\n"
+    "**C-6. Operating Asset / Technology Profile** — Describe the company's key operating "
+    "assets, production/service capacity, technology platforms, or product portfolio. "
+    "Use tables where data is available. Omit vessel/TEU/fleet references unless applicable.\n\n"
+    "**C-7. Debt Profile** — Table (Lender/Bond | Type | CCY | Amount | Maturity | "
+    "Secured/Unsecured). Maturity profile assessment sentence.\n\n"
+    "**C-8. Industry & Market Analysis** — Sub-topics (1-2 sentences each or mini-table): "
+    "industry market conditions and key indices; supply-demand dynamics; competitive positioning; "
+    "regulatory/ESG headwinds; tariff/geopolitical risk.\n\n"
+    "**C-9. Peer Comparison** — Table (Company | Revenue | Market Share % | Listed (Y/N) | "
+    "Credit Rating). Rank top peers + borrower row (bold borrower). Positioning statement.\n\n"
+    "**Banking Relationships** (end of section) — Table (Bank | Product | Limit USD m | Since).\n\n"
+    "## D. Rules\n"
+    "• null → omit row. Currency+unit on first use. All tables: pipe-format Markdown.\n"
+    "• Do NOT copy §7 full financial tables. §C-5 is highlights only.\n"
+    "• NO source-referencing phrases. NO marine/vessel/TEU terminology unless borrower "
+    "is a shipping company. NO credit opinion (→§2).\n"
+    "Overflow → split: End: '[§4 CONTINUED IN NEXT OUTPUT]' / Resume: '[§4 CONTINUED]'"
+)
+
+_CORPORATE_SECTION6_OVERRIDE = (
+    "## A. Role\n"
+    "Credit report engine for CUB SG Branch producing §6 Project Analysis — "
+    "analyzing the specific project, capital expenditure programme, or asset acquisition "
+    "that forms the purpose of this credit facility.\n\n"
+    "## B. Heading\n"
+    "Heading EXACTLY: **6. Project Analysis** (bold, no §, no sub-number).\n\n"
+    "## C. Output (Non-Compressible)\n\n"
+    "**C-1. Project / Programme Overview** — Prose. Must include: project description; "
+    "total cost/capex amount; CUB facility amount and LTC%; expected completion timeline; "
+    "strategic rationale; cross-ref §4 for business context.\n\n"
+    "**C-2. Project Sponsor / Developer Profile** — Table (Field | Detail): company name, "
+    "track record, market position, relevant completed projects, credit standing.\n\n"
+    "**C-3. Contract / Agreement Structure** — Table (Term | Detail) — reproduce all key "
+    "contractual terms: type, parties, value, currency, timeline, key conditions, "
+    "termination rights, penalty/liquidated damages clauses.\n\n"
+    "**C-4. Drawdown & Milestone Schedule** — Table: "
+    "# | Milestone | Target Date | Amount (USD m) | Cumulative (USD m) | Status.\n\n"
+    "**C-5. Risk Assessment** — For each key risk: title, description (1-2 sentences), "
+    "likelihood (High/Medium/Low), mitigants (3-5 bullets with specific data).\n\n"
+    "**C-6. Project Economics** — Key financial metrics: IRR, payback period, breakeven, "
+    "sensitivity analysis if available. Cross-ref §7.\n\n"
+    "## D. Rules\n"
+    "• NO marine/vessel terminology unless the project involves ships.\n"
+    "• NO hallucination — use [DATA NOT PROVIDED] for absent data.\n"
+    "• NO source-referencing phrases.\n"
+    "• Likelihood labels permitted; summary judgments ('satisfactory', 'low risk') not permitted.\n"
+    "Overflow → split: End: '[§6 CONTINUED IN NEXT OUTPUT]' / Resume: '[§6 CONTINUED]'"
+)
+
+_MARINE_INDUSTRIES = {"marine", "shipping"}
+
+
+def _get_section_instructions(industry: str, section_no: int) -> str:
+    """Return section instructions, substituting corporate variants for §4 and §6 when not marine."""
+    if industry.lower() not in _MARINE_INDUSTRIES and section_no == 4:
+        return _CORPORATE_SECTION4_OVERRIDE
+    if industry.lower() not in _MARINE_INDUSTRIES and section_no == 6:
+        return _CORPORATE_SECTION6_OVERRIDE
+    return SECTION_INSTRUCTIONS.get(section_no, f"Write Section {section_no}.")
+
+
 def build_section_prompt(
     section_no: int,
     input_json: dict,
@@ -1715,6 +1827,7 @@ def build_section_prompt(
     is_continuation: bool = False,
     continuation_resume_token: Optional[str] = None,
     output_language: str = "en",
+    industry: str = "marine",
 ) -> tuple[str, str]:
     """
     Build (system_prompt, user_prompt) for a single section generation call.
@@ -1723,7 +1836,7 @@ def build_section_prompt(
     from where it left off, using the resume token as a prefix.
     """
     heading = SECTION_HEADINGS.get(section_no, f"Section {section_no}")
-    instructions = SECTION_INSTRUCTIONS.get(section_no, f"Write {heading}.")
+    instructions = _get_section_instructions(industry, section_no)
 
     evidence_block = ""
     if evidence_chunks:
@@ -1812,5 +1925,5 @@ def build_section_prompt(
             f"{OUTPUT_INSTRUCTIONS}"
         )
 
-    system_prompt = SYSTEM_PROMPT + (_ZH_INSTRUCTION if output_language == "zh" else "")
+    system_prompt = get_system_prompt(industry, output_language)
     return system_prompt, user_prompt

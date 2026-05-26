@@ -1,0 +1,89 @@
+# Section 4 — Corporate Background: fact extraction mappings (corporate/non-marine industries)
+facts:
+  # ── Ownership ────────────────────────────────────────────────────────────────
+  - id_template: "OWN-UBO-STAKE-{entity}-CURRENT"
+    path: "4B_ownership.ubo_stake_pct"
+    metric: "ubo_stake_pct"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "percent"
+
+  - id_template: "OWN-SHAREHOLDER0-STAKE-{entity}-CURRENT"
+    path: "4B_ownership.shareholders[0].stake_percent"
+    metric: "shareholder_stake"
+    entity_path: "4B_ownership.shareholders[0].name"
+    period: "CURRENT"
+    unit: "percent"
+
+  - id_template: "OWN-SHAREHOLDER1-STAKE-{entity}-CURRENT"
+    path: "4B_ownership.shareholders[1].stake_percent"
+    metric: "shareholder_stake"
+    entity_path: "4B_ownership.shareholders[1].name"
+    period: "CURRENT"
+    unit: "percent"
+
+  # ── Business profile ─────────────────────────────────────────────────────────
+  - id_template: "BUS-MARKET-SHARE-{entity}-CURRENT"
+    path: "4D_business.market_share_pct"
+    metric: "market_share_pct"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "percent"
+
+  - id_template: "BUS-GLOBAL-RANKING-{entity}-CURRENT"
+    path: "4D_business.global_ranking"
+    metric: "global_ranking"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "rank"
+
+  - id_template: "BUS-HEADCOUNT-{entity}-CURRENT"
+    path: "4D_business.total_employees"
+    metric: "total_employees"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "persons"
+
+  - id_template: "BUS-CAPEX-{entity}-CURRENT"
+    path: "4D_business.annual_capex_usd_m"
+    metric: "annual_capex_usd_m"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "million USD"
+
+  # ── Revenue segments ──────────────────────────────────────────────────────────
+  - id_template: "REV-SEG0-PCT-{entity}-CURRENT"
+    path: "4E_revenue_breakdown[0].pct_of_total"
+    metric: "segment_revenue_pct"
+    entity_path: "4E_revenue_breakdown[0].segment"
+    period: "CURRENT"
+    unit: "percent"
+
+  - id_template: "REV-SEG1-PCT-{entity}-CURRENT"
+    path: "4E_revenue_breakdown[1].pct_of_total"
+    metric: "segment_revenue_pct"
+    entity_path: "4E_revenue_breakdown[1].segment"
+    period: "CURRENT"
+    unit: "percent"
+
+  - id_template: "REV-SEG2-PCT-{entity}-CURRENT"
+    path: "4E_revenue_breakdown[2].pct_of_total"
+    metric: "segment_revenue_pct"
+    entity_path: "4E_revenue_breakdown[2].segment"
+    period: "CURRENT"
+    unit: "percent"
+
+  # ── Production / operational capacity ────────────────────────────────────────
+  - id_template: "OPS-CAPACITY-{entity}-CURRENT"
+    path: "4F_operations.production_capacity"
+    metric: "production_capacity"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "units"
+
+  - id_template: "OPS-UTILIZATION-{entity}-CURRENT"
+    path: "4F_operations.capacity_utilization_pct"
+    metric: "capacity_utilization_pct"
+    entity: "BORROWER"
+    period: "CURRENT"
+    unit: "percent"
