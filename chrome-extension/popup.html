@@ -97,16 +97,17 @@
 
 <!-- ── AUTOMATE PANEL ─────────────────────────────────────────────────────── -->
 <div class="panel active" id="panel-auto">
+
   <div class="field">
-    <label>Report ID</label>
-    <div class="row">
-      <div class="field" style="flex:3">
-        <input type="text" id="reportId" placeholder="Paste UUID or auto-detect below" />
-      </div>
-      <div class="field" style="flex:1">
-        <button class="btn btn-outline btn-sm" id="detectBtn" style="width:100%;margin-top:0">Detect</button>
-      </div>
+    <label>Select Report</label>
+    <div style="display:flex;gap:6px;align-items:center">
+      <select id="reportSelect" style="flex:1;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:6px 8px;color:#e2e8f0;font-size:12px">
+        <option value="">— click Load to pick a report —</option>
+      </select>
+      <button class="btn btn-outline btn-sm" id="loadReportsBtn" style="white-space:nowrap">📋 Load</button>
     </div>
+    <input type="hidden" id="reportId" />
+    <div id="selectedReport" style="margin-top:4px;font-size:11px;color:#10b981"></div>
   </div>
 
   <div class="field">

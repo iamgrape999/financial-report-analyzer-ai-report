@@ -309,6 +309,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const res = await api("POST", `/reports/${reportId}/facts/conflicts/${msg.conflictId}/ai-suggest`, {}, token, baseUrl);
         sendResponse({ ok: true, data: res });
 
+      } else if (action === "list_reports") {
+        const { baseUrl, token } = await cfg();
+        const res = await api("GET", "/reports?limit=100", undefined, token, baseUrl);
+        sendResponse({ ok: true, data: Array.isArray(res) ? res : (res.items || res.reports || []) });
+
       } else if (action === "list_conflicts") {
         const { baseUrl, token } = await cfg();
         const res = await api("GET", `/reports/${reportId}/facts/conflicts`, undefined, token, baseUrl);

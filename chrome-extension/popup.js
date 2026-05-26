@@ -32,20 +32,49 @@ document.getElementById("saveSettingsBtn").addEventListener("click", async () =>
   setTimeout(() => { btn.textContent = "💾 Save Settings"; }, 1500);
 });
 
-// ── Auto-detect report ID from active tab ─────────────────────────────────────
+// ── Report list dropdown ──────────────────────────────────────────────────────
 
-document.getElementById("detectBtn").addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return;
+async function loadReportList() {
+  const btn = document.getElementById("loadReportsBtn");
+  const sel = document.getElementById("reportSelect");
+  btn.disabled = true;
+  btn.textContent = "⏳";
+  sel.innerHTML = '<option value="">Loading…</option>';
+
   try {
-    const resp = await chrome.tabs.sendMessage(tab.id, { type: "get_page_context" });
-    if (resp?.reportId) {
-      document.getElementById("reportId").value = resp.reportId;
-    } else {
-      alert("Could not detect report ID from the current page.\nPlease paste it manually.");
+    const resp = await chrome.runtime.sendMessage({ action: "list_reports" });
+    if (!resp.ok) throw new Error(resp.error);
+    const reports = resp.data;
+    if (!reports.length) {
+      sel.innerHTML = '<option value="">— no reports found —</option>';
+      return;
     }
-  } catch {
-    alert("Content script not loaded on this page.\nMake sure you are on the credit report web app.");
+    sel.innerHTML = '<option value="">— select a report —</option>' +
+      reports.map(r => {
+        const label = [r.borrower_name || r.id.slice(0, 8), r.industry, r.status]
+          .filter(Boolean).join(" · ");
+        return `<option value="${r.id}">${label}</option>`;
+      }).join("");
+  } catch (e) {
+    sel.innerHTML = '<option value="">— error loading reports —</option>';
+    alert("Could not load reports:\n" + e.message + "\n\nCheck Base URL and Email in Settings.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "📋 Load";
+  }
+}
+
+document.getElementById("loadReportsBtn").addEventListener("click", loadReportList);
+
+document.getElementById("reportSelect").addEventListener("change", function () {
+  const rid = this.value;
+  document.getElementById("reportId").value = rid;
+  const sel = document.getElementById("selectedReport");
+  if (rid) {
+    const label = this.options[this.selectedIndex].text;
+    sel.textContent = "✓ " + label;
+  } else {
+    sel.textContent = "";
   }
 });
 
@@ -69,7 +98,7 @@ chrome.runtime.onMessage.addListener(msg => {
 
 function getReportId() {
   const rid = document.getElementById("reportId").value.trim();
-  if (!rid) { alert("Please enter or detect a Report ID."); return null; }
+  if (!rid) { alert("Please select a report from the dropdown (click 📋 Load)."); return null; }
   return rid;
 }
 
@@ -201,14 +230,8 @@ function renderConflictCard(c) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadSettings();
 
-// Auto-detect report ID when popup opens — no user action required
-(async function autoDetect() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return;
-    const resp = await chrome.tabs.sendMessage(tab.id, { type: "get_page_context" });
-    if (resp?.reportId && !document.getElementById("reportId").value) {
-      document.getElementById("reportId").value = resp.reportId;
-    }
-  } catch { /* not on the web app page — silently skip */ }
+// Auto-load report list on popup open if settings are configured
+(async function autoLoadReports() {
+  const data = await chrome.storage.local.get(["baseUrl", "email"]);
+  if (data.baseUrl && data.email) loadReportList();
 })();
