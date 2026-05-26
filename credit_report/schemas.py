@@ -40,7 +40,7 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-VALID_INDUSTRIES = {"marine", "shipping", "aviation", "real_estate", "corporate", "finance", "other"}
+VALID_INDUSTRIES = {"marine", "shipping", "aviation", "real_estate", "corporate", "semiconductor", "finance", "other"}
 
 
 class CreateReportRequest(BaseModel):
