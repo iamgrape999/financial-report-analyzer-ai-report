@@ -31,6 +31,9 @@ from credit_report.schemas import (
     ApplyFieldSuggestionItem,
     ApplySuggestionsRequest,
     ApplySuggestionsResponse,
+    BulkApplySectionResult,
+    BulkApplySuggestionsRequest,
+    BulkApplySuggestionsResponse,
     CreateReportRequest,
     FieldSuggestion,
     FieldSuggestionsResponse,
@@ -701,6 +704,135 @@ def _compute_confidence(fact: Any, facts_for_report: list[Any]) -> tuple[str, fl
     return level, round(score, 1), reasons, conflict_warning, selectable
 
 
+# ── Internal suggestion builder (shared by GET and bulk POST) ────────────────
+
+def _build_suggestions_for_section(
+    *,
+    report_id: str,
+    section_no: int,
+    active_facts: list[Any],
+    full_index: dict[tuple, Any],
+    me_index: dict[tuple, Any],
+    current_input: dict,
+    yaml_config: dict,
+) -> list[FieldSuggestion]:
+    """Build the FieldSuggestion list for one section given pre-loaded data.
+
+    Separated from the HTTP handler so the bulk-apply endpoint can reuse it
+    without making per-section DB calls for the fact index.
+    """
+    suggestions: list[FieldSuggestion] = []
+    for mapping in yaml_config.get("facts", []):
+        metric = mapping.get("metric", "").lower()
+        if not metric:
+            continue
+        if "entity_path" in mapping:
+            entity_raw = _resolve_path_safe(current_input, mapping["entity_path"])
+            entity_key = str(entity_raw or "").upper()
+        else:
+            entity_key = (mapping.get("entity") or "").upper()
+
+        if "iterate_path" in mapping:
+            iterate_path = mapping["iterate_path"]
+            field = mapping.get("field", "")
+            candidates = [
+                f for f in active_facts
+                if f.metric_name.lower() == metric
+                and (not entity_key or (f.entity or "").upper() == entity_key)
+            ]
+            if not candidates and entity_key == "BORROWER":
+                candidates = [f for f in active_facts if f.metric_name.lower() == metric
+                              and (f.entity or "").upper() not in {"FACILITY", "MARKET"}]
+            for fact in candidates:
+                if not fact.period:
+                    logger.debug(
+                        "field-suggestions: skipping fact with no period metric=%s entity=%s fact_id=%s",
+                        fact.metric_name, fact.entity, fact.id,
+                    )
+                    continue
+                full_path = f"{iterate_path}.{fact.period}.{field}"
+                suggested_val = fact.value if fact.value is not None else fact.value_text
+                if suggested_val is None:
+                    continue
+                current_val = _resolve_path_safe(current_input, full_path)
+                if _values_equal(current_val, suggested_val):
+                    continue
+                level, score, reasons, conflict_warning, selectable = _compute_confidence(fact, active_facts)
+                suggestions.append(FieldSuggestion(
+                    suggestion_id=_make_suggestion_id(report_id, section_no, full_path, fact.id),
+                    field_path=full_path,
+                    field_label=_humanize_path(full_path),
+                    metric_name=fact.metric_name,
+                    entity=fact.entity or "",
+                    period=fact.period,
+                    current_value=current_val,
+                    suggested_value=suggested_val,
+                    display=fact.display,
+                    currency=fact.currency,
+                    unit=fact.unit,
+                    confidence=level,
+                    confidence_score=score,
+                    confidence_reasons=reasons,
+                    source_type=fact.source_type,
+                    source_priority=fact.source_priority,
+                    fact_id=fact.id,
+                    fact_state=fact.state,
+                    conflict_warning=conflict_warning,
+                    selectable=selectable,
+                ))
+        else:
+            path = mapping.get("path", "")
+            if not path:
+                continue
+            if "period_path" in mapping:
+                period_raw = _resolve_path_safe(current_input, mapping["period_path"])
+                lookup_period = str(period_raw or "").upper()
+            else:
+                lookup_period = (mapping.get("period") or "").upper()
+            fact = full_index.get((metric, entity_key, lookup_period))
+            if fact is None:
+                fact = me_index.get((metric, entity_key))
+            if fact is None:
+                candidates = [f for f in active_facts if f.metric_name.lower() == metric]
+                if lookup_period:
+                    period_match = [f for f in candidates if (f.period or "").upper() == lookup_period]
+                    candidates = period_match or candidates
+                fact = min(candidates, key=lambda f: f.source_priority, default=None)
+            if fact is None:
+                continue
+            suggested_val = fact.value if fact.value is not None else fact.value_text
+            if suggested_val is None:
+                continue
+            current_val = _resolve_path_safe(current_input, path)
+            if _values_equal(current_val, suggested_val):
+                continue
+            level, score, reasons, conflict_warning, selectable = _compute_confidence(fact, active_facts)
+            suggestions.append(FieldSuggestion(
+                suggestion_id=_make_suggestion_id(report_id, section_no, path, fact.id),
+                field_path=path,
+                field_label=_humanize_path(path),
+                metric_name=fact.metric_name,
+                entity=fact.entity or "",
+                period=fact.period,
+                current_value=current_val,
+                suggested_value=suggested_val,
+                display=fact.display,
+                currency=fact.currency,
+                unit=fact.unit,
+                confidence=level,
+                confidence_score=score,
+                confidence_reasons=reasons,
+                source_type=fact.source_type,
+                source_priority=fact.source_priority,
+                fact_id=fact.id,
+                fact_state=fact.state,
+                conflict_warning=conflict_warning,
+                selectable=selectable,
+            ))
+    suggestions.sort(key=lambda s: s.field_path)
+    return suggestions
+
+
 # ── GET field-suggestions ─────────────────────────────────────────────────────
 
 @router.get("/{report_id}/sections/{section_no}/field-suggestions",
@@ -791,136 +923,15 @@ async def get_field_suggestions(
     si = si_result.scalars().first()
     current_input: dict = json.loads(si.input_json) if si and si.input_json else {}
 
-    suggestions: list[FieldSuggestion] = []
-
-    for mapping in yaml_config.get("facts", []):
-        metric = mapping.get("metric", "").lower()
-        if not metric:
-            continue
-
-        # Resolve entity: static 'entity:' key takes precedence;
-        # 'entity_path:' reads the entity name from the current section input
-        # (used in Section 3 ratings and Section 7 guarantor mappings).
-        if "entity_path" in mapping:
-            entity_raw = _resolve_path_safe(current_input, mapping["entity_path"])
-            entity_key = str(entity_raw or "").upper()
-        else:
-            entity_key = (mapping.get("entity") or "").upper()
-
-        if "iterate_path" in mapping:
-            # Iterate mapping: one suggestion per fiscal-year period
-            iterate_path = mapping["iterate_path"]
-            field = mapping.get("field", "")
-            # Collect all facts for this metric+entity across all periods
-            candidates = [
-                f for f in active_facts
-                if f.metric_name.lower() == metric
-                and (not entity_key or (f.entity or "").upper() == entity_key)
-            ]
-            # When entity_key is the abstract BORROWER and no exact match found,
-            # ETL facts may carry the real company name instead of the abstract key.
-            # Fall back to metric-only to surface these facts as suggestions.
-            if not candidates and entity_key == "BORROWER":
-                candidates = [f for f in active_facts if f.metric_name.lower() == metric
-                              and (f.entity or "").upper() not in {"FACILITY", "MARKET"}]
-            for fact in candidates:
-                if not fact.period:
-                    logger.debug(
-                        "field-suggestions: skipping fact with no period metric=%s entity=%s fact_id=%s",
-                        fact.metric_name, fact.entity, fact.id,
-                    )
-                    continue
-                full_path = f"{iterate_path}.{fact.period}.{field}"
-                suggested_val = fact.value if fact.value is not None else fact.value_text
-                if suggested_val is None:
-                    continue
-                current_val = _resolve_path_safe(current_input, full_path)
-                if _values_equal(current_val, suggested_val):
-                    continue
-                level, score, reasons, conflict_warning, selectable = _compute_confidence(fact, active_facts)
-                suggestions.append(FieldSuggestion(
-                    suggestion_id=_make_suggestion_id(report_id, section_no, full_path, fact.id),
-                    field_path=full_path,
-                    field_label=_humanize_path(full_path),
-                    metric_name=fact.metric_name,
-                    entity=fact.entity or "",
-                    period=fact.period,
-                    current_value=current_val,
-                    suggested_value=suggested_val,
-                    display=fact.display,
-                    currency=fact.currency,
-                    unit=fact.unit,
-                    confidence=level,
-                    confidence_score=score,
-                    confidence_reasons=reasons,
-                    source_type=fact.source_type,
-                    source_priority=fact.source_priority,
-                    fact_id=fact.id,
-                    fact_state=fact.state,
-                    conflict_warning=conflict_warning,
-                    selectable=selectable,
-                ))
-        else:
-            # Static mapping: single field
-            path = mapping.get("path", "")
-            if not path:
-                continue
-            # Resolve period: 'period:' is static; 'period_path:' reads from current input.
-            # Section 4 financial fields use period_path so the period comes from whatever
-            # fiscal_year the analyst typed — without resolving this, full_index always misses.
-            if "period_path" in mapping:
-                period_raw = _resolve_path_safe(current_input, mapping["period_path"])
-                lookup_period = str(period_raw or "").upper()
-            else:
-                lookup_period = (mapping.get("period") or "").upper()
-
-            # Prefer exact (metric, entity, period) match; then (metric, entity); then metric-only
-            fact = full_index.get((metric, entity_key, lookup_period))
-            if fact is None:
-                fact = me_index.get((metric, entity_key))
-            if fact is None:
-                # Entity mismatch fallback: ETL stores facts with the actual company name
-                # while YAML uses the abstract "BORROWER" entity.  Pick the best-priority
-                # fact for this metric, preferring the resolved period when available.
-                candidates = [f for f in active_facts if f.metric_name.lower() == metric]
-                if lookup_period:
-                    period_match = [f for f in candidates
-                                    if (f.period or "").upper() == lookup_period]
-                    candidates = period_match or candidates
-                fact = min(candidates, key=lambda f: f.source_priority, default=None)
-            if fact is None:
-                continue
-            suggested_val = fact.value if fact.value is not None else fact.value_text
-            if suggested_val is None:
-                continue
-            current_val = _resolve_path_safe(current_input, path)
-            if _values_equal(current_val, suggested_val):
-                continue
-            level, score, reasons, conflict_warning, selectable = _compute_confidence(fact, active_facts)
-            suggestions.append(FieldSuggestion(
-                suggestion_id=_make_suggestion_id(report_id, section_no, path, fact.id),
-                field_path=path,
-                field_label=_humanize_path(path),
-                metric_name=fact.metric_name,
-                entity=fact.entity or "",
-                period=fact.period,
-                current_value=current_val,
-                suggested_value=suggested_val,
-                display=fact.display,
-                currency=fact.currency,
-                unit=fact.unit,
-                confidence=level,
-                confidence_score=score,
-                confidence_reasons=reasons,
-                source_type=fact.source_type,
-                source_priority=fact.source_priority,
-                fact_id=fact.id,
-                fact_state=fact.state,
-                conflict_warning=conflict_warning,
-                selectable=selectable,
-            ))
-
-    suggestions.sort(key=lambda s: s.field_path)
+    suggestions = _build_suggestions_for_section(
+        report_id=report_id,
+        section_no=section_no,
+        active_facts=active_facts,
+        full_index=full_index,
+        me_index=me_index,
+        current_input=current_input,
+        yaml_config=yaml_config,
+    )
     logger.info(
         "get_field_suggestions: report=%s section=%d facts_checked=%d suggestions=%d user=%s",
         report_id, section_no, len(active_facts), len(suggestions), current_user.id,
@@ -1079,4 +1090,181 @@ async def apply_field_suggestions(
         applied_paths=applied_paths,
         skipped_paths=skipped_paths,
         conflict_paths=conflict_paths,
+    )
+
+
+# ── POST bulk-suggest-apply — one-click populate all sections ─────────────────
+
+@router.post("/{report_id}/sections/bulk-suggest-apply",
+             response_model=BulkApplySuggestionsResponse)
+async def bulk_apply_suggestions(
+    report_id: str,
+    payload: BulkApplySuggestionsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Auto-apply CanonicalFact-backed field suggestions across all (or selected) sections.
+
+    Scans every requested section for matching facts, filters by min_confidence,
+    and applies non-conflicting suggestions in a single transaction.  Intended as
+    a one-click "populate fields from uploaded documents" shortcut after ETL.
+
+    apply_mode="only_empty"  — safe default: only fills blank fields
+    apply_mode="overwrite"   — overwrites existing values (use with care)
+    min_confidence="high"    — default: only source_priority 1/2 or validated PDF facts
+    min_confidence="medium"  — high + medium confidence
+    min_confidence="any"     — all non-conflicted suggestions
+    """
+    sections = payload.sections or list(range(1, 11))
+    if not sections or any(s < 1 or s > 10 for s in sections):
+        raise HTTPException(status_code=400, detail="sections must be integers 1–10")
+    if payload.apply_mode not in ("only_empty", "overwrite"):
+        raise HTTPException(status_code=400, detail="apply_mode must be 'only_empty' or 'overwrite'")
+    if payload.min_confidence not in ("high", "medium", "any"):
+        raise HTTPException(status_code=400, detail="min_confidence must be 'high', 'medium', or 'any'")
+
+    report_result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_deleted == False)
+    )
+    report = report_result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _assert_owner_or_admin(report, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports are immutable")
+
+    # Load all facts once — shared across all sections
+    all_facts = await get_facts_for_report(db, report_id)
+    active_facts = [f for f in all_facts if f.state != "deprecated"]
+    full_index: dict[tuple, Any] = {}
+    for f in active_facts:
+        key = (f.metric_name.lower(), (f.entity or "").upper(), f.period)
+        existing = full_index.get(key)
+        if existing is None or f.source_priority < existing.source_priority:
+            full_index[key] = f
+    me_index: dict[tuple, Any] = {}
+    for f in active_facts:
+        key = (f.metric_name.lower(), (f.entity or "").upper())
+        existing = me_index.get(key)
+        if existing is None or f.source_priority < existing.source_priority:
+            me_index[key] = f
+
+    industry = report.industry or "marine"
+    confidence_pass = {"high": {"high"}, "medium": {"high", "medium"}, "any": {"high", "medium", "low"}}
+    allowed_confidence = confidence_pass[payload.min_confidence]
+
+    section_results: list[BulkApplySectionResult] = []
+    total_applied = 0
+    total_skipped = 0
+
+    for section_no in sorted(set(sections)):
+        # Load YAML config (path-traversal safe)
+        config_path = (CONFIG_DIR / industry / f"section_{section_no}.yaml").resolve()
+        if not str(config_path).startswith(str(CONFIG_DIR.resolve())) or not config_path.exists():
+            section_results.append(BulkApplySectionResult(
+                section_no=section_no, suggestions_found=0,
+                applied_count=0, skipped_count=0, conflict_count=0,
+            ))
+            continue
+        if not _YAML_AVAILABLE:
+            continue
+        try:
+            with config_path.open(encoding="utf-8") as fh:
+                yaml_config = _yaml.safe_load(fh) or {}
+        except Exception:
+            continue
+
+        # Load current section input
+        si_result = await db.execute(
+            select(SectionInput).where(
+                SectionInput.report_id == report_id,
+                SectionInput.section_no == section_no,
+            ).order_by(SectionInput.id.desc())
+        )
+        si = si_result.scalars().first()
+        current_input: dict = json.loads(si.input_json) if si and si.input_json else {}
+
+        # Build suggestions using the shared helper
+        suggestions = _build_suggestions_for_section(
+            report_id=report_id,
+            section_no=section_no,
+            active_facts=active_facts,
+            full_index=full_index,
+            me_index=me_index,
+            current_input=current_input,
+            yaml_config=yaml_config,
+        )
+
+        # Filter by confidence threshold and exclude conflicted facts
+        candidates = [s for s in suggestions if s.confidence in allowed_confidence and s.selectable]
+        conflict_count = sum(1 for s in suggestions if not s.selectable)
+
+        applied_count = 0
+        skipped_count = 0
+        for sug in candidates:
+            current_val = _resolve_path_safe(current_input, sug.field_path)
+            if payload.apply_mode == "only_empty" and current_val is not None and str(current_val).strip():
+                skipped_count += 1
+                continue
+            # Deep-set value
+            parts = sug.field_path.split(".")
+            cur = current_input
+            for p in parts[:-1]:
+                if not isinstance(cur.get(p), dict):
+                    cur[p] = {}
+                cur = cur[p]
+            cur[parts[-1]] = sug.suggested_value
+            applied_count += 1
+
+        # Persist updated section input
+        if applied_count > 0:
+            if si:
+                si.input_json = json.dumps(current_input, ensure_ascii=False)
+                si.saved_by = current_user.id
+                si.saved_at = datetime.now(timezone.utc)
+            else:
+                si = SectionInput(
+                    id=str(uuid.uuid4()),
+                    report_id=report_id,
+                    section_no=section_no,
+                    input_json=json.dumps(current_input, ensure_ascii=False),
+                    saved_by=current_user.id,
+                )
+                db.add(si)
+            await db.flush()
+
+        section_results.append(BulkApplySectionResult(
+            section_no=section_no,
+            suggestions_found=len(suggestions),
+            applied_count=applied_count,
+            skipped_count=skipped_count,
+            conflict_count=conflict_count,
+        ))
+        total_applied += applied_count
+        total_skipped += skipped_count
+
+    await write_event(
+        db,
+        action="section_input.bulk_facts_applied",
+        actor_user_id=current_user.id,
+        actor_role=current_user.role,
+        report_id=report_id,
+        target_type="report",
+        target_id=report_id,
+        after=(
+            f"total_applied={total_applied} mode={payload.apply_mode} "
+            f"confidence={payload.min_confidence} sections={sorted(set(sections))}"
+        ),
+    )
+    logger.info(
+        "bulk_apply_suggestions: report=%s total_applied=%d total_skipped=%d "
+        "sections=%s mode=%s confidence=%s user=%s",
+        report_id, total_applied, total_skipped,
+        sorted(set(sections)), payload.apply_mode, payload.min_confidence, current_user.id,
+    )
+    return BulkApplySuggestionsResponse(
+        report_id=report_id,
+        total_applied=total_applied,
+        total_skipped=total_skipped,
+        sections=section_results,
     )

@@ -231,6 +231,9 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
           <button class="btn btn-warning btn-sm" onclick="openConflictsModal()" id="conflictsBtn" style="display:none">
             ⚠ <span id="conflictsCount">0</span> <span data-i18n="conflicts.btn_label">Conflicts</span>
           </button>
+          <button class="btn btn-outline-primary btn-sm" onclick="openBulkApplyModal()" id="btnBulkApply" title="Scan all uploaded document facts and auto-populate empty fields across all 10 sections">
+            📥 <span data-i18n="rd.bulk_apply">Smart Import Fields</span>
+          </button>
           <!-- Live generation progress (shown while generateAll runs) -->
           <div id="genProgressBar" class="d-none mt-1" style="font-size:12px;"></div>
         </div>
@@ -877,6 +880,13 @@ const TRANSLATIONS={
     'rd.gen_all':'⚡ Generate Full Report',
     'rd.full_review':'📖 Full Report Review',
     'rd.refresh':'🔄 Refresh',
+    'rd.bulk_apply':'Smart Import Fields',
+    'bulk.desc':'Scans all CanonicalFacts extracted from uploaded documents and auto-populates matching form fields across sections 1–10.',
+    'bulk.confidence':'Confidence Threshold',
+    'bulk.mode':'Apply Mode',
+    'bulk.mode_empty':'Only empty fields',
+    'bulk.mode_over':'Overwrite all',
+    'bulk.run':'Run Smart Import',
     'rd.sections_header':'Sections — Click a row to edit input or view output',
     'rd.legend_check':'✓ = input saved',
     'rd.legend_x':'✗ = input missing',
@@ -1028,6 +1038,13 @@ const TRANSLATIONS={
     'rd.gen_all':'⚡ 產生完整報告',
     'rd.full_review':'📖 完整報告審查',
     'rd.refresh':'🔄 刷新',
+    'rd.bulk_apply':'智能導入欄位',
+    'bulk.desc':'掃描所有已上傳文件提取的CanonicalFacts，自動填充1-10段落中匹配的表單欄位。',
+    'bulk.confidence':'信心度門檻',
+    'bulk.mode':'套用模式',
+    'bulk.mode_empty':'僅空白欄位',
+    'bulk.mode_over':'覆蓋所有欄位',
+    'bulk.run':'執行智能導入',
     'rd.sections_header':'各段落 — 點擊行以編輯輸入資料或檢視輸出',
     'rd.legend_check':'✓ = 已儲存輸入',
     'rd.legend_x':'✗ = 缺少輸入',
@@ -5129,6 +5146,114 @@ async function umResetPw(userId, email){
     toast(`${email} 密碼已重設 ✓`,'success');
   }catch(e){toast('重設失敗：'+e.message,'danger');}
 }
+
+// ── Bulk Apply Suggestions (Smart Import Fields) ──────────────────────────────
+function openBulkApplyModal(){
+  if(!currentRid){toast('No report loaded','warning');return;}
+  // Reset modal state
+  document.getElementById('bulkApplyBody').innerHTML='';
+  document.getElementById('bulkApplyResult').classList.add('d-none');
+  document.getElementById('bulkApplyResult').innerHTML='';
+  document.getElementById('bulkApplyBtn').disabled=false;
+  document.getElementById('bulkApplySpin').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('bulkApplyModal')).show();
+}
+
+async function runBulkApply(){
+  const conf=document.querySelector('input[name="bulkConf"]:checked')?.value||'high';
+  const mode=document.querySelector('input[name="bulkMode"]:checked')?.value||'only_empty';
+  const btn=document.getElementById('bulkApplyBtn');
+  const spin=document.getElementById('bulkApplySpin');
+  btn.disabled=true; spin.classList.remove('d-none');
+  const body=document.getElementById('bulkApplyBody');
+  body.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary"></div><div class="mt-2 small text-muted">Scanning all sections for matching facts…</div></div>';
+  try{
+    const data=await apiCall(`/reports/${currentRid}/sections/bulk-suggest-apply`,'POST',
+      {sections:[1,2,3,4,5,6,7,8,9,10],min_confidence:conf,apply_mode:mode});
+    const res=document.getElementById('bulkApplyResult');
+    res.classList.remove('d-none');
+    // Build result table
+    const rows=data.sections.map(s=>{
+      const bar=s.applied_count>0?'<span class="badge bg-success">'+s.applied_count+' applied</span>':'<span class="badge bg-secondary">0</span>';
+      const skip=s.skipped_count>0?`<small class="text-muted"> (${s.skipped_count} skipped)</small>`:'';
+      const conf2=s.conflict_count>0?`<small class="text-warning"> ⚠${s.conflict_count} conflict</small>`:'';
+      return `<tr><td class="ps-2">§${s.section_no}</td><td>${bar}${skip}${conf2}</td><td class="text-muted small">${s.suggestions_found} found</td></tr>`;
+    }).join('');
+    res.innerHTML=`
+      <div class="alert alert-success py-2 mb-2">
+        ✅ <strong>${data.total_applied}</strong> field(s) applied across ${data.sections.filter(s=>s.applied_count>0).length} section(s).
+        ${data.total_skipped>0?`<span class="text-muted small">(${data.total_skipped} skipped — already filled)</span>`:''}
+      </div>
+      <table class="table table-sm mb-0"><thead><tr><th>Section</th><th>Result</th><th>Facts</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+    body.innerHTML='';
+    // Refresh the currently open section form if any
+    if(currentPanelSec&&sectionInputDataMap[currentPanelSec]){
+      try{
+        const inp=await apiCall(`/reports/${currentRid}/inputs/${currentPanelSec}`,'GET');
+        const j=inp.input_json||{};
+        sectionInputDataMap[currentPanelSec]=j;
+        syncJsonToForm();
+      }catch(_){}
+    }
+    // Refresh section table to show updated input indicators
+    loadReportDetail(currentRid);
+    if(data.total_applied>0)toast(tl(`${data.total_applied} field(s) imported into section forms ✓`,`已導入 ${data.total_applied} 個欄位 ✓`),'success');
+  }catch(e){
+    document.getElementById('bulkApplyBody').innerHTML=`<div class="alert alert-danger">Error: ${esc(e.message)}</div>`;
+  }finally{
+    btn.disabled=false; spin.classList.add('d-none');
+  }
+}
 </script>
+
+<!-- Bulk Apply Modal -->
+<div class="modal fade" id="bulkApplyModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">📥 <span data-i18n="rd.bulk_apply">Smart Import Fields</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3" data-i18n="bulk.desc">
+          Scans all CanonicalFacts extracted from uploaded documents and auto-populates matching form fields across sections 1–10.
+          Only applies facts that have been validated or extracted with high confidence.
+        </p>
+        <div class="row g-3 mb-3">
+          <div class="col-sm-6">
+            <label class="form-label fw-semibold small" data-i18n="bulk.confidence">Confidence Threshold</label>
+            <div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="bulkConf" value="high" id="bconfHigh" checked>
+                <label class="form-check-label small" for="bconfHigh"><span class="badge bg-success">HIGH</span> — analyst input, overrides, validated PDF</label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="bulkConf" value="medium" id="bconfMed">
+                <label class="form-check-label small" for="bconfMed"><span class="badge bg-success">HIGH</span> + <span class="badge bg-warning text-dark">MEDIUM</span> — include unvalidated PDF extracts</label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="bulkConf" value="any" id="bconfAny">
+                <label class="form-check-label small" for="bconfAny">All non-conflicted suggestions</label></div>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label fw-semibold small" data-i18n="bulk.mode">Apply Mode</label>
+            <div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="bulkMode" value="only_empty" id="bmodeEmpty" checked>
+                <label class="form-check-label small" for="bmodeEmpty"><strong data-i18n="bulk.mode_empty">Only empty fields</strong> — won't overwrite existing data (safe)</label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="bulkMode" value="overwrite" id="bmodeOver">
+                <label class="form-check-label small" for="bmodeOver"><strong data-i18n="bulk.mode_over">Overwrite all</strong> — replaces existing values with fact-backed data</label></div>
+            </div>
+          </div>
+        </div>
+        <div id="bulkApplyBody"></div>
+        <div id="bulkApplyResult" class="d-none mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="bulkApplyBtn" onclick="runBulkApply()">
+          <span id="bulkApplySpin" class="spinner-border spinner-sm d-none me-1"></span>
+          📥 <span data-i18n="bulk.run">Run Smart Import</span>
+        </button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="g.cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

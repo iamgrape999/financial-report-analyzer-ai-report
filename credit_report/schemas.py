@@ -240,6 +240,29 @@ class ApplySuggestionsResponse(BaseModel):
     conflict_paths: list[str]
 
 
+# ── Bulk apply field suggestions across all sections ─────────────────────────
+
+class BulkApplySuggestionsRequest(BaseModel):
+    sections: list[int] = list(range(1, 11))  # default all 10 sections
+    min_confidence: str = "high"              # "high" | "medium" | "any"
+    apply_mode: str = "only_empty"            # "only_empty" | "overwrite"
+
+
+class BulkApplySectionResult(BaseModel):
+    section_no: int
+    suggestions_found: int
+    applied_count: int
+    skipped_count: int
+    conflict_count: int
+
+
+class BulkApplySuggestionsResponse(BaseModel):
+    report_id: str
+    total_applied: int
+    total_skipped: int
+    sections: list[BulkApplySectionResult]
+
+
 # ── Gap-fill (server-proxied Gemini, no client key) ───────────────────────────
 
 class GapFillRequest(BaseModel):
