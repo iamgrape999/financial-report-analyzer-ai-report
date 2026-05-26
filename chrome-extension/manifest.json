@@ -23,7 +23,7 @@
         "http://localhost:8000/*"
       ],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "icons": {
