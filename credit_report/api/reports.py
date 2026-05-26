@@ -1115,8 +1115,8 @@ async def bulk_apply_suggestions(
     min_confidence="medium"  — high + medium confidence
     min_confidence="any"     — all non-conflicted suggestions
     """
-    sections = payload.sections or list(range(1, 11))
-    if not sections or any(s < 1 or s > 10 for s in sections):
+    sections = payload.sections  # schema validator ensures non-empty; default is 1-10
+    if any(s < 1 or s > 10 for s in sections):
         raise HTTPException(status_code=400, detail="sections must be integers 1–10")
     if payload.apply_mode not in ("only_empty", "overwrite"):
         raise HTTPException(status_code=400, detail="apply_mode must be 'only_empty' or 'overwrite'")

@@ -1112,6 +1112,16 @@ def map_form_fields(raw: dict) -> dict:
                         conf = 0.70
                         src_page = pn
                         break
+                elif src == "_infer" and callable(transform):
+                    try:
+                        v = transform(populated)
+                        if v is not None:
+                            value = v
+                            status = FieldStatus.INFERRED
+                            conf = 0.85
+                            break
+                    except Exception:
+                        pass
 
         if status == FieldStatus.EXTRACTED and conf < 0.75:
             status = FieldStatus.LOW_CONF

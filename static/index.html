@@ -4176,7 +4176,7 @@ async function fsmApply(){
 
     // Explain skipped fields so analyst knows why nothing changed for those paths
     if(result.skipped_count>0){
-      const applyMode=document.querySelector('input[name="fsmApplyMode"]:checked')?.value||'only_empty';
+      const applyMode=document.querySelector('input[name="fsmMode"]:checked')?.value||'only_empty';
       const whyMsg=applyMode==='only_empty'
         ?tl(
           `${result.skipped_count} field(s) were skipped because they already contain a value. Switch to "Overwrite" mode to replace existing values.`,

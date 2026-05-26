@@ -163,17 +163,20 @@ def render_page_to_base64(pdf_path: str, pn: int, dpi: int = 150) -> str | None:
     """Render a PDF page to PNG base64 using pymupdf (no poppler required)."""
     if not HAS_FITZ:
         return None
+    doc = None
     try:
         doc = fitz.open(pdf_path)
         page = doc[pn - 1]
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         pix = page.get_pixmap(matrix=mat)
         img_bytes = pix.tobytes("png")
-        doc.close()
         return base64.b64encode(img_bytes).decode()
     except Exception as e:
         print(f"    [L2] render p{pn} failed: {e}", file=sys.stderr)
         return None
+    finally:
+        if doc is not None:
+            doc.close()
 
 
 def extract_chart_vlm(pdf_path: str, pn: int, chart_type: str = "auto") -> dict:

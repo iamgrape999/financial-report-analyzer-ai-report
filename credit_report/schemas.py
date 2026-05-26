@@ -243,9 +243,16 @@ class ApplySuggestionsResponse(BaseModel):
 # ── Bulk apply field suggestions across all sections ─────────────────────────
 
 class BulkApplySuggestionsRequest(BaseModel):
-    sections: list[int] = list(range(1, 11))  # default all 10 sections
-    min_confidence: str = "high"              # "high" | "medium" | "any"
-    apply_mode: str = "only_empty"            # "only_empty" | "overwrite"
+    sections: list[int] = Field(default_factory=lambda: list(range(1, 11)))
+    min_confidence: str = "high"   # "high" | "medium" | "any"
+    apply_mode: str = "only_empty" # "only_empty" | "overwrite"
+
+    @field_validator("sections")
+    @classmethod
+    def _non_empty_sections(cls, v: list) -> list:
+        if not v:
+            raise ValueError("sections must not be empty; omit the field to process all 10 sections")
+        return v
 
 
 class BulkApplySectionResult(BaseModel):
