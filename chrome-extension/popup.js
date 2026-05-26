@@ -128,15 +128,96 @@ async function send(action, extra = {}) {
   }
 }
 
+// ── File drop zone ────────────────────────────────────────────────────────────
+
+const dropZone = document.getElementById("dropZone");
+
+dropZone.addEventListener("click", () => document.getElementById("docFiles").click());
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.style.borderColor = "#3b82f6"; });
+dropZone.addEventListener("dragleave", () => { dropZone.style.borderColor = "#475569"; });
+dropZone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropZone.style.borderColor = "#475569";
+  const dt = e.dataTransfer;
+  if (dt.files.length) {
+    document.getElementById("docFiles").files; // can't assign, use stored ref
+    _droppedFiles = Array.from(dt.files);
+    renderFileList(_droppedFiles);
+  }
+});
+document.getElementById("docFiles").addEventListener("change", function() {
+  _droppedFiles = null; // use input.files instead
+  renderFileList(Array.from(this.files));
+});
+
+let _droppedFiles = null;
+
+function getSelectedFiles() {
+  if (_droppedFiles) return _droppedFiles;
+  return Array.from(document.getElementById("docFiles").files);
+}
+
+function renderFileList(files) {
+  const el = document.getElementById("fileList");
+  if (!files.length) { el.textContent = ""; return; }
+  el.innerHTML = files.map(f =>
+    `<span style="display:inline-block;margin:2px 4px 2px 0">📄 ${f.name}</span>`
+  ).join("");
+}
+
 // ── Automate panel actions ────────────────────────────────────────────────────
 
 document.getElementById("fullAutoBtn").addEventListener("click", async () => {
+  const rid = getReportId();
+  if (!rid) return;
   const companyName = document.getElementById("companyName").value.trim();
-  // Reset all steps
-  document.querySelectorAll(".step").forEach(el => {
-    el.className = "step idle";
-  });
-  await send("full_auto", { companyName });
+  const files = getSelectedFiles();
+
+  document.querySelectorAll(".step").forEach(el => { el.className = "step idle"; });
+  disableActions(true);
+
+  try {
+    // Step 0: upload documents directly from popup (File objects can't cross SW boundary)
+    if (files.length > 0) {
+      setStep("upload", "running", `0 / ${files.length} files`);
+
+      // Ensure we have a fresh JWT
+      const loginResp = await chrome.runtime.sendMessage({ action: "login" });
+      if (!loginResp.ok) throw new Error(loginResp.error);
+
+      const { baseUrl, token } = await new Promise(r =>
+        chrome.storage.local.get(["baseUrl", "token"], r)
+      );
+
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        setStep("upload", "running", `${i + 1} / ${files.length}: ${f.name}`);
+        const fd = new FormData();
+        fd.append("file", f);
+        const resp = await fetch(
+          `${baseUrl}/api/credit-report/reports/${rid}/documents`,
+          { method: "POST", headers: { Authorization: "Bearer " + token }, body: fd }
+        );
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => "");
+          throw new Error(`Upload failed — ${f.name}: HTTP ${resp.status} ${txt.slice(0, 120)}`);
+        }
+      }
+      setStep("upload", "done", `${files.length} file(s) uploaded`);
+    } else {
+      setStep("upload", "skip", "no files — using existing documents");
+    }
+
+    // Steps 1–6 run in service worker (login, ETL, suggestions, conflicts, gapfill, generate)
+    const resp = await chrome.runtime.sendMessage({ action: "full_auto", reportId: rid, companyName });
+    if (!resp.ok) throw new Error(resp.error);
+
+  } catch (e) {
+    setStep("upload", "error", e.message);
+    alert("Error: " + e.message);
+  } finally {
+    disableActions(false);
+  }
 });
 
 document.getElementById("etlBtn").addEventListener("click",      () => send("etl"));

@@ -111,6 +111,17 @@
   </div>
 
   <div class="field">
+    <label>Project Documents <span class="info">(PDF / DOCX / XLSX — drag &amp; drop or click)</span></label>
+    <div id="dropZone" style="border:1px dashed #475569;border-radius:6px;padding:8px 10px;
+         cursor:pointer;color:#64748b;font-size:11px;text-align:center;transition:border-color .15s">
+      📂 Click to select files or drag &amp; drop
+      <input type="file" id="docFiles" multiple accept=".pdf,.docx,.xlsx,.xls"
+             style="opacity:0;position:absolute;width:1px;height:1px">
+    </div>
+    <div id="fileList" style="margin-top:4px;font-size:11px;color:#94a3b8;word-break:break-all"></div>
+  </div>
+
+  <div class="field">
     <label>Company Name <span class="info">(optional — leave blank to skip gap-fill)</span></label>
     <input type="text" id="companyName" placeholder="e.g. Evergreen Marine Corp" />
   </div>
@@ -124,6 +135,10 @@
   </div>
 
   <div class="steps" id="steps">
+    <div class="step idle" data-step="upload">
+      <div class="step-icon"></div>
+      <div class="step-body"><div class="step-name">0. Upload Docs</div><div class="step-detail" id="d-upload">–</div></div>
+    </div>
     <div class="step idle" data-step="login">
       <div class="step-icon"></div>
       <div class="step-body"><div class="step-name">1. Login</div><div class="step-detail" id="d-login">–</div></div>
