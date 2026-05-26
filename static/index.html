@@ -1924,9 +1924,161 @@ const REQUIRED_FIELDS_CORP={
   ]
 };
 
+};
+
+// ── Field-level patches for non-marine industries (sections 1,2,5,7,9,10) ────
+// Each entry: { remove:[paths], override:[{p,l?,lz?,h?,hz?,...}], add:[fieldDefs] }
+// Section 5 gets a full FIELD_DEFS_CORP[5] replacement (maritime insurance → commercial).
+FIELD_DEFS_CORP[5]=[
+  {p:'5A_security_overview.is_secured',l:'5A — Facility Secured?',lz:'5A — 授信已擔保？',t:'bool'},
+  {p:'5A_security_overview.instr_1_instrument',l:'5A — Security #1: Instrument Name',lz:'5A — 擔保品#1：工具名稱',t:'text',h:'e.g. Equipment Charge / First Priority Asset Lien',hz:'例：設備抵押╱資產第一順位留置權'},
+  {p:'5A_security_overview.instr_1_description',l:'5A — Security #1: Description',lz:'5A — 擔保品#1：說明',t:'textarea',h:'e.g. First priority floating charge over all present and future assets of Borrower, assigned to CUB.',hz:'例：對借款人所有現有及未來資產之第一順位浮動抵押，讓渡予國泰聯行。'},
+  {p:'5A_security_overview.instr_2_instrument',l:'5A — Security #2: Instrument Name',lz:'5A — 擔保品#2：工具名稱',t:'text',h:'e.g. Completion / Performance Guarantee',hz:'例：完工╱履約保證'},
+  {p:'5A_security_overview.instr_2_description',l:'5A — Security #2: Description',lz:'5A — 擔保品#2：說明',t:'textarea',h:'e.g. Unconditional performance guarantee from EPC contractor covering all construction phase drawdowns.',hz:'例：EPC承包商出具之無條件履約保證，涵蓋所有建設期提款。'},
+  {p:'5B_completion_guarantee.applicable',l:'5B — Completion / Performance Guarantee Applicable?',lz:'5B — 完工╱履約保證適用？',t:'bool'},
+  {p:'5B_completion_guarantee.provider_full_name',l:'5B — Guarantee Provider Full Name',lz:'5B — 保證提供方全名',t:'text',h:'e.g. CTCI Corporation / Parent Co. Ltd.',hz:'例：中鼎工程股份有限公司╱母公司'},
+  {p:'5B_completion_guarantee.provider_rating',l:'5B — Provider Credit Rating',lz:'5B — 提供方信用評級',t:'text',h:'e.g. A- (S&P) / Baa1 (Moody\'s)',hz:'例：A-（標普）╱Baa1（穆迪）'},
+  {p:'5B_completion_guarantee.guarantee_amount_usd_m',l:'5B — Guarantee Amount (USD M)',lz:'5B — 保證金額 (USD M)',t:'number',h:'e.g. 500',hz:'例：500'},
+  {p:'5B_completion_guarantee.coverage_pct',l:'5B — Coverage Ratio (%)',lz:'5B — 覆蓋率 (%)',t:'number',h:'e.g. 100',hz:'例：100'},
+  {p:'5B_completion_guarantee.governing_law',l:'5B — Governing Law',lz:'5B — 適用法律',t:'select',opts:['English law','Singapore law','Taiwan law','New York law']},
+  {p:'5B_completion_guarantee.trigger_events',l:'5B — Trigger Events (one per line)',lz:'5B — 觸發事件（每行一條）',t:'lines',h:'Contractor abandons project\nContractor becomes insolvent\nProject not completed by Long-Stop Date',hz:'承包商放棄專案\n承包商破產\n專案未於截止日期前完工'},
+  {p:'5C_asset_security.applicable',l:'5C — Asset Security / Equipment Lien Applicable?',lz:'5C — 資產擔保╱設備留置權適用？',t:'bool'},
+  {p:'5C_asset_security.asset_description',l:'5C — Asset / Collateral Description',lz:'5C — 資產╱擔保品說明',t:'textarea',h:'e.g. Manufacturing facility including building, land use right, and equipment at Tainan Science Park, Taiwan.',hz:'例：位於台灣台南科學園區之製造廠，包括建築物、土地使用權及設備。'},
+  {p:'5C_asset_security.appraised_value_usd_m',l:'5C — Appraised Value (USD M)',lz:'5C — 評估價值 (USD M)',t:'number',h:'e.g. 2500',hz:'例：2,500'},
+  {p:'5C_asset_security.loan_amount_usd_m',l:'5C — Loan Amount (USD M)',lz:'5C — 貸款金額 (USD M)',t:'number',h:'e.g. 500',hz:'例：500'},
+  {p:'5C_asset_security.ltv_pct',l:'5C — LTV (%)',lz:'5C — 貸款價值比 (%)',t:'number',h:'e.g. 20',hz:'例：20'},
+  {p:'5C_asset_security.valuer',l:'5C — Independent Valuation Firm',lz:'5C — 獨立估值機構',t:'text',h:'e.g. JLL / Cushman & Wakefield / CBRE',hz:'例：仲量聯行╱威達信╱世邦魏理仕'},
+  {p:'5D_insurance.applicable',l:'5D — Insurance Package Applicable?',lz:'5D — 保險方案適用？',t:'bool'},
+  {p:'5D_insurance.property_insurer',l:'5D — Property / All-Risk Insurance: Insurer',lz:'5D — 財產╱全風險保險：承保人',t:'text',h:'e.g. Zurich Insurance / AIG / Chubb',hz:'例：蘇黎世保險╱美亞保險╱美國莊信萬豐'},
+  {p:'5D_insurance.property_insured_value_usd_m',l:'5D — Property Insurance: Insured Value (USD M)',lz:'5D — 財產保險：被保金額 (USD M)',t:'number',h:'e.g. 2500',hz:'例：2,500'},
+  {p:'5D_insurance.property_notes',l:'5D — Property Insurance: Notes',lz:'5D — 財產保險：備註',t:'text',h:'e.g. CUB named as additional insured and loss payee',hz:'例：國泰聯行列為附加被保險人及受益人'},
+  {p:'5D_insurance.liability_insurer',l:'5D — Public Liability Insurance: Insurer',lz:'5D — 公眾責任保險：承保人',t:'text',h:'e.g. AIG / Chubb',hz:'例：美亞保險╱美國莊信萬豐'},
+  {p:'5D_insurance.liability_insured_value_usd_m',l:'5D — Liability Insurance: Insured Value (USD M)',lz:'5D — 責任保險：被保金額 (USD M)',t:'number',h:'e.g. 500',hz:'例：500'},
+  {p:'5D_insurance.business_interruption_applicable',l:'5D — Business Interruption Insurance Applicable?',lz:'5D — 營業中斷保險適用？',t:'bool'},
+  {p:'5E_financial_covenants.dscr_floor',l:'5E — DSCR Floor (x)',lz:'5E — DSCR最低要求（倍）',t:'number',h:'e.g. 1.20',hz:'例：1.20'},
+  {p:'5E_financial_covenants.leverage_cap_verbatim',l:'5E — Leverage Ratio Cap (verbatim)',lz:'5E — 槓桿比率上限（逐字）',t:'text',h:'e.g. Net Debt / EBITDA ≤ 4.0x',hz:'例：淨債務╱EBITDA ≤ 4.0倍'},
+  {p:'5E_financial_covenants.test_frequency_verbatim',l:'5E — Test Frequency (verbatim)',lz:'5E — 測試頻率（逐字）',t:'text',h:'e.g. Semi-annually based on trailing 12-month financials',hz:'例：每半年以過去12個月財務報表為基礎'},
+  {p:'5E_financial_covenants.cure_period_days',l:'5E — Cure Period (Days)',lz:'5E — 救濟期（天）',t:'number',h:'e.g. 30',hz:'例：30'},
+  {p:'5E_financial_covenants.cure_mechanism_verbatim',l:'5E — Cure Mechanism (verbatim)',lz:'5E — 救濟機制（逐字）',t:'textarea',h:'e.g. Borrower may cure by injection of additional equity or reduction of debt within the cure period.',hz:'例：借款人可於救濟期內注入額外股本或減少債務以補救。'},
+  {p:'5F_corporate_guarantee.applicable',l:'5F — Corporate Guarantee Applicable?',lz:'5F — 公司擔保適用？',t:'bool'},
+  {p:'5F_corporate_guarantee.guarantor_full_name',l:'5F — Guarantor Full Legal Name',lz:'5F — 保證人法定全名',t:'text',h:'e.g. Taiwan Semiconductor Manufacturing Co., Ltd.',hz:'例：台灣積體電路製造股份有限公司'},
+  {p:'5F_corporate_guarantee.guarantor_listed_exchange',l:'5F — Guarantor Listed Exchange',lz:'5F — 保證人上市交易所',t:'text',h:'e.g. NYSE (TSM) / TWSE (2330.TW)',hz:'例：紐約交易所（TSM）╱台灣證交所（2330.TW）'},
+  {p:'5F_corporate_guarantee.relationship_to_borrower',l:'5F — Guarantor Relationship to Borrower',lz:'5F — 保證人與借款人關係',t:'text',h:'e.g. Parent company (100% ownership)',hz:'例：母公司（100%持股）'},
+  {p:'5F_corporate_guarantee.guarantee_scope',l:'5F — Guarantee Scope (verbatim)',lz:'5F — 擔保範圍（逐字）',t:'textarea',h:'e.g. Unconditional and irrevocable corporate guarantee covering all amounts outstanding under the facility.',hz:'例：無條件且不可撤銷之公司擔保，涵蓋融資項下所有未償金額。'},
+  {p:'5F_corporate_guarantee.cash_usd_bn',l:'5F — Guarantor Cash & Equivalents (USD bn)',lz:'5F — 保證人現金及等價物 (USD bn)',t:'number',h:'e.g. 50.0',hz:'例：50.0'},
+  {p:'5F_corporate_guarantee.net_worth_twd_bn',l:'5F — Guarantor Net Worth (USD bn equivalent)',lz:'5F — 保證人淨值（USD bn約當值）',t:'number',h:'e.g. 180.0',hz:'例：180.0'},
+  {p:'5F_corporate_guarantee.interest_coverage',l:'5F — Guarantor Interest Coverage (x)',lz:'5F — 保證人利息覆蓋率 (倍)',t:'number',h:'e.g. 45.0',hz:'例：45.0'},
+  {p:'5G_responsible_person.provided',l:'5G — Responsible Person Guarantee Provided?',lz:'5G — 負責人擔保已提供？',t:'bool'},
+  {p:'5G_responsible_person.name',l:'5G — Responsible Person Name',lz:'5G — 負責人姓名',t:'text',h:'e.g. C.C. Wei',hz:'例：魏哲家'},
+  {p:'5G_responsible_person.title',l:'5G — Responsible Person Title / Position',lz:'5G — 負責人職稱╱職位',t:'text',h:'e.g. Director and CEO',hz:'例：董事兼執行長'}
+];
+REQUIRED_FIELDS_CORP[5]=[
+  {p:'5A_security_overview.is_secured',l:'Facility Secured? (5A)'},
+  {p:'5C_asset_security.loan_amount_usd_m',l:'Asset Security Loan Amount (5C)'},
+  {p:'5E_financial_covenants.dscr_floor',l:'DSCR Covenant Floor (5E)'}
+];
+
+// ── Patch-based overrides for sections 1, 2, 7, 9, 10 ────────────────────────
+// Only fields that differ from marine; all other fields are inherited unchanged.
+const _CORP_FIELD_PATCHES={
+  1:{
+    remove:['terms_and_conditions.vessel'],
+    override:[
+      {p:'terms_and_conditions.security_pre_delivery',l:'1D — Construction Phase Security',lz:'1D — 建設期擔保品',h:'e.g. Performance bond from EPC contractor; completion guarantee from Parent Co.',hz:'例：EPC承包商履約保證；母公司完工保證'},
+      {p:'terms_and_conditions.security_post_delivery',l:'1D — Operational Phase Security',lz:'1D — 運營期擔保品',h:'e.g. First priority equipment charge / floating charge over all assets; assignment of project revenues and insurances.',hz:'例：設備第一順位抵押╱所有資產浮動抵押；專案收入及保險收益讓渡。'},
+      {p:'terms_and_conditions.value_maintenance_clause.acr_minimum_pct',l:'1D — Financial Covenant: DSCR Floor (× 100)',lz:'1D — 財務契約：DSCR最低要求（×100）',h:'e.g. 120 = DSCR ≥ 1.20x',hz:'例：120 = DSCR ≥ 1.20倍'},
+      {p:'terms_and_conditions.value_maintenance_clause.ltv_maximum_pct',l:'1D — Financial Covenant: Leverage Cap (%)',lz:'1D — 財務契約：槓桿上限 (%)',h:'e.g. 65 = Net Debt/EBITDA ≤ 65% or LTV ≤ 65%',hz:'例：65 = 淨債務/EBITDA ≤ 65% 或 LTV ≤ 65%'},
+      {p:'terms_and_conditions.drawdown_conditions.pre_delivery_cap_usd_m',l:'1D — Drawdown: Phase 1 Cap (USD m)',lz:'1D — 提款：第一期上限 (USD m)',h:'e.g. Initial drawdown cap before construction milestone certification',hz:'例：建設里程碑認證前首期提款上限'},
+      {p:'sll_kpi_performance.kpis',h:'Energy intensity reduction|<=8%|6.2%|2024|Yes|-5\nESG Rating|AA (MSCI)|A|2024|No|0\nScope 1 Carbon Reduction|5% YoY|4.8%|2024|Yes|-5',hz:'能源強度降低|<=8%|6.2%|2024|Yes|-5\nESG評級|AA（MSCI）|A|2024|No|0\n範疇一碳排放減少|5% YoY|4.8%|2024|Yes|-5'}
+    ],
+    add:[]
+  },
+  2:{
+    remove:[],
+    override:[
+      {p:'2D_collateral.pre_delivery.issuer_full_name',l:'2D — Construction Guarantee Provider',lz:'2D — 建設保證提供方',h:'e.g. Performance bond issuer or Completion Guarantee provider',hz:'例：履約保證開具機構或完工保證提供方'},
+      {p:'2D_collateral.pre_delivery.rating_sp',l:'2D — Guarantee Provider Rating (S&P)',lz:'2D — 保證提供方評級 (S&P)',h:'e.g. AA-',hz:'例：AA-'},
+      {p:'2D_collateral.pre_delivery.rating_fitch',l:'2D — Guarantee Provider Rating (Fitch)',lz:'2D — 保證提供方評級 (Fitch)',h:'e.g. A+',hz:'例：A+'},
+      {p:'2D_collateral.pre_delivery.coverage_verbatim',l:'2D — Construction Phase Coverage (verbatim)',lz:'2D — 建設期覆蓋說明（逐字）',h:'e.g. Unconditional performance guarantee covering 100% of construction phase drawdowns',hz:'例：無條件履約保證，涵蓋100%建設期提款'},
+      {p:'2D_collateral.pre_delivery.assigned_to_cub',l:'2D — Guarantee Assigned to CUB?',lz:'2D — 保證已讓渡予國泰聯行？'},
+      {p:'2D_collateral.post_delivery.security_type',l:'2D — Operational Phase Security Type',lz:'2D — 運營期擔保品類型',h:'e.g. First priority equipment lien / floating charge',hz:'例：設備第一順位留置權╱浮動抵押'},
+      {p:'2D_collateral.post_delivery.vessel_spec',l:'2D — Asset / Collateral Description',lz:'2D — 資產╱擔保品說明',h:'e.g. Manufacturing facility at Tainan Science Park, Taiwan — 150,000 sqm, 3nm process equipment',hz:'例：台灣台南科學園區製造廠 — 15萬平方公尺，3奈米製程設備'},
+      {p:'2D_collateral.post_delivery.ltc_pct',l:'2D — LTC / Advance Rate at Project Completion (%)',lz:'2D — 完工時LTC╱預付率 (%)',h:'e.g. 20',hz:'例：20'},
+      {p:'2D_collateral.post_delivery.acr_pct',l:'2D — DSCR Floor (× 100)',lz:'2D — DSCR最低要求（×100）',h:'e.g. 120 = DSCR ≥ 1.20x',hz:'例：120 = DSCR ≥ 1.20倍'},
+      {p:'2D_collateral.post_delivery.ltv_pct',l:'2D — LTV Cap (%)',lz:'2D — LTV上限 (%)',h:'e.g. 65',hz:'例：65'},
+      {p:'2E_risk_and_mitigants.risk_1_title',h:'e.g. Technology / Product Risk'},
+      {p:'2E_risk_and_mitigants.risk_1_risk_bullets',h:'Technology obsolescence may reduce product ASP\nCompetitor node advancement may erode market share'},
+      {p:'2E_risk_and_mitigants.risk_1_mitigant_bullets',h:'R&D investment USD6bn p.a. maintains technology leadership\nLong-term customer commitments (AAPL, NVDA, AMD) provide revenue visibility'},
+      {p:'2E_risk_and_mitigants.risk_2_title',h:'e.g. Construction / Execution Risk'},
+      {p:'2E_risk_and_mitigants.risk_2_risk_bullets',h:'Equipment delivery delays from key tool vendors (ASML)\nYield ramp on new process node may take longer than expected'},
+      {p:'2E_risk_and_mitigants.risk_2_mitigant_bullets',h:'Fixed-price EPC contract with performance bond coverage\nTrial production buffer period built into project timeline'},
+      {p:'2E_risk_and_mitigants.risk_3_title',h:'e.g. Market / Demand Risk'},
+      {p:'2E_risk_and_mitigants.risk_3_risk_bullets',h:'End-market demand softness may delay capacity utilization ramp\nGeopolitical tensions may disrupt supply chain'},
+      {p:'2E_risk_and_mitigants.risk_3_mitigant_bullets',h:'Diversified customer base across AI, mobile, HPC segments\nParent guarantee and strong net cash position (USD50bn) provide buffer'},
+      {p:'2E_risk_and_mitigants.risk_4_title',h:'e.g. Regulatory / ESG Risk'},
+      {p:'2E_risk_and_mitigants.risk_4_risk_bullets',h:'Export control regulations may restrict advanced chip sales to certain markets\nEnvironmental compliance costs for fab water / chemical discharge'},
+      {p:'2E_risk_and_mitigants.risk_4_mitigant_bullets',h:'Legal counsel monitoring export control requirements; customer mix diversification\nISO 14001 certified operations; water recycling rate >85%'}
+    ],
+    add:[]
+  },
+  7:{
+    remove:[],
+    override:[
+      {p:'7E_base_case.key_assumptions',h:'Revenue growth (%)|+15|+12|Historical demand and booking orders\nGross margin (%)|55|55|Stable ASP with technology premium\nCapacity utilization (%)|85|87|Current order backlog',hz:'收入增長（%）|+15|+12|歷史需求及訂單\n毛利率（%）|55|55|技術溢價下穩定ASP\n產能利用率（%）|85|87|當前訂單積壓'},
+      {p:'7E_base_case.conclusion',h:'e.g. Under the base case, the borrower generates sufficient EBITDA to service debt with minimum DSCR of 1.5x throughout the loan tenor.',hz:'例：在基本情境下，借款人產生足夠EBITDA以償還債務，貸款年期內最低DSCR達1.5倍。'},
+      {p:'7F_worse_case.key_stress_assumptions',h:'Revenue growth|+15%|+2% (-13pp)\nGross margin|55%|45% (-10pp)\nCapacity utilization|85%|70% (-15pp)',hz:'收入增長|+15%|+2%（-13個百分點）\n毛利率|55%|45%（-10個百分點）\n產能利用率|85%|70%（-15個百分點）'},
+      {p:'7F_worse_case.conclusion',h:'e.g. Under the stressed scenario, DSCR falls to 1.1x, above the 1.0x floor, supported by parent company guarantee and net cash balance.',hz:'例：在壓力情境下，DSCR降至1.1倍，仍高於1.0倍下限，由母公司擔保及淨現金餘額支撐。'}
+    ],
+    add:[]
+  },
+  9:{
+    remove:['9A_checklist.item15_pre_delivery_usd_m','9A_checklist.item15_exemption_basis','9C_recommendation.balloon_ltv_pct'],
+    override:[
+      {p:'9B_conditions_covenants.conditions_precedent',h:'Execution of facility agreement and all security documents|Before first drawdown\nEquipment charge / floating charge registration|Before first drawdown\nInsurance policy with CUB as additional insured and loss payee|Before first drawdown'},
+      {p:'9B_conditions_covenants.ongoing_covenants',h:'DSCR >= 1.2x (semi-annual testing)|1.2x|Semi-annual\nNet Debt/EBITDA <= 4.0x|4.0x|Annual\nInsurance on key assets maintained at replacement value|Replacement value|Annual',hz:'DSCR >= 1.2倍（半年測試）|1.2倍|每半年\n淨債務/EBITDA <= 4.0倍|4.0倍|每年\n關鍵資產保險維持重置價值|重置價值|每年'},
+      {p:'9C_recommendation.security_structure',h:'e.g. Construction Phase: Performance bond from EPC contractor (100% coverage). Operational Phase: First priority equipment charge; assignment of project revenues and insurances; corporate guarantee from Parent Co.',hz:'例：建設期：EPC承包商履約保證（100%涵蓋）。運營期：設備第一順位抵押；專案收入及保險讓渡；母公司公司擔保。'}
+    ],
+    add:[]
+  },
+  10:{
+    remove:[],
+    override:[
+      {p:'10B_fleet_growth.group_name',l:'10B — Company / Group Name',lz:'10B — 公司╱集團名稱',h:'e.g. TSMC',hz:'例：台積電'},
+      {p:'10B_fleet_growth.year_range',l:'10B — Expansion Timeline',lz:'10B — 擴張時間軸',h:'e.g. 2023-2028E',hz:'例：2023-2028E'},
+      {p:'10B_fleet_growth.rows',l:'10B — Capacity Expansion Rows (one per line: Year|Revenue USD M|CapEx USD M|Capacity (units)|Utilization%)',lz:'10B — 產能擴張列表（每行一項：年份｜收入 USD M｜資本支出 USD M｜產能（單位）｜利用率%）',h:'2023|69300|32000|120000 w/m|80\n2024|88960|38000|130000 w/m|85\n2028E|145000|52000|180000 w/m|92',hz:'2023|69300|32000|每月120000片|80\n2024|88960|38000|每月130000片|85\n2028E|145000|52000|每月180000片|92'},
+      {p:'10B_fleet_growth.cagr_pct',l:'10B — Revenue CAGR (%)',lz:'10B — 收入複合年增長率 (%)'},
+      {p:'10B_fleet_growth.chart_reference',l:'10B — Data Source Reference',lz:'10B — 資料來源參考',h:'e.g. TSMC 2024 Annual Report / Investor Day Presentation',hz:'例：台積電2024年報╱投資人大會簡報'},
+      {p:'10B_fleet_growth.target_capacity_note',l:'10B — Target Capacity / Expansion Note',lz:'10B — 目標產能╱擴張備註',h:'e.g. Company targets 180k wafers/month (12-inch equivalent) by 2028E, up from 130k in 2024, driven by advanced node (≤3nm) demand.',hz:'例：公司目標於2028年達每月180,000片（12吋約當），較2024年的130,000片增長，由先進製程（≤3nm）需求驅動。'},
+      {p:'10B_fleet_growth.key_notes',l:'10B — Key Notes (one per line)',lz:'10B — 重要備註（每行一條）',h:'Target capacity: 180k wafers/month by 2028E\nN2 process node ramp: H1 2025\nFab 21 (Arizona) Phase 1 complete 2024\nCapEx guidance: USD38-42bn p.a. 2025-2027E\nCUB-financed project contributes to Phase 2 expansion',hz:'目標產能：2028年達每月180,000片\nN2製程量產：2025年上半年\nFab 21（亞利桑那）第一期2024年完工\n資本支出指引：2025-2027E每年USD380-420億\nCUB融資專案貢獻第二期擴張'},
+      {p:'10C_projections.key_assumptions',h:'Revenue growth (%)|+15|+12|+10\nGross margin (%)|55|56|57\nCapacity utilization (%)|85|87|90',hz:'收入增長（%）|+15|+12|+10\n毛利率（%）|55|56|57\n產能利用率（%）|85|87|90'},
+      {p:'10C_projections.assumptions_narrative',h:'e.g. Revenue growth assumes continued AI accelerator and HPC demand driving advanced node capacity ramp. Gross margin assumes stable ASP with technology leadership premium maintained.',hz:'例：收入增長假設AI加速器及高效能運算需求持續驅動先進製程產能爬升。毛利率假設技術領導優勢下ASP穩定。'},
+      {p:'10C_projections.freight_rate_drop_pct',l:'10C — Revenue Decline in Stress Scenario (%)',lz:'10C — 壓力情境收入下降幅度 (%)',h:'e.g. 20 for -20% revenue decline',hz:'例：20代表收入下降20%'},
+      {p:'10C_projections.dscr_commentary',h:'e.g. Base case DSCR of 1.5x throughout loan tenor, supported by strong operating cash flow (OCF/Revenue ~40%) and conservative balance sheet management.',hz:'例：貸款年期內基本情境DSCR達1.5倍，由強健的營業現金流（OCF/收入約40%）及保守的資產負債管理支撐。'},
+      {p:'10C_projections.stress_assumptions',h:'Revenue|+15% p.a.|+2% p.a.|-13pp growth\nGross Margin|55%|45%|-10pp\nUtilization|85%|70%|-15pp',hz:'收入|+15%/年|+2%/年|-13個百分點\n毛利率|55%|45%|-10個百分點\n產能利用率|85%|70%|-15個百分點'},
+      {p:'10C_projections.worse_case_commentary',h:'e.g. Under stressed demand scenario (-20% revenue), DSCR falls to 1.1x. Parent company guarantee and net cash balance (USD50bn) provide adequate downside protection.',hz:'例：在需求壓力情境下（收入下降20%），DSCR降至1.1倍。母公司擔保及淨現金餘額（USD500億）提供充足下行保護。'}
+    ],
+    add:[]
+  }
+};
+
+function _patchFieldDefs(defs,patches){
+  const removeSet=new Set(patches.remove||[]);
+  const overrideMap={};
+  (patches.override||[]).forEach(o=>{overrideMap[o.p]=o;});
+  const result=defs.filter(f=>!removeSet.has(f.p)).map(f=>{
+    const ov=overrideMap[f.p];
+    return ov?Object.assign({},f,ov):f;
+  });
+  (patches.add||[]).forEach(f=>result.push(f));
+  return result;
+}
+
 const _MARINE_INDUSTRIES=new Set(['marine','shipping']);
 function getFieldDefs(secNo){
-  if(!_MARINE_INDUSTRIES.has(currentIndustry)&&FIELD_DEFS_CORP[secNo])return FIELD_DEFS_CORP[secNo];
+  if(!_MARINE_INDUSTRIES.has(currentIndustry)){
+    if(FIELD_DEFS_CORP[secNo])return FIELD_DEFS_CORP[secNo];
+    if(_CORP_FIELD_PATCHES[secNo])return _patchFieldDefs(FIELD_DEFS[secNo]||[],_CORP_FIELD_PATCHES[secNo]);
+  }
   return FIELD_DEFS[secNo]||[];
 }
 function getRequiredFields(secNo){
