@@ -401,6 +401,65 @@ document.getElementById("fetchBtn").addEventListener("click", async () => {
   }
 });
 
+// ── TWSE Import ───────────────────────────────────────────────────────────────
+document.getElementById("twseImportBtn").addEventListener("click", async () => {
+  const btn      = document.getElementById("twseImportBtn");
+  const statusEl = document.getElementById("twseStatus");
+
+  const rid        = document.getElementById("reportId").value.trim();
+  const stockCode  = document.getElementById("twseStockCode").value.trim();
+  const applyMode  = document.getElementById("twseApplyMode").value;
+  const sec4       = document.getElementById("twseSec4").checked;
+  const sec7       = document.getElementById("twseSec7").checked;
+
+  if (!rid) { statusEl.textContent = "⚠ 請先在 Automate 面板選擇報告"; return; }
+  if (!stockCode) { statusEl.textContent = "⚠ 請輸入股票代號"; return; }
+
+  const sections = [];
+  if (sec4) sections.push(4);
+  if (sec7) sections.push(7);
+  if (!sections.length) { statusEl.textContent = "⚠ 請至少勾選一個段落"; return; }
+
+  const { baseUrl, jwt } = await chrome.storage.local.get(["baseUrl", "jwt"]);
+  if (!baseUrl || !jwt) { statusEl.textContent = "⚠ 請先在 Settings 設定並登入"; return; }
+
+  btn.disabled = true;
+  btn.textContent = "⏳ 查詢中…";
+  statusEl.textContent = "";
+
+  try {
+    const resp = await fetch(
+      `${baseUrl}/api/credit-report/reports/${encodeURIComponent(rid)}/import-twse`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${jwt}` },
+        body: JSON.stringify({ stock_code: stockCode, apply_mode: applyMode, sections }),
+      }
+    );
+    const txt = await resp.text();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+    const data = JSON.parse(txt);
+
+    if (data.not_found) {
+      statusEl.textContent = `⚠ 查無此股票代號 "${esc(stockCode)}"，請確認代號是否正確。`;
+    } else {
+      const secList = data.sections_updated.length
+        ? data.sections_updated.map(s => `§${s}`).join("、")
+        : "（無新欄位）";
+      statusEl.innerHTML =
+        `✅ <strong>${esc(data.company_name)}</strong> 匯入完成<br>` +
+        `已更新段落：${secList}　` +
+        `填入 <strong>${data.fields_written}</strong> 個欄位` +
+        (data.fields_skipped ? `，略過 ${data.fields_skipped} 個（已有值）` : "");
+    }
+  } catch (e) {
+    statusEl.textContent = "❌ " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "📊 TWSE Import to Report";
+  }
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadSettings();
 

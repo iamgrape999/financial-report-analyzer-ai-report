@@ -1777,6 +1777,138 @@ async def auto_fetch_documents(
     }
 
 
+# ── TWSE import ───────────────────────────────────────────────────────────────
+
+class TWSEImportRequest(BaseModel):
+    stock_code: str
+    apply_mode: str = "only_empty"   # "only_empty" | "overwrite"
+    sections: list[int] = [4, 7]     # which sections to fill; currently 4 and/or 7
+
+
+class TWSEImportResult(BaseModel):
+    stock_code: str
+    company_name: str
+    sections_updated: list[int]
+    fields_written: int
+    fields_skipped: int
+    not_found: bool = False
+
+
+@router.post("/import-twse", response_model=TWSEImportResult)
+async def import_twse_data(
+    report_id: str,
+    payload: TWSEImportRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Fetch company data from TWSE OpenAPI and merge into §4 / §7 SectionInputs."""
+    import json as _json
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from credit_report.api.twse_importer import (
+        apply_field_mapping,
+        fetch_twse_company,
+        map_to_section4,
+        map_to_section7_metadata,
+    )
+
+    if payload.apply_mode not in ("only_empty", "overwrite"):
+        raise HTTPException(status_code=422, detail="apply_mode must be 'only_empty' or 'overwrite'")
+    if not payload.stock_code.strip():
+        raise HTTPException(status_code=422, detail="stock_code is required")
+    invalid_secs = [s for s in payload.sections if s not in (4, 7)]
+    if invalid_secs:
+        raise HTTPException(status_code=422, detail=f"Unsupported sections: {invalid_secs}. Only 4 and 7 are supported.")
+
+    result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_deleted == False)
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _assert_owner_or_admin(report, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports are immutable")
+
+    twse_data = await fetch_twse_company(payload.stock_code.strip())
+    if twse_data is None:
+        return TWSEImportResult(
+            stock_code=payload.stock_code,
+            company_name="",
+            sections_updated=[],
+            fields_written=0,
+            fields_skipped=0,
+            not_found=True,
+        )
+
+    section_maps: dict[int, dict] = {}
+    if 4 in payload.sections:
+        section_maps[4] = map_to_section4(twse_data)
+    if 7 in payload.sections:
+        section_maps[7] = map_to_section7_metadata(twse_data)
+
+    total_written = 0
+    total_skipped = 0
+    updated_sections: list[int] = []
+
+    for sec_no, field_map in section_maps.items():
+        if not field_map:
+            continue
+
+        si_result = await db.execute(
+            select(SectionInput).where(
+                SectionInput.report_id == report_id,
+                SectionInput.section_no == sec_no,
+            ).order_by(SectionInput.id.desc())
+        )
+        si = si_result.scalars().first()
+        existing_json: dict = {}
+        if si and si.input_json:
+            try:
+                existing_json = _json.loads(si.input_json)
+            except (ValueError, TypeError):
+                existing_json = {}
+
+        merged, written, skipped = apply_field_mapping(existing_json, field_map, payload.apply_mode)
+        total_written += written
+        total_skipped += skipped
+
+        if written == 0:
+            continue
+
+        updated_sections.append(sec_no)
+        merged_str = _json.dumps(merged, ensure_ascii=False)
+        if si:
+            si.input_json = merged_str
+            si.saved_by = current_user.id
+            si.saved_at = datetime.now(timezone.utc)
+        else:
+            si = SectionInput(
+                id=str(_uuid.uuid4()),
+                report_id=report_id,
+                section_no=sec_no,
+                input_json=merged_str,
+                saved_by=current_user.id,
+            )
+            db.add(si)
+
+    await db.flush()
+
+    company_name = twse_data.company_name_zh or twse_data.company_name_en or payload.stock_code
+    logger.info(
+        "twse_import: stock=%r company=%r sections=%r written=%d skipped=%d report=%s",
+        payload.stock_code, company_name, updated_sections, total_written, total_skipped, report_id,
+    )
+    return TWSEImportResult(
+        stock_code=payload.stock_code,
+        company_name=company_name,
+        sections_updated=updated_sections,
+        fields_written=total_written,
+        fields_skipped=total_skipped,
+    )
+
+
 @router.get("/generate/stream/{task_id}")
 async def generation_stream_events(
     request: Request,

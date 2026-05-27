@@ -213,6 +213,40 @@
   <div id="fetchStatus" style="margin-top:10px;font-size:11px;color:#64748b"></div>
 
   <div id="fetchResults" style="margin-top:8px"></div>
+
+  <hr class="divider">
+
+  <p class="info" style="margin-bottom:8px">
+    📊 <strong>TWSE 自動填入</strong> — 從台灣證交所匯入公司基本資料至 §4 / §7 欄位（免費公開資料，不需憑證）。
+  </p>
+
+  <div class="row">
+    <div class="field">
+      <label>股票代號</label>
+      <input type="text" id="twseStockCode" placeholder="e.g. 2603" />
+    </div>
+    <div class="field">
+      <label>填入模式</label>
+      <select id="twseApplyMode" style="width:100%;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:6px 8px;color:#e2e8f0;font-size:12px">
+        <option value="only_empty">只填空白欄位</option>
+        <option value="overwrite">覆蓋現有值</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>段落</label>
+    <div style="display:flex;gap:10px;padding-top:2px">
+      <label style="color:#e2e8f0;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="twseSec4" checked style="margin-right:4px">§4 公司基本</label>
+      <label style="color:#e2e8f0;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="twseSec7" checked style="margin-right:4px">§7 財務標頭</label>
+    </div>
+  </div>
+
+  <button class="btn btn-success" id="twseImportBtn">📊 TWSE Import to Report</button>
+
+  <div id="twseStatus" style="margin-top:10px;font-size:11px;color:#64748b"></div>
 </div>
 
 <!-- ── CONFLICTS PANEL ────────────────────────────────────────────────────── -->
