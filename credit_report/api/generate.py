@@ -50,6 +50,43 @@ ALLOWED_EXTENSIONS = {
     "xlsx", "xls",
 }
 
+# Magic-number prefixes for security-critical binary formats.
+# Checked against the first 8 bytes of every uploaded file.
+_MAGIC_SIGNATURES: dict[bytes, str] = {
+    b"%PDF":          "pdf",
+    b"PK\x03\x04":   "zip-office",   # .docx/.xlsx/.pptx are zip-based
+    b"\xd0\xcf\x11\xe0": "ole",      # .doc/.xls/.ppt legacy Office
+    b"\xff\xd8\xff":  "jpeg",
+    b"\x89PNG":       "png",
+    b"GIF8":          "gif",
+    b"RIFF":          "riff",        # .webp uses RIFF container
+}
+
+def _check_magic(data: bytes, ext: str) -> bool:
+    """Return False if the file's magic bytes contradict its declared extension."""
+    head = data[:8]
+    for sig, kind in _MAGIC_SIGNATURES.items():
+        if not head.startswith(sig):
+            continue
+        if kind == "pdf" and ext == "pdf":
+            return True
+        if kind == "zip-office" and ext in ("docx", "xlsx", "pptx"):
+            return True
+        if kind == "ole" and ext in ("doc", "xls", "ppt"):
+            return True
+        if kind == "jpeg" and ext in ("jpg", "jpeg"):
+            return True
+        if kind == "png" and ext == "png":
+            return True
+        if kind == "gif" and ext == "gif":
+            return True
+        if kind == "riff" and ext == "webp":
+            return True
+        # Magic matched a known format but extension disagrees → reject
+        return False
+    # No magic match for this extension — pass through (text/csv/md have no magic)
+    return True
+
 DOCUMENT_TYPES = [
     "annual_report", "financial_statement", "analyst_presentation",
     "interim_report", "valuation_report", "charter_agreement",
@@ -443,6 +480,13 @@ async def upload_document(
     if len(file_bytes) > _MAX_UPLOAD_BYTES:
         logger.warning("upload_document: file too large bytes=%d limit=%dMB report=%s", len(file_bytes), CREDIT_REPORT_MAX_UPLOAD_MB, report_id)
         raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
+
+    if not _check_magic(file_bytes, ext):
+        logger.warning("upload_document: magic-byte mismatch file=%r ext=%s report=%s", fname, ext, report_id)
+        raise HTTPException(
+            status_code=400,
+            detail=f"File content does not match its declared extension '.{ext}'. Upload rejected.",
+        )
 
     doc_id = str(uuid.uuid4())
     logger.info("upload_document: extracting text file=%r type=%s bytes=%d doc=%s report=%s", fname, document_type, len(file_bytes), doc_id, report_id)

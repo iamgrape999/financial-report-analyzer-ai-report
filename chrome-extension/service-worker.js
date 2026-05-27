@@ -16,7 +16,8 @@ function emit(step, status, detail = "") {
 }
 
 async function cfg() {
-  return chrome.storage.local.get(["baseUrl", "email", "password", "token"]);
+  return chrome.storage.local.get(["baseUrl", "email", "token"]);
+  // Password is not persisted in storage — it must be supplied fresh by the user
 }
 
 async function saveToken(token) {
@@ -140,12 +141,12 @@ async function _genClear() {
 
 // ── Step implementations ──────────────────────────────────────────────────────
 
-async function stepLogin() {
+async function stepLogin(passwordOverride) {
   emit("login", "running");
-  const { baseUrl, email, password, token: cached } = await cfg();
+  const { baseUrl, email, token: cached } = await cfg();
   if (!baseUrl || !email) throw new Error("Configure Base URL and Email in Settings.");
 
-  // Token-first: reuse cached JWT to avoid relying on stored password every call
+  // Token-first: reuse cached JWT — never fall back to stored password
   if (cached) {
     try {
       await api("GET", "/reports?limit=1", undefined, cached, baseUrl);
@@ -153,12 +154,13 @@ async function stepLogin() {
       return cached;
     } catch (e) {
       if (!e.message.startsWith("HTTP 401")) throw e;
-      // 401 = expired; fall through to fresh login
+      // 401 = expired; require user to supply password fresh
     }
   }
 
-  if (!password) throw new Error("Session expired — re-enter Password in Settings.");
-  const newToken = await login(baseUrl, email, password);
+  // Password must be supplied at automation start — never from storage
+  if (!passwordOverride) throw new Error("Session expired — open Settings and start automation again to re-authenticate.");
+  const newToken = await login(baseUrl, email, passwordOverride);
   await saveToken(newToken);
   emit("login", "done", email);
   return newToken;

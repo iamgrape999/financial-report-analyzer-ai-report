@@ -15,10 +15,10 @@ document.querySelectorAll(".tab").forEach(tab => {
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 async function loadSettings() {
-  const data = await chrome.storage.local.get(["baseUrl", "email", "password"]);
+  const data = await chrome.storage.local.get(["baseUrl", "email"]);
   if (data.baseUrl)  document.getElementById("baseUrl").value  = data.baseUrl;
   if (data.email)    document.getElementById("email").value    = data.email;
-  if (data.password) document.getElementById("password").value = data.password;
+  // Password is never persisted — always entered fresh for security
 }
 
 document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
@@ -26,9 +26,9 @@ document.getElementById("saveSettingsBtn").addEventListener("click", async () =>
   // Strip any path (e.g. /app) — only keep scheme + host + port
   try { rawUrl = new URL(rawUrl).origin; } catch (_) {}
   await chrome.storage.local.set({
-    baseUrl:  rawUrl,
-    email:    document.getElementById("email").value.trim(),
-    password: document.getElementById("password").value,
+    baseUrl: rawUrl,
+    email:   document.getElementById("email").value.trim(),
+    // Password intentionally NOT saved — re-entered each session
   });
   document.getElementById("baseUrl").value = rawUrl; // show the cleaned value
   const btn = document.getElementById("saveSettingsBtn");

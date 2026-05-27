@@ -190,10 +190,10 @@ def validate_runtime_security() -> None:
             "Set a strong SECRET_KEY before deploying to production."
         )
     if IS_PRODUCTION and CORS_ALLOW_ORIGINS.strip() in ("*", ""):
-        _cfg_logger.warning(
-            "CORS_ALLOW_ORIGINS is set to wildcard '*' in production. "
-            "Set CORS_ALLOW_ORIGINS to your actual frontend origin (e.g. https://your-app.onrender.com) "
-            "to prevent cross-origin attacks."
+        raise RuntimeError(
+            "CORS_ALLOW_ORIGINS must not be wildcard '*' in production. "
+            "Set CORS_ALLOW_ORIGINS to your actual frontend origin "
+            "(e.g. https://your-app.onrender.com)."
         )
 
 

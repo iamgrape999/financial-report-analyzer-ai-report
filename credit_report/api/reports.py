@@ -16,7 +16,7 @@ try:
 except ImportError:
     _yaml = None  # type: ignore[assignment]
     _YAML_AVAILABLE = False
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -441,6 +441,22 @@ async def submit_for_review(
             detail="Cannot submit for review — no sections have been generated yet.",
         )
 
+    # Block submission while data conflicts remain unresolved
+    from credit_report.fact_store.models import FactConflict
+    open_conflicts_result = await db.execute(
+        select(func.count()).select_from(FactConflict).where(
+            FactConflict.report_id == report_id,
+            FactConflict.status == "open",
+        )
+    )
+    open_count = open_conflicts_result.scalar() or 0
+    if open_count:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot submit for review — {open_count} unresolved data conflict(s) exist. "
+                   "Resolve all conflicts before submitting.",
+        )
+
     old_status = report.status
     report.status = "review_in_progress"
     await write_event(
@@ -467,11 +483,20 @@ async def approve_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Transition report to approved. Only approvers and admins may approve."""
+    """Transition report to approved. Only approvers and admins may approve.
+
+    Self-approval is blocked: the approver must not be the report's creator.
+    """
     if current_user.role not in ("approver", "admin"):
         raise HTTPException(status_code=403, detail="Only approvers and admins can approve reports")
 
     report = await _get_live_report(db, report_id)
+
+    if report.created_by == current_user.id and current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Self-approval is not permitted. The approver must be a different user from the report creator.",
+        )
 
     if report.status not in ("review_in_progress", "validated"):
         raise HTTPException(
