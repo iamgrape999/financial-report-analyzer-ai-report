@@ -1,6 +1,8 @@
 """Tests for credit_report/api/twse_importer.py and the /import-twse endpoint.
 
-External HTTP calls are patched with unittest.mock — no live network traffic.
+Key change from earlier version: ALL company data now comes from t187ap03_L
+(t187ap04_L was material news, not company detail).  Tests also cover the two
+new endpoints: t187ap02_L (major shareholders) and t187ap11_L (board data).
 """
 from __future__ import annotations
 
@@ -13,13 +15,20 @@ os.environ.setdefault("ADMIN_EMAIL", "admin@example.com")
 os.environ.setdefault("ADMIN_PASSWORD", "admin123")
 
 from credit_report.api.twse_importer import (
+    BoardMember,
+    SUPPORTED_SECTIONS,
     TWSECompanyData,
-    _find_by_code,
+    _find_all,
+    _find_one,
     _parse_twse_date,
     apply_field_mapping,
     deep_get,
     deep_set,
+    map_to_section,
+    map_to_section1,
+    map_to_section3,
     map_to_section4,
+    map_to_section5,
     map_to_section7_metadata,
 )
 
@@ -27,54 +36,106 @@ BASE = "/api/credit-report"
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-_SAMPLE_BASIC = {
+# All fields now come from a SINGLE t187ap03_L row
+_SAMPLE_COMPANY = {
     "公司代號": "2603",
     "公司名稱": "長榮海運",
+    "公司簡稱": "長榮",
+    "英文全名": "Evergreen Marine Corp",
+    "英文簡稱": "EMC",
     "國際證券辨識號碼(ISIN Code)": "TW0002603004",
     "上市日期": "19870925",
     "市場別": "上市",
     "產業別": "航運業",
-}
-
-_SAMPLE_DETAILED = {
-    "公司代號": "2603",
-    "公司名稱": "長榮海運",
-    "英文全名": "Evergreen Marine Corp",
-    "英文簡稱": "EMC",
+    "外國企業註冊地國": "",          # empty = Taiwan
+    "營利事業統一編號": "11111111",
     "成立日期": "19680901",
     "實收資本額(元)": "38808000000",
+    "已發行普通股數或TDR原股發行股數": "3880800000",
+    "普通股每股面額": "10",
     "董事長": "張衍義",
     "總經理": "謝惠全",
+    "發言人": "蔡文瑞",
+    "發言人職稱": "財務長",
     "主要業務": "貨櫃輪航運",
     "簽證會計師事務所": "資誠聯合會計師事務所",
     "簽證會計師1": "陳明進",
     "簽證會計師2": "徐薇婷",
     "電話": "02-25056688",
+    "傳真電話": "02-25056000",
     "住址": "台北市中山區民生東路二段166號",
+    "電子郵件信箱": "ir@evergreen-marine.com",
+    "公司網址": "www.evergreen-marine.com",
     "財務報告書類型": "合併",
 }
+
+_SAMPLE_SHAREHOLDERS = [
+    {"公司代號": "2603", "公司名稱": "長榮海運", "大股東名稱": "長榮國際股份有限公司"},
+    {"公司代號": "2603", "公司名稱": "長榮海運", "大股東名稱": "張衍義"},
+]
+
+_SAMPLE_BOARD = [
+    {
+        "公司代號": "2603", "公司名稱": "長榮海運",
+        "職稱": "董事長", "姓名": "張衍義",
+        "目前持股": "500000000", "設質股數": "0", "設質股數佔持股比例": "0",
+    },
+    {
+        "公司代號": "2603", "公司名稱": "長榮海運",
+        "職稱": "董事", "姓名": "謝惠全",
+        "目前持股": "100000", "設質股數": "0", "設質股數佔持股比例": "0",
+    },
+    {
+        "公司代號": "2603", "公司名稱": "長榮海運",
+        "職稱": "獨立董事", "姓名": "王小明",
+        "目前持股": "0", "設質股數": "0", "設質股數佔持股比例": "0",
+    },
+]
 
 _SAMPLE_DATA = TWSECompanyData(
     stock_code="2603",
     company_name_zh="長榮海運",
+    company_name_abbrev_zh="長榮",
+    company_name_en="Evergreen Marine Corp",
+    company_name_abbrev_en="EMC",
     isin_code="TW0002603004",
     listing_date="1987-09-25",
     market_type="上市",
     industry_zh="航運業",
-    company_name_en="Evergreen Marine Corp",
+    tax_id="11111111",
+    incorporation_country_raw="",
     incorporation_date="1968-09-01",
     paid_in_capital_ntd=38_808_000_000,
+    shares_outstanding="3880800000",
+    par_value_ntd="10",
     chairman="張衍義",
     ceo="謝惠全",
+    spokesperson="蔡文瑞",
+    spokesperson_title="財務長",
     primary_business="貨櫃輪航運",
     auditor_firm="資誠聯合會計師事務所",
     auditor1="陳明進",
     auditor2="徐薇婷",
     phone="02-25056688",
+    fax="02-25056000",
     address="台北市中山區民生東路二段166號",
+    email="ir@evergreen-marine.com",
+    website="www.evergreen-marine.com",
     financial_report_type="合併",
-    raw={"basic": _SAMPLE_BASIC, "detailed": _SAMPLE_DETAILED},
+    major_shareholders=["長榮國際股份有限公司", "張衍義"],
+    board_members=[
+        BoardMember(title="董事長", name="張衍義", shares_current="500000000", pledged_shares="0", pledge_pct="0"),
+        BoardMember(title="董事", name="謝惠全", shares_current="100000", pledged_shares="0", pledge_pct="0"),
+        BoardMember(title="獨立董事", name="王小明", shares_current="0", pledged_shares="0", pledge_pct="0"),
+    ],
+    raw={"company": _SAMPLE_COMPANY, "shareholders": _SAMPLE_SHAREHOLDERS, "board": _SAMPLE_BOARD},
 )
+
+
+# ── SUPPORTED_SECTIONS constant ───────────────────────────────────────────────
+
+def test_supported_sections():
+    assert SUPPORTED_SECTIONS == frozenset({1, 3, 4, 5, 7})
 
 
 # ── _parse_twse_date ──────────────────────────────────────────────────────────
@@ -96,39 +157,46 @@ def test_parse_date_whitespace():
 
 
 def test_parse_date_invalid_string():
-    result = _parse_twse_date("abcdefgh")
-    assert result == "abcdefgh"
+    assert _parse_twse_date("abcdefgh") == "abcdefgh"
 
 
 def test_parse_date_too_short():
-    result = _parse_twse_date("2024")
-    assert result == "2024"
+    assert _parse_twse_date("2024") == "2024"
 
 
 def test_parse_date_future_unchanged():
-    result = _parse_twse_date("29991231")
-    assert result == "29991231"
+    assert _parse_twse_date("29991231") == "29991231"
 
 
-# ── _find_by_code ─────────────────────────────────────────────────────────────
+# ── _find_one / _find_all ─────────────────────────────────────────────────────
 
-def test_find_by_code_exact():
-    rows = [{"公司代號": "2603", "val": 1}, {"公司代號": "2412", "val": 2}]
-    assert _find_by_code(rows, "2603")["val"] == 1
-
-
-def test_find_by_code_with_whitespace():
-    rows = [{"公司代號": " 2603 ", "val": 1}]
-    assert _find_by_code(rows, "2603")["val"] == 1
+def test_find_one_exact():
+    rows = [{"公司代號": "2603", "v": 1}, {"公司代號": "2412", "v": 2}]
+    assert _find_one(rows, "2603")["v"] == 1
 
 
-def test_find_by_code_not_found():
-    rows = [{"公司代號": "2603"}]
-    assert _find_by_code(rows, "9999") == {}
+def test_find_one_with_whitespace():
+    rows = [{"公司代號": " 2603 "}]
+    assert _find_one(rows, "2603") != {}
 
 
-def test_find_by_code_empty_list():
-    assert _find_by_code([], "2603") == {}
+def test_find_one_not_found():
+    assert _find_one([{"公司代號": "2603"}], "9999") == {}
+
+
+def test_find_all_returns_multiple():
+    rows = [
+        {"公司代號": "2603", "大股東名稱": "A"},
+        {"公司代號": "2603", "大股東名稱": "B"},
+        {"公司代號": "2412", "大股東名稱": "C"},
+    ]
+    result = _find_all(rows, "2603")
+    assert len(result) == 2
+    assert result[0]["大股東名稱"] == "A"
+
+
+def test_find_all_empty_list():
+    assert _find_all([], "2603") == []
 
 
 # ── deep_set / deep_get ───────────────────────────────────────────────────────
@@ -146,8 +214,7 @@ def test_deep_set_overwrites():
 
 
 def test_deep_get_existing():
-    obj = {"a": {"b": {"c": 7}}}
-    assert deep_get(obj, "a.b.c") == 7
+    assert deep_get({"a": {"b": {"c": 7}}}, "a.b.c") == 7
 
 
 def test_deep_get_missing():
@@ -161,104 +228,188 @@ def test_deep_get_partial_missing():
 # ── apply_field_mapping ───────────────────────────────────────────────────────
 
 def test_apply_only_empty_fills_missing():
-    mapping = {"a.b": "new_val"}
-    result, written, skipped = apply_field_mapping({}, mapping, "only_empty")
-    assert result["a"]["b"] == "new_val"
-    assert written == 1
-    assert skipped == 0
+    result, written, skipped = apply_field_mapping({}, {"a.b": "val"}, "only_empty")
+    assert result["a"]["b"] == "val"
+    assert written == 1 and skipped == 0
 
 
 def test_apply_only_empty_skips_existing():
-    mapping = {"a.b": "new_val"}
-    existing = {"a": {"b": "keep_me"}}
-    result, written, skipped = apply_field_mapping(existing, mapping, "only_empty")
-    assert result["a"]["b"] == "keep_me"
-    assert written == 0
-    assert skipped == 1
+    result, written, skipped = apply_field_mapping(
+        {"a": {"b": "keep"}}, {"a.b": "new"}, "only_empty"
+    )
+    assert result["a"]["b"] == "keep"
+    assert written == 0 and skipped == 1
 
 
 def test_apply_only_empty_treats_empty_string_as_blank():
-    mapping = {"x": "filled"}
-    existing = {"x": ""}
-    result, written, skipped = apply_field_mapping(existing, mapping, "only_empty")
+    result, written, _ = apply_field_mapping({"x": ""}, {"x": "filled"}, "only_empty")
     assert result["x"] == "filled"
     assert written == 1
 
 
-def test_apply_overwrite_replaces_existing():
-    mapping = {"a.b": "replacement"}
-    existing = {"a": {"b": "original"}}
-    result, written, skipped = apply_field_mapping(existing, mapping, "overwrite")
-    assert result["a"]["b"] == "replacement"
+def test_apply_overwrite_replaces():
+    result, written, _ = apply_field_mapping(
+        {"a": {"b": "orig"}}, {"a.b": "new"}, "overwrite"
+    )
+    assert result["a"]["b"] == "new"
     assert written == 1
-    assert skipped == 0
 
 
 def test_apply_empty_mapping():
-    result, written, skipped = apply_field_mapping({"x": 1}, {}, "only_empty")
-    assert written == 0
-    assert skipped == 0
+    _, written, skipped = apply_field_mapping({"x": 1}, {}, "only_empty")
+    assert written == 0 and skipped == 0
+
+
+# ── map_to_section1 ───────────────────────────────────────────────────────────
+
+def test_section1_borrower_name():
+    m = map_to_section1(_SAMPLE_DATA)
+    assert m["terms_and_conditions.borrower"] == "長榮海運"
+
+
+def test_section1_china_flag_false_for_taiwan():
+    m = map_to_section1(_SAMPLE_DATA)
+    assert "regulatory_compliance.china_invested_enterprise" not in m
+
+
+def test_section1_china_flag_true_for_prc():
+    data = TWSECompanyData(stock_code="9999", company_name_zh="某公司",
+                           incorporation_country_raw="中國大陸")
+    m = map_to_section1(data)
+    assert m.get("regulatory_compliance.china_invested_enterprise") is True
+
+
+def test_section1_china_flag_false_for_cayman():
+    data = TWSECompanyData(stock_code="9999", company_name_zh="某公司",
+                           incorporation_country_raw="Cayman Islands")
+    m = map_to_section1(data)
+    assert m.get("regulatory_compliance.china_invested_enterprise") is False
+
+
+# ── map_to_section3 ───────────────────────────────────────────────────────────
+
+def test_section3_full_name():
+    m = map_to_section3(_SAMPLE_DATA)
+    assert m["3B_internal_ratings.borrower_entity_full_name"] == "Evergreen Marine Corp"
+
+
+def test_section3_abbrev():
+    m = map_to_section3(_SAMPLE_DATA)
+    assert m["3B_internal_ratings.borrower_entity_abbrev"] == "EMC"
+
+
+def test_section3_falls_back_to_zh_name():
+    data = TWSECompanyData(stock_code="2603", company_name_zh="長榮海運",
+                           company_name_en="", company_name_abbrev_en="",
+                           company_name_abbrev_zh="長榮")
+    m = map_to_section3(data)
+    assert m["3B_internal_ratings.borrower_entity_full_name"] == "長榮海運"
+    assert m["3B_internal_ratings.borrower_entity_abbrev"] == "長榮"
 
 
 # ── map_to_section4 ───────────────────────────────────────────────────────────
 
-def test_map_section4_keys_present():
-    m = map_to_section4(_SAMPLE_DATA)
-    assert "4A_borrower.company_name_zh" in m
-    assert "4A_borrower.company_name_en" in m
-    assert "4A_borrower.incorporation_date" in m
-    assert "4A_borrower.group_auditor" in m
-    assert "4C_management.ceo_name" in m
-    assert "4D_business.primary_business" in m
-    assert "4E_financials.currency" in m
-    assert "4E_financials.paid_in_capital_ntd_bn" in m
-
-
-def test_map_section4_values():
+def test_section4_4a_fields():
     m = map_to_section4(_SAMPLE_DATA)
     assert m["4A_borrower.company_name_zh"] == "長榮海運"
     assert m["4A_borrower.company_name_en"] == "Evergreen Marine Corp"
-    assert m["4A_borrower.incorporation_date"] == "1968-09-01"
+    assert m["4A_borrower.registration_number"] == "11111111"
     assert m["4A_borrower.incorporation_country"] == "Taiwan"
+    assert m["4A_borrower.incorporation_date"] == "1968-09-01"
     assert m["4A_borrower.legal_entity_type"] == "Listed Company"
     assert m["4A_borrower.fiscal_year_end"] == "December 31"
+    assert m["4A_borrower.group_auditor"] == "資誠聯合會計師事務所"
+
+
+def test_section4_incorporation_country_uses_raw_if_set():
+    data = TWSECompanyData(stock_code="2603", market_type="上市",
+                           incorporation_country_raw="Cayman Islands")
+    m = map_to_section4(data)
+    assert m["4A_borrower.incorporation_country"] == "Cayman Islands"
+
+
+def test_section4_otc_legal_entity_type():
+    data = TWSECompanyData(stock_code="2603", market_type="上櫃")
+    m = map_to_section4(data)
+    assert m["4A_borrower.legal_entity_type"] == "OTC Listed Company"
+
+
+def test_section4_4b_shareholders():
+    m = map_to_section4(_SAMPLE_DATA)
+    sh = m["4B_ownership.shareholders"]
+    assert isinstance(sh, list)
+    assert len(sh) == 2
+    assert "長榮國際股份有限公司|>10%|Taiwan" in sh
+    assert m["4B_ownership.ultimate_beneficial_owner"] == "長榮國際股份有限公司"
+
+
+def test_section4_no_shareholders_when_empty():
+    data = TWSECompanyData(stock_code="2603")
+    m = map_to_section4(data)
+    assert "4B_ownership.shareholders" not in m
+    assert "4B_ownership.ultimate_beneficial_owner" not in m
+
+
+def test_section4_4c_management():
+    m = map_to_section4(_SAMPLE_DATA)
     assert m["4C_management.ceo_name"] == "謝惠全"
     assert m["4C_management.ceo_title"] == "President"
-    assert m["4D_business.primary_business"] == "貨櫃輪航運"
-    assert m["4E_financials.currency"] == "NTD"
 
 
-def test_map_section4_paid_in_capital_ntd_bn():
+def test_section4_4d_business():
     m = map_to_section4(_SAMPLE_DATA)
+    assert m["4D_business.primary_business"] == "貨櫃輪航運"
+
+
+def test_section4_4e_financials():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert m["4E_financials.currency"] == "NTD"
     assert m["4E_financials.paid_in_capital_ntd_bn"] == pytest.approx(38.808, rel=1e-3)
 
 
-def test_map_section4_empty_data_omits_fields():
-    empty = TWSECompanyData(stock_code="0000")
-    m = map_to_section4(empty)
+def test_section4_empty_data_omits_optional_fields():
+    m = map_to_section4(TWSECompanyData(stock_code="0000"))
     assert "4A_borrower.company_name_zh" not in m
     assert "4E_financials.paid_in_capital_ntd_bn" not in m
 
 
-def test_map_section4_zero_capital_omitted():
-    data = TWSECompanyData(stock_code="9999", market_type="上市", paid_in_capital_ntd=0)
-    m = map_to_section4(data)
-    assert "4E_financials.paid_in_capital_ntd_bn" not in m
+# ── map_to_section5 ───────────────────────────────────────────────────────────
+
+def test_section5_5f_guarantor_fields():
+    m = map_to_section5(_SAMPLE_DATA)
+    assert m["5F_corporate_guarantee.guarantor_full_name"] == "長榮海運"
+    assert m["5F_corporate_guarantee.guarantor_listed_exchange"] == "Taiwan Stock Exchange"
 
 
-# ── map_to_section7_metadata ─────────────────────────────────────────────────
-
-def test_map_section7_keys_present():
-    m = map_to_section7_metadata(_SAMPLE_DATA)
-    assert "7A_borrower_financials.reporting_entity" in m
-    assert "7A_borrower_financials.auditor" in m
-    assert "7A_borrower_financials.fiscal_year_end" in m
-    assert "7A_borrower_financials.reporting_currency" in m
-    assert "7A_borrower_financials.unit" in m
-    assert "7A_borrower_financials.accounting_standard" in m
+def test_section5_5f_otc_exchange():
+    data = TWSECompanyData(stock_code="2603", company_name_zh="某公司", market_type="上櫃")
+    m = map_to_section5(data)
+    assert m["5F_corporate_guarantee.guarantor_listed_exchange"] == "Taipei Exchange"
 
 
-def test_map_section7_values():
+def test_section5_5g_responsible_person_from_board():
+    m = map_to_section5(_SAMPLE_DATA)
+    # Board has 董事長=張衍義, should be preferred over basic chairman field
+    assert m["5G_responsible_person.name"] == "張衍義"
+    assert m["5G_responsible_person.title"] == "Chairman / 董事長"
+
+
+def test_section5_5g_falls_back_to_basic_chairman():
+    data = TWSECompanyData(stock_code="2603", chairman="王大明",
+                           company_name_zh="某公司", market_type="上市")
+    m = map_to_section5(data)
+    assert m["5G_responsible_person.name"] == "王大明"
+
+
+def test_section5_5g_no_chairman_omits_fields():
+    data = TWSECompanyData(stock_code="2603", company_name_zh="某公司")
+    m = map_to_section5(data)
+    assert "5G_responsible_person.name" not in m
+
+
+# ── map_to_section7_metadata ──────────────────────────────────────────────────
+
+def test_section7_7a_fields():
     m = map_to_section7_metadata(_SAMPLE_DATA)
     assert m["7A_borrower_financials.reporting_entity"] == "長榮海運"
     assert m["7A_borrower_financials.auditor"] == "資誠聯合會計師事務所"
@@ -268,93 +419,136 @@ def test_map_section7_values():
     assert m["7A_borrower_financials.accounting_standard"] == "IFRS (TIFRS)"
 
 
-def test_map_section7_falls_back_to_english_name():
-    data = TWSECompanyData(
-        stock_code="2603",
-        company_name_zh="",
-        company_name_en="Evergreen Marine Corp",
-    )
+def test_section7_entities_to_analyze():
+    m = map_to_section7_metadata(_SAMPLE_DATA)
+    assert m["entities_to_analyze.borrower_name"] == "Evergreen Marine Corp"
+    assert m["entities_to_analyze.borrower_currency"] == "NTD"
+    assert m["entities_to_analyze.borrower_unit"] == "NTD million"
+
+
+def test_section7_falls_back_to_zh_name():
+    data = TWSECompanyData(stock_code="2603", company_name_zh="長榮海運",
+                           company_name_en="")
     m = map_to_section7_metadata(data)
-    assert m["7A_borrower_financials.reporting_entity"] == "Evergreen Marine Corp"
+    assert m["7A_borrower_financials.reporting_entity"] == "長榮海運"
+    assert m["entities_to_analyze.borrower_name"] == "長榮海運"
 
 
-# ── fetch_twse_company (async, HTTP mocked) ───────────────────────────────────
+# ── map_to_section dispatch ───────────────────────────────────────────────────
+
+def test_map_to_section_dispatch():
+    assert "terms_and_conditions.borrower" in map_to_section(1, _SAMPLE_DATA)
+    assert "3B_internal_ratings.borrower_entity_full_name" in map_to_section(3, _SAMPLE_DATA)
+    assert "4A_borrower.company_name_zh" in map_to_section(4, _SAMPLE_DATA)
+    assert "5G_responsible_person.name" in map_to_section(5, _SAMPLE_DATA)
+    assert "7A_borrower_financials.reporting_entity" in map_to_section(7, _SAMPLE_DATA)
+
+
+def test_map_to_section_unsupported_returns_empty():
+    assert map_to_section(2, _SAMPLE_DATA) == {}
+    assert map_to_section(6, _SAMPLE_DATA) == {}
+    assert map_to_section(10, _SAMPLE_DATA) == {}
+
+
+# ── fetch_twse_company (HTTP mocked) ─────────────────────────────────────────
+
+def _make_mock_resp(data):
+    r = MagicMock()
+    r.raise_for_status = MagicMock()
+    r.json = MagicMock(return_value=data)
+    return r
+
 
 @pytest.mark.asyncio
 async def test_fetch_twse_company_success():
     from credit_report.api.twse_importer import fetch_twse_company
 
-    mock_basic = MagicMock()
-    mock_basic.raise_for_status = MagicMock()
-    mock_basic.json = MagicMock(return_value=[_SAMPLE_BASIC])
-
-    mock_detailed = MagicMock()
-    mock_detailed.raise_for_status = MagicMock()
-    mock_detailed.json = MagicMock(return_value=[_SAMPLE_DETAILED])
-
     async def _fake_get(url, **kw):
-        if "t187ap03" in url:
-            return mock_basic
-        return mock_detailed
+        if "t187ap03_L" in url:
+            return _make_mock_resp([_SAMPLE_COMPANY])
+        if "t187ap03_P" in url:
+            return _make_mock_resp([])
+        if "t187ap02_L" in url:
+            return _make_mock_resp(_SAMPLE_SHAREHOLDERS)
+        if "t187ap11_L" in url:
+            return _make_mock_resp(_SAMPLE_BOARD)
+        return _make_mock_resp([])
 
     with patch("httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = _fake_get
-        mock_cls.return_value = mock_client
-
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=None)
+        mc.get = _fake_get
+        mock_cls.return_value = mc
         data = await fetch_twse_company("2603")
 
     assert data is not None
     assert data.company_name_zh == "長榮海運"
     assert data.company_name_en == "Evergreen Marine Corp"
-    assert data.paid_in_capital_ntd == 38_808_000_000
+    assert data.tax_id == "11111111"
     assert data.ceo == "謝惠全"
+    assert data.chairman == "張衍義"
     assert data.auditor_firm == "資誠聯合會計師事務所"
+    assert data.incorporation_date == "1968-09-01"
+    assert data.paid_in_capital_ntd == 38_808_000_000
+    assert len(data.major_shareholders) == 2
+    assert data.major_shareholders[0] == "長榮國際股份有限公司"
+    assert len(data.board_members) == 3
+    assert data.board_members[0].title == "董事長"
+
+
+@pytest.mark.asyncio
+async def test_fetch_twse_company_falls_back_to_otc():
+    from credit_report.api.twse_importer import fetch_twse_company
+
+    async def _fake_get(url, **kw):
+        if "t187ap03_P" in url:
+            return _make_mock_resp([{**_SAMPLE_COMPANY, "市場別": "上櫃"}])
+        return _make_mock_resp([])
+
+    with patch("httpx.AsyncClient") as mock_cls:
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=None)
+        mc.get = _fake_get
+        mock_cls.return_value = mc
+        data = await fetch_twse_company("2603")
+
+    assert data is not None
+    assert data.company_name_zh == "長榮海運"
 
 
 @pytest.mark.asyncio
 async def test_fetch_twse_company_not_found():
     from credit_report.api.twse_importer import fetch_twse_company
 
-    mock_resp = MagicMock()
-    mock_resp.raise_for_status = MagicMock()
-    mock_resp.json = MagicMock(return_value=[])
-
     with patch("httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(return_value=mock_resp)
-        mock_cls.return_value = mock_client
-
-        result = await fetch_twse_company("9999")
-
-    assert result is None
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=None)
+        mc.get = AsyncMock(return_value=_make_mock_resp([]))
+        mock_cls.return_value = mc
+        assert await fetch_twse_company("9999") is None
 
 
 @pytest.mark.asyncio
 async def test_fetch_twse_company_http_error_returns_none():
+    import httpx as _httpx
     from credit_report.api.twse_importer import fetch_twse_company
-    import httpx
 
-    async def _failing_get(url, **kw):
-        raise httpx.ConnectError("network unreachable")
+    async def _failing(*a, **kw):
+        raise _httpx.ConnectError("network unreachable")
 
     with patch("httpx.AsyncClient") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = _failing_get
-        mock_cls.return_value = mock_client
-
-        result = await fetch_twse_company("2603")
-
-    assert result is None
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=None)
+        mc.get = _failing
+        mock_cls.return_value = mc
+        assert await fetch_twse_company("2603") is None
 
 
-# ── /import-twse endpoint integration ─────────────────────────────────────────
+# ── /import-twse endpoint integration ────────────────────────────────────────
 
 @pytest.fixture()
 def ac():
@@ -364,7 +558,8 @@ def ac():
 
 
 async def _login(ac) -> dict:
-    r = await ac.post(f"{BASE}/auth/login", data={"username": "admin@example.com", "password": "admin123"})
+    r = await ac.post(f"{BASE}/auth/login",
+                      data={"username": "admin@example.com", "password": "admin123"})
     if r.status_code != 200:
         pytest.skip("admin login failed")
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -391,11 +586,9 @@ async def test_import_twse_invalid_apply_mode(ac):
     cr = await ac.post(f"{BASE}/reports",
                        json={"borrower_name": "TWImportTest", "industry": "marine"},
                        headers=hdrs)
-    assert cr.status_code in (200, 201)
     rid = cr.json()["id"]
     r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
-                      json={"stock_code": "2603", "apply_mode": "bad_mode"},
-                      headers=hdrs)
+                      json={"stock_code": "2603", "apply_mode": "bad_mode"}, headers=hdrs)
     assert r.status_code == 422
 
 
@@ -405,11 +598,22 @@ async def test_import_twse_invalid_section(ac):
     cr = await ac.post(f"{BASE}/reports",
                        json={"borrower_name": "TWImportTestSec", "industry": "marine"},
                        headers=hdrs)
-    assert cr.status_code in (200, 201)
     rid = cr.json()["id"]
     r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
-                      json={"stock_code": "2603", "sections": [4, 99]},
-                      headers=hdrs)
+                      json={"stock_code": "2603", "sections": [4, 99]}, headers=hdrs)
+    assert r.status_code == 422
+    assert "99" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_import_twse_unsupported_section_2_rejected(ac):
+    hdrs = await _login(ac)
+    cr = await ac.post(f"{BASE}/reports",
+                       json={"borrower_name": "TWImportSec2", "industry": "marine"},
+                       headers=hdrs)
+    rid = cr.json()["id"]
+    r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
+                      json={"stock_code": "2603", "sections": [2]}, headers=hdrs)
     assert r.status_code == 422
 
 
@@ -417,16 +621,13 @@ async def test_import_twse_invalid_section(ac):
 async def test_import_twse_stock_not_found(ac):
     hdrs = await _login(ac)
     cr = await ac.post(f"{BASE}/reports",
-                       json={"borrower_name": "TWImportNotFound", "industry": "marine"},
+                       json={"borrower_name": "TWImportNF", "industry": "marine"},
                        headers=hdrs)
-    assert cr.status_code in (200, 201)
     rid = cr.json()["id"]
-
     with patch("credit_report.api.twse_importer.fetch_twse_company",
                new=AsyncMock(return_value=None)):
         r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
                           json={"stock_code": "9999"}, headers=hdrs)
-
     assert r.status_code == 200
     body = r.json()
     assert body["not_found"] is True
@@ -434,27 +635,103 @@ async def test_import_twse_stock_not_found(ac):
 
 
 @pytest.mark.asyncio
-async def test_import_twse_success_writes_sections(ac):
+async def test_import_twse_sections_1_3_4_5_7_success(ac):
+    """Importing all supported sections writes fields across §1/§3/§4/§5/§7."""
     hdrs = await _login(ac)
     cr = await ac.post(f"{BASE}/reports",
-                       json={"borrower_name": "TWImportSuccess", "industry": "marine"},
+                       json={"borrower_name": "TWImportAll", "industry": "marine"},
                        headers=hdrs)
-    assert cr.status_code in (200, 201)
     rid = cr.json()["id"]
-
     with patch("credit_report.api.twse_importer.fetch_twse_company",
                new=AsyncMock(return_value=_SAMPLE_DATA)):
         r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
-                          json={"stock_code": "2603", "apply_mode": "overwrite", "sections": [4, 7]},
+                          json={"stock_code": "2603", "apply_mode": "overwrite",
+                                "sections": [1, 3, 4, 5, 7]},
                           headers=hdrs)
-
     assert r.status_code == 200
     body = r.json()
     assert body["not_found"] is False
     assert body["company_name"] == "長榮海運"
     assert body["fields_written"] > 0
-    assert 4 in body["sections_updated"]
-    assert 7 in body["sections_updated"]
+    updated = set(body["sections_updated"])
+    assert updated == {1, 3, 4, 5, 7}
+
+
+@pytest.mark.asyncio
+async def test_import_twse_default_sections_are_4_and_7(ac):
+    hdrs = await _login(ac)
+    cr = await ac.post(f"{BASE}/reports",
+                       json={"borrower_name": "TWImportDef", "industry": "marine"},
+                       headers=hdrs)
+    rid = cr.json()["id"]
+    with patch("credit_report.api.twse_importer.fetch_twse_company",
+               new=AsyncMock(return_value=_SAMPLE_DATA)):
+        r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
+                          json={"stock_code": "2603", "apply_mode": "overwrite"},
+                          headers=hdrs)
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body["sections_updated"]) == {4, 7}
+
+
+@pytest.mark.asyncio
+async def test_import_twse_section4_writes_registration_number(ac):
+    """Verify the new tax_id → registration_number field is written to §4."""
+    hdrs = await _login(ac)
+    cr = await ac.post(f"{BASE}/reports",
+                       json={"borrower_name": "TWTaxId", "industry": "marine"},
+                       headers=hdrs)
+    rid = cr.json()["id"]
+    with patch("credit_report.api.twse_importer.fetch_twse_company",
+               new=AsyncMock(return_value=_SAMPLE_DATA)):
+        await ac.post(f"{BASE}/reports/{rid}/import-twse",
+                      json={"stock_code": "2603", "apply_mode": "overwrite",
+                            "sections": [4]},
+                      headers=hdrs)
+    si = await ac.get(f"{BASE}/reports/{rid}/inputs/4", headers=hdrs)
+    ij = si.json()["input_json"]
+    assert ij["4A_borrower"]["registration_number"] == "11111111"
+
+
+@pytest.mark.asyncio
+async def test_import_twse_section4_writes_shareholders(ac):
+    """Verify major shareholders from t187ap02_L populate §4B."""
+    hdrs = await _login(ac)
+    cr = await ac.post(f"{BASE}/reports",
+                       json={"borrower_name": "TWShareholders", "industry": "marine"},
+                       headers=hdrs)
+    rid = cr.json()["id"]
+    with patch("credit_report.api.twse_importer.fetch_twse_company",
+               new=AsyncMock(return_value=_SAMPLE_DATA)):
+        await ac.post(f"{BASE}/reports/{rid}/import-twse",
+                      json={"stock_code": "2603", "apply_mode": "overwrite",
+                            "sections": [4]},
+                      headers=hdrs)
+    si = await ac.get(f"{BASE}/reports/{rid}/inputs/4", headers=hdrs)
+    ij = si.json()["input_json"]
+    sh = ij["4B_ownership"]["shareholders"]
+    assert isinstance(sh, list) and len(sh) == 2
+    assert any("長榮國際" in s for s in sh)
+
+
+@pytest.mark.asyncio
+async def test_import_twse_section5_writes_responsible_person(ac):
+    """Verify chairman from board data populates §5G responsible person."""
+    hdrs = await _login(ac)
+    cr = await ac.post(f"{BASE}/reports",
+                       json={"borrower_name": "TWResPerson", "industry": "marine"},
+                       headers=hdrs)
+    rid = cr.json()["id"]
+    with patch("credit_report.api.twse_importer.fetch_twse_company",
+               new=AsyncMock(return_value=_SAMPLE_DATA)):
+        await ac.post(f"{BASE}/reports/{rid}/import-twse",
+                      json={"stock_code": "2603", "apply_mode": "overwrite",
+                            "sections": [5]},
+                      headers=hdrs)
+    si = await ac.get(f"{BASE}/reports/{rid}/inputs/5", headers=hdrs)
+    ij = si.json()["input_json"]
+    assert ij["5G_responsible_person"]["name"] == "張衍義"
+    assert "Chairman" in ij["5G_responsible_person"]["title"]
 
 
 @pytest.mark.asyncio
@@ -463,31 +740,21 @@ async def test_import_twse_only_empty_skips_filled(ac):
     cr = await ac.post(f"{BASE}/reports",
                        json={"borrower_name": "TWOnlyEmpty", "industry": "marine"},
                        headers=hdrs)
-    assert cr.status_code in (200, 201)
     rid = cr.json()["id"]
-
-    # Pre-fill §4 with a value
-    await ac.put(
-        f"{BASE}/reports/{rid}/inputs/4",
-        json={"section_no": 4, "input_json": {"4A_borrower": {"company_name_zh": "已填寫"}}},
-        headers=hdrs,
-    )
-
+    await ac.put(f"{BASE}/reports/{rid}/inputs/4",
+                 json={"section_no": 4, "input_json": {
+                     "4A_borrower": {"company_name_zh": "已填寫"}}},
+                 headers=hdrs)
     with patch("credit_report.api.twse_importer.fetch_twse_company",
                new=AsyncMock(return_value=_SAMPLE_DATA)):
         r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
-                          json={"stock_code": "2603", "apply_mode": "only_empty", "sections": [4]},
+                          json={"stock_code": "2603", "apply_mode": "only_empty",
+                                "sections": [4]},
                           headers=hdrs)
-
     assert r.status_code == 200
-    body = r.json()
-    # The one pre-filled field should be skipped
-    assert body["fields_skipped"] >= 1
-
-    # Verify the original value is preserved
-    si_r = await ac.get(f"{BASE}/reports/{rid}/inputs/4", headers=hdrs)
-    assert si_r.status_code == 200
-    assert si_r.json()["input_json"]["4A_borrower"]["company_name_zh"] == "已填寫"
+    assert r.json()["fields_skipped"] >= 1
+    si = await ac.get(f"{BASE}/reports/{rid}/inputs/4", headers=hdrs)
+    assert si.json()["input_json"]["4A_borrower"]["company_name_zh"] == "已填寫"
 
 
 @pytest.mark.asyncio
@@ -496,39 +763,13 @@ async def test_import_twse_approved_report_returns_409(ac):
     cr = await ac.post(f"{BASE}/reports",
                        json={"borrower_name": "TWApproved409", "industry": "marine"},
                        headers=hdrs)
-    assert cr.status_code in (200, 201)
     rid = cr.json()["id"]
-
-    # Force to approved state via admin status-patch endpoint
     r_upd = await ac.patch(f"{BASE}/reports/{rid}/status",
                            json={"status": "approved"}, headers=hdrs)
     if r_upd.status_code not in (200, 201):
         pytest.skip("Cannot set approved status in test environment")
-
     with patch("credit_report.api.twse_importer.fetch_twse_company",
                new=AsyncMock(return_value=_SAMPLE_DATA)):
         r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
                           json={"stock_code": "2603"}, headers=hdrs)
-
     assert r.status_code == 409
-
-
-@pytest.mark.asyncio
-async def test_import_twse_section4_only(ac):
-    hdrs = await _login(ac)
-    cr = await ac.post(f"{BASE}/reports",
-                       json={"borrower_name": "TWSection4Only", "industry": "marine"},
-                       headers=hdrs)
-    assert cr.status_code in (200, 201)
-    rid = cr.json()["id"]
-
-    with patch("credit_report.api.twse_importer.fetch_twse_company",
-               new=AsyncMock(return_value=_SAMPLE_DATA)):
-        r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
-                          json={"stock_code": "2603", "sections": [4]},
-                          headers=hdrs)
-
-    assert r.status_code == 200
-    body = r.json()
-    assert 4 in body["sections_updated"]
-    assert 7 not in body["sections_updated"]

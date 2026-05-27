@@ -1781,8 +1781,8 @@ async def auto_fetch_documents(
 
 class TWSEImportRequest(BaseModel):
     stock_code: str
-    apply_mode: str = "only_empty"   # "only_empty" | "overwrite"
-    sections: list[int] = [4, 7]     # which sections to fill; currently 4 and/or 7
+    apply_mode: str = "only_empty"       # "only_empty" | "overwrite"
+    sections: list[int] = [4, 7]         # §1, §3, §4, §5, §7 supported
 
 
 class TWSEImportResult(BaseModel):
@@ -1801,25 +1801,29 @@ async def import_twse_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
-    """Fetch company data from TWSE OpenAPI and merge into §4 / §7 SectionInputs."""
+    """Fetch company data from TWSE OpenAPI and merge into SectionInputs for §1/§3/§4/§5/§7."""
     import json as _json
     import uuid as _uuid
     from datetime import datetime, timezone
 
     from credit_report.api.twse_importer import (
+        SUPPORTED_SECTIONS,
         apply_field_mapping,
         fetch_twse_company,
-        map_to_section4,
-        map_to_section7_metadata,
+        map_to_section,
     )
 
     if payload.apply_mode not in ("only_empty", "overwrite"):
         raise HTTPException(status_code=422, detail="apply_mode must be 'only_empty' or 'overwrite'")
     if not payload.stock_code.strip():
         raise HTTPException(status_code=422, detail="stock_code is required")
-    invalid_secs = [s for s in payload.sections if s not in (4, 7)]
+    invalid_secs = [s for s in payload.sections if s not in SUPPORTED_SECTIONS]
     if invalid_secs:
-        raise HTTPException(status_code=422, detail=f"Unsupported sections: {invalid_secs}. Only 4 and 7 are supported.")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sections {invalid_secs} have no TWSE data. "
+                   f"Supported: {sorted(SUPPORTED_SECTIONS)}",
+        )
 
     result = await db.execute(
         select(Report).where(Report.id == report_id, Report.is_deleted == False)
@@ -1842,11 +1846,10 @@ async def import_twse_data(
             not_found=True,
         )
 
-    section_maps: dict[int, dict] = {}
-    if 4 in payload.sections:
-        section_maps[4] = map_to_section4(twse_data)
-    if 7 in payload.sections:
-        section_maps[7] = map_to_section7_metadata(twse_data)
+    section_maps: dict[int, dict] = {
+        sec_no: map_to_section(sec_no, twse_data)
+        for sec_no in payload.sections
+    }
 
     total_written = 0
     total_skipped = 0

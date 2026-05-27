@@ -406,18 +406,19 @@ document.getElementById("twseImportBtn").addEventListener("click", async () => {
   const btn      = document.getElementById("twseImportBtn");
   const statusEl = document.getElementById("twseStatus");
 
-  const rid        = document.getElementById("reportId").value.trim();
-  const stockCode  = document.getElementById("twseStockCode").value.trim();
-  const applyMode  = document.getElementById("twseApplyMode").value;
-  const sec4       = document.getElementById("twseSec4").checked;
-  const sec7       = document.getElementById("twseSec7").checked;
+  const rid       = document.getElementById("reportId").value.trim();
+  const stockCode = document.getElementById("twseStockCode").value.trim();
+  const applyMode = document.getElementById("twseApplyMode").value;
 
   if (!rid) { statusEl.textContent = "⚠ 請先在 Automate 面板選擇報告"; return; }
   if (!stockCode) { statusEl.textContent = "⚠ 請輸入股票代號"; return; }
 
   const sections = [];
-  if (sec4) sections.push(4);
-  if (sec7) sections.push(7);
+  if (document.getElementById("twseSec1").checked) sections.push(1);
+  if (document.getElementById("twseSec3").checked) sections.push(3);
+  if (document.getElementById("twseSec4").checked) sections.push(4);
+  if (document.getElementById("twseSec5").checked) sections.push(5);
+  if (document.getElementById("twseSec7").checked) sections.push(7);
   if (!sections.length) { statusEl.textContent = "⚠ 請至少勾選一個段落"; return; }
 
   const { baseUrl, jwt } = await chrome.storage.local.get(["baseUrl", "jwt"]);
