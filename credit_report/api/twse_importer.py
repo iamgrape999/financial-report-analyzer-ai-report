@@ -10,11 +10,11 @@ APIs used (no auth, public JSON):
   t187ap03_P  — OTC/public companies: same schema as t187ap03_L (fallback)
   t187ap02_L  — major shareholders holding >10% of listed companies
   t187ap11_L  — board / supervisor shareholding detail (title, name, shares, pledge)
+  t187ap04_L  — daily material news (Phase 2: material event risk for §4G)
+  t21sc03_1   — monthly revenue for listed companies (Phase 2: §7 income_statement)
+  t21sc03_2   — monthly revenue for OTC companies (Phase 2: §7 fallback)
 
-All four return full arrays; we filter client-side by 公司代號 == stock_code.
-
-NOTE: t187ap04_L is 上市公司每日重大訊息 (daily material news) — NOT company
-data.  Earlier drafts mistakenly used it; this version does not.
+All arrays are filtered client-side by 公司代號 == stock_code.
 """
 from __future__ import annotations
 
@@ -36,6 +36,16 @@ _TWSE_COMPANY_P_URL    = "https://openapi.twse.com.tw/v1/opendata/t187ap03_P"
 _TWSE_SHAREHOLDERS_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap02_L"
 _TWSE_BOARD_URL        = "https://openapi.twse.com.tw/v1/opendata/t187ap11_L"
 
+# ── Phase 2 additions ─────────────────────────────────────────────────────────
+
+# t187ap04_L: 上市公司每日重大訊息 (daily material news)
+_TWSE_MATERIAL_NEWS_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap04_L"
+
+# Monthly revenue — listed companies (every month, all companies, filter client-side)
+# Run scripts/twse_swagger_parser.py to verify this path:
+_TWSE_MONTHLY_REVENUE_L_URL = "https://openapi.twse.com.tw/v1/opendata/t21sc03_1"
+_TWSE_MONTHLY_REVENUE_P_URL = "https://openapi.twse.com.tw/v1/opendata/t21sc03_2"
+
 # Sections for which TWSE provides meaningful auto-fill data
 SUPPORTED_SECTIONS: frozenset[int] = frozenset({1, 3, 4, 5, 7})
 
@@ -49,6 +59,28 @@ _HEADERS = {
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
+
+@dataclass
+class MaterialNewsItem:
+    """One row from t187ap04_L — material news for a listed company."""
+    date: str = ""          # 出表日期
+    subject: str = ""       # 主旨
+    clause: str = ""        # 符合條款
+    fact_date: str = ""     # 事實發生日
+    description: str = ""   # 說明 (may be long)
+    risk_category: str = "" # classified by _classify_news_risk()
+
+
+@dataclass
+class MonthlyRevenue:
+    """One month row from t21sc03_1 — monthly revenue for a listed company."""
+    year_month: str = ""         # 資料年月 e.g. "11412" (ROC 114 year, month 12)
+    revenue_k_ntd: float = 0.0   # 當月營收 (unit: thousands NT$)
+    mom_pct: float = 0.0         # 上月比較增減%
+    yoy_pct: float = 0.0         # 去年同月增減%
+    ytd_revenue_k_ntd: float = 0.0  # 當月累計營收 (thousands NT$)
+    ytd_yoy_pct: float = 0.0     # 前期比較增減%
+
 
 @dataclass
 class BoardMember:
@@ -101,8 +133,61 @@ class TWSECompanyData:
     # ── From t187ap11_L ──────────────────────────────────────────────────────
     board_members: list[BoardMember] = field(default_factory=list)
 
+    # ── From t187ap04_L ──────────────────────────────────────────────────────
+    material_news: list[MaterialNewsItem] = field(default_factory=list)   # newest first, up to 10
+
+    # ── From t21sc03_1 / t21sc03_2 ───────────────────────────────────────────
+    monthly_revenues: list[MonthlyRevenue] = field(default_factory=list)  # newest first, up to 24
+
     # ── Raw ──────────────────────────────────────────────────────────────────
     raw: dict = field(default_factory=dict, repr=False)
+
+
+# ── Material news risk classifier ─────────────────────────────────────────────
+
+_NEWS_RISK_KEYWORDS: dict[str, str] = {
+    "財務": "financial",
+    "訴訟": "litigation",
+    "重大投資": "major_investment",
+    "處分": "asset_disposal",
+    "背書保證": "guarantee",
+    "資金貸與": "intercompany_lending",
+    "解散": "dissolution",
+    "停業": "suspension",
+    "破產": "bankruptcy",
+    "重整": "reorganization",
+    "掏空": "embezzlement",
+    "內線": "insider_trading",
+    "違約": "default",
+}
+
+
+def _classify_news_risk(subject: str, clause: str) -> str:
+    combined = (subject or "") + " " + (clause or "")
+    for kw, category in _NEWS_RISK_KEYWORDS.items():
+        if kw in combined:
+            return category
+    return "general"
+
+
+# ── ROC date helper ────────────────────────────────────────────────────────────
+
+def _roc_year_month_to_gregorian(roc_ym: str) -> tuple[int, int]:
+    """Convert ROC year-month string (e.g. '11412') to (2025, 12).
+    ROC 114 = AD 2025; ROC year + 1911 = Gregorian year."""
+    s = str(roc_ym).strip()
+    try:
+        if len(s) == 5:   # YYYMMM → actually YYMM? No: 3-digit ROC + 2-digit month
+            roc_y = int(s[:3])
+            month = int(s[3:])
+        elif len(s) == 6:  # YYYYMM
+            roc_y = int(s[:4])
+            month = int(s[4:])
+        else:
+            return (0, 0)
+        return (roc_y + 1911, month)
+    except (ValueError, IndexError):
+        return (0, 0)
 
 
 # ── Date helper ───────────────────────────────────────────────────────────────
@@ -169,9 +254,16 @@ async def fetch_twse_company(stock_code: str) -> TWSECompanyData | None:
         company_p_task    = asyncio.create_task(_fetch_json(client, _TWSE_COMPANY_P_URL))
         shareholders_task = asyncio.create_task(_fetch_json(client, _TWSE_SHAREHOLDERS_URL))
         board_task        = asyncio.create_task(_fetch_json(client, _TWSE_BOARD_URL))
+        news_task         = asyncio.create_task(_fetch_json(client, _TWSE_MATERIAL_NEWS_URL))
+        rev_l_task        = asyncio.create_task(_fetch_json(client, _TWSE_MONTHLY_REVENUE_L_URL))
+        rev_p_task        = asyncio.create_task(_fetch_json(client, _TWSE_MONTHLY_REVENUE_P_URL))
 
-        company_l_rows, company_p_rows, sh_rows, board_rows = await asyncio.gather(
-            company_l_task, company_p_task, shareholders_task, board_task
+        (
+            company_l_rows, company_p_rows, sh_rows, board_rows,
+            news_rows, rev_l_rows, rev_p_rows,
+        ) = await asyncio.gather(
+            company_l_task, company_p_task, shareholders_task, board_task,
+            news_task, rev_l_task, rev_p_task,
         )
 
     # Prefer listed (L) over OTC (P)
@@ -208,6 +300,42 @@ async def fetch_twse_company(stock_code: str) -> TWSECompanyData | None:
         if r.get("姓名", "").strip()
     ]
 
+    # ── Phase 2: material news ────────────────────────────────────────────────
+    raw_news = _find_all(news_rows, stock_code)
+    material_news = []
+    for row in raw_news[:10]:  # cap at 10 most recent
+        material_news.append(MaterialNewsItem(
+            date        = row.get("出表日期", "").strip(),
+            subject     = row.get("主旨", "").strip(),
+            clause      = row.get("符合條款", "").strip(),
+            fact_date   = row.get("事實發生日", "").strip(),
+            description = row.get("說明", "").strip(),
+            risk_category = _classify_news_risk(
+                row.get("主旨", ""), row.get("符合條款", "")
+            ),
+        ))
+
+    # ── Phase 2: monthly revenue ──────────────────────────────────────────────
+    def _safe_float(val: str) -> float:
+        try:
+            return float(str(val).replace(",", "").strip())
+        except (ValueError, TypeError):
+            return 0.0
+
+    rev_rows = _find_all(rev_l_rows, stock_code)
+    if not rev_rows:
+        rev_rows = _find_all(rev_p_rows, stock_code)  # OTC fallback
+    monthly_revenues = []
+    for row in rev_rows[:24]:  # up to 24 months
+        monthly_revenues.append(MonthlyRevenue(
+            year_month        = row.get("資料年月", "").strip(),
+            revenue_k_ntd     = _safe_float(row.get("當月營收", 0)),
+            mom_pct           = _safe_float(row.get("上月比較增減%", 0)),
+            yoy_pct           = _safe_float(row.get("去年同月增減%", 0)),
+            ytd_revenue_k_ntd = _safe_float(row.get("當月累計營收", 0)),
+            ytd_yoy_pct       = _safe_float(row.get("前期比較增減%", 0)),
+        ))
+
     return TWSECompanyData(
         stock_code=stock_code,
         company_name_zh        = company_row.get("公司名稱", "").strip(),
@@ -240,6 +368,8 @@ async def fetch_twse_company(stock_code: str) -> TWSECompanyData | None:
         financial_report_type  = company_row.get("財務報告書類型", "").strip(),
         major_shareholders     = major_shareholders,
         board_members          = board_members,
+        material_news          = material_news,
+        monthly_revenues       = monthly_revenues,
         raw                    = {"company": company_row, "shareholders": _find_all(sh_rows, stock_code), "board": board_data},
     )
 
@@ -429,6 +559,84 @@ def map_to_section7_metadata(data: TWSECompanyData) -> dict[str, Any]:
     return mapping
 
 
+def map_to_section7_financials(data: TWSECompanyData) -> dict[str, Any]:
+    """
+    §7 — Map monthly revenue trend to 7A income_statement per fiscal year.
+
+    Groups monthly_revenues by Gregorian year, sums annual revenue,
+    and writes FY{year} keys compatible with section_7.yaml iterate_path format.
+    Units: NTD million (input is NTD thousands, divide by 1000).
+    """
+    if not data.monthly_revenues:
+        return {}
+
+    mapping: dict[str, Any] = {}
+
+    def _put(path: str, value: Any) -> None:
+        if value is not None and value != "":
+            mapping[path] = value
+
+    # Group by Gregorian year
+    from collections import defaultdict
+    year_months: dict[int, list[MonthlyRevenue]] = defaultdict(list)
+    for rev in data.monthly_revenues:
+        yr, mo = _roc_year_month_to_gregorian(rev.year_month)
+        if yr > 2000:
+            year_months[yr].append(rev)
+
+    for year, months in sorted(year_months.items()):
+        fy_key = f"FY{year}"
+        # Annual revenue = sum of all available months for that year (in NTD millions)
+        annual_revenue_m = round(sum(r.revenue_k_ntd for r in months) / 1000.0, 1)
+        if annual_revenue_m > 0:
+            _put(f"7A_borrower_financials.income_statement.{fy_key}.revenue", annual_revenue_m)
+
+        # Most recent month's YoY for the full year estimate
+        if len(months) == 12:
+            # Full year: use the December (last month) YTD values
+            dec = max(months, key=lambda r: int(r.year_month[-2:]) if r.year_month else 0)
+            if dec.ytd_yoy_pct != 0:
+                _put(f"7A_borrower_financials.income_statement.{fy_key}.revenue_yoy_pct",
+                     round(dec.ytd_yoy_pct, 1))
+        elif months:
+            # Partial year: use the latest month's YTD YoY
+            latest = months[-1]
+            if latest.ytd_yoy_pct != 0:
+                _put(f"7A_borrower_financials.income_statement.{fy_key}.revenue_yoy_pct",
+                     round(latest.ytd_yoy_pct, 1))
+
+    return mapping
+
+
+def map_to_section4_event_risk(data: TWSECompanyData) -> dict[str, Any]:
+    """
+    §4 — Populate 4G_risk_events from material news (t187ap04_L).
+
+    Surfaces up to 5 high-risk news items as structured event flags.
+    The analyst sees pre-populated risk event summaries in §4G.
+    """
+    if not data.material_news:
+        return {}
+
+    mapping: dict[str, Any] = {}
+
+    high_risk = [n for n in data.material_news if n.risk_category != "general"]
+    all_news   = high_risk or data.material_news[:5]
+
+    if all_news:
+        mapping["4G_risk_events.has_material_news"] = True
+        mapping["4G_risk_events.news_count_90d"] = len(data.material_news)
+        mapping["4G_risk_events.high_risk_categories"] = list(
+            {n.risk_category for n in high_risk}
+        )
+        mapping["4G_risk_events.latest_news_summary"] = "; ".join(
+            f"[{n.date}] {n.subject}"
+            for n in all_news[:3]
+        )
+
+    return mapping
+
+
 # ── Section dispatch ──────────────────────────────────────────────────────────
 
 def map_to_section(section_no: int, data: TWSECompanyData) -> dict[str, Any]:
@@ -436,9 +644,9 @@ def map_to_section(section_no: int, data: TWSECompanyData) -> dict[str, Any]:
     dispatch = {
         1: map_to_section1,
         3: map_to_section3,
-        4: map_to_section4,
+        4: lambda d: {**map_to_section4(d), **map_to_section4_event_risk(d)},
         5: map_to_section5,
-        7: map_to_section7_metadata,
+        7: lambda d: {**map_to_section7_metadata(d), **map_to_section7_financials(d)},
     }
     fn = dispatch.get(section_no)
     return fn(data) if fn else {}

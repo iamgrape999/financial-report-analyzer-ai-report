@@ -773,3 +773,198 @@ async def test_import_twse_approved_report_returns_409(ac):
         r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
                           json={"stock_code": "2603"}, headers=hdrs)
     assert r.status_code == 409
+
+
+# ── Phase 2 tests ─────────────────────────────────────────────────────────────
+
+# ── Phase 2: Material news classification ─────────────────────────────────────
+
+def test_classify_news_financial_risk():
+    from credit_report.api.twse_importer import _classify_news_risk
+    assert _classify_news_risk("財務重大事項", "財務") == "financial"
+
+
+def test_classify_news_litigation():
+    from credit_report.api.twse_importer import _classify_news_risk
+    assert _classify_news_risk("訴訟案件", "訴訟") == "litigation"
+
+
+def test_classify_news_general():
+    from credit_report.api.twse_importer import _classify_news_risk
+    assert _classify_news_risk("公告事項", "其他") == "general"
+
+
+def test_classify_news_guarantee():
+    from credit_report.api.twse_importer import _classify_news_risk
+    assert _classify_news_risk("背書保證事項", "") == "guarantee"
+
+
+# ── Phase 2: ROC date parsing ─────────────────────────────────────────────────
+
+def test_roc_ym_5digit_dec2025():
+    from credit_report.api.twse_importer import _roc_year_month_to_gregorian
+    assert _roc_year_month_to_gregorian("11412") == (2025, 12)
+
+
+def test_roc_ym_jan2025():
+    from credit_report.api.twse_importer import _roc_year_month_to_gregorian
+    yr, mo = _roc_year_month_to_gregorian("11401")
+    assert yr == 2025 and mo == 1
+
+
+def test_roc_ym_invalid_empty():
+    from credit_report.api.twse_importer import _roc_year_month_to_gregorian
+    assert _roc_year_month_to_gregorian("") == (0, 0)
+
+
+def test_roc_ym_invalid_str():
+    from credit_report.api.twse_importer import _roc_year_month_to_gregorian
+    assert _roc_year_month_to_gregorian("abc") == (0, 0)
+
+
+# ── Phase 2: MonthlyRevenue dataclass ─────────────────────────────────────────
+
+def test_monthly_revenue_defaults():
+    from credit_report.api.twse_importer import MonthlyRevenue
+    rev = MonthlyRevenue(year_month="11412", revenue_k_ntd=123456.0, yoy_pct=5.2)
+    assert rev.year_month == "11412"
+    assert rev.revenue_k_ntd == 123456.0
+    assert rev.mom_pct == 0.0
+
+
+# ── Phase 2: MaterialNewsItem dataclass ───────────────────────────────────────
+
+def test_material_news_item_defaults():
+    from credit_report.api.twse_importer import MaterialNewsItem
+    item = MaterialNewsItem(subject="重大消息", risk_category="financial")
+    assert item.subject == "重大消息"
+    assert item.date == ""
+
+
+# ── Phase 2: map_to_section7_financials ───────────────────────────────────────
+
+def test_section7_financials_maps_revenue():
+    from credit_report.api.twse_importer import (
+        TWSECompanyData, MonthlyRevenue, map_to_section7_financials,
+    )
+    # 12 months of FY2024 data (ROC 113); year_month is 5 chars: "11301"–"11312"
+    revs = [
+        MonthlyRevenue(
+            year_month=f"113{m:02d}",
+            revenue_k_ntd=10_000_000.0,
+            ytd_revenue_k_ntd=m * 10_000_000.0,
+            ytd_yoy_pct=5.0,
+        )
+        for m in range(1, 13)
+    ]
+    data = TWSECompanyData(
+        stock_code="2603",
+        company_name_zh="長榮海運",
+        monthly_revenues=revs,
+    )
+    result = map_to_section7_financials(data)
+    # 12 months × 10,000,000 thousands = 120,000,000 thousands = 120,000 NTD million
+    assert "7A_borrower_financials.income_statement.FY2024.revenue" in result
+    assert result["7A_borrower_financials.income_statement.FY2024.revenue"] == 120_000.0
+
+
+def test_section7_financials_empty_returns_empty():
+    from credit_report.api.twse_importer import TWSECompanyData, map_to_section7_financials
+    data = TWSECompanyData(stock_code="2603", company_name_zh="長榮海運")
+    result = map_to_section7_financials(data)
+    # No revenue data — should return empty dict
+    assert not any("income_statement" in k for k in result)
+    assert result == {}
+
+
+# ── Phase 2: map_to_section4_event_risk ───────────────────────────────────────
+
+def test_section4_event_risk_populated():
+    from credit_report.api.twse_importer import (
+        TWSECompanyData, MaterialNewsItem, map_to_section4_event_risk,
+    )
+    news = [
+        MaterialNewsItem(date="20250101", subject="重大訴訟", clause="訴訟", risk_category="litigation"),
+        MaterialNewsItem(date="20250110", subject="背書保證事項", clause="背書保證", risk_category="guarantee"),
+    ]
+    data = TWSECompanyData(stock_code="2603", company_name_zh="長榮", material_news=news)
+    result = map_to_section4_event_risk(data)
+    assert result["4G_risk_events.has_material_news"] is True
+    assert result["4G_risk_events.news_count_90d"] == 2
+    assert "litigation" in result["4G_risk_events.high_risk_categories"]
+
+
+def test_section4_event_risk_empty_news():
+    from credit_report.api.twse_importer import TWSECompanyData, map_to_section4_event_risk
+    data = TWSECompanyData(stock_code="2603")
+    assert map_to_section4_event_risk(data) == {}
+
+
+# ── Phase 2: updated map_to_section dispatch ──────────────────────────────────
+
+def test_map_to_section7_includes_financials_when_revenue_present():
+    from credit_report.api.twse_importer import (
+        TWSECompanyData, MonthlyRevenue, map_to_section,
+    )
+    revs = [MonthlyRevenue(year_month="11312", revenue_k_ntd=5_000_000.0)]
+    data = TWSECompanyData(stock_code="2603", company_name_zh="長榮", monthly_revenues=revs)
+    result = map_to_section(7, data)
+    # Metadata keys still present
+    assert "7A_borrower_financials.reporting_currency" in result
+    # Revenue key added by map_to_section7_financials
+    assert "7A_borrower_financials.income_statement.FY2024.revenue" in result
+
+
+def test_map_to_section4_includes_event_risk():
+    from credit_report.api.twse_importer import (
+        TWSECompanyData, MaterialNewsItem, map_to_section,
+    )
+    news = [MaterialNewsItem(date="20250101", subject="訴訟", clause="訴訟", risk_category="litigation")]
+    data = TWSECompanyData(stock_code="2603", company_name_zh="長榮", material_news=news)
+    result = map_to_section(4, data)
+    # Basic §4A key still present
+    assert "4A_borrower.company_name_zh" in result
+    # Event risk key added by map_to_section4_event_risk
+    assert "4G_risk_events.has_material_news" in result
+
+
+# ── Phase 2: fetch_twse_company integration (material news + monthly revenue) ─
+
+@pytest.mark.asyncio
+async def test_fetch_twse_company_includes_material_news():
+    """fetch_twse_company() should populate material_news from t187ap04_L."""
+    from credit_report.api.twse_importer import fetch_twse_company
+
+    _NEWS = [{"公司代號": "2603", "主旨": "重大訴訟", "符合條款": "訴訟",
+              "出表日期": "20250101", "事實發生日": "20250101", "說明": "訴訟詳情"}]
+    _REVS = [{"公司代號": "2603", "資料年月": "11312", "當月營收": "50000000",
+              "上月比較增減%": "5", "去年同月增減%": "10",
+              "當月累計營收": "500000000", "前期比較增減%": "8"}]
+
+    async def mock_get(url, **kwargs):
+        class R:
+            def raise_for_status(self): pass
+            def json(self):
+                if "t187ap03_L" in url:   return [_SAMPLE_COMPANY]
+                if "t187ap03_P" in url:   return []
+                if "t187ap02_L" in url:   return _SAMPLE_SHAREHOLDERS
+                if "t187ap11_L" in url:   return _SAMPLE_BOARD
+                if "t187ap04_L" in url:   return _NEWS
+                if "t21sc03_1"  in url:   return _REVS
+                if "t21sc03_2"  in url:   return []
+                return []
+        return R()
+
+    with patch("httpx.AsyncClient") as mock_cls:
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=None)
+        mc.get = mock_get
+        mock_cls.return_value = mc
+        result = await fetch_twse_company("2603")
+
+    assert result is not None
+    assert len(result.material_news) == 1
+    assert result.material_news[0].risk_category == "litigation"
+    assert len(result.monthly_revenues) == 1
+    assert result.monthly_revenues[0].revenue_k_ntd == 50_000_000.0
