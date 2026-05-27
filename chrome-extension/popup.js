@@ -419,6 +419,7 @@ document.getElementById("twseImportBtn").addEventListener("click", async () => {
   if (document.getElementById("twseSec4").checked) sections.push(4);
   if (document.getElementById("twseSec5").checked) sections.push(5);
   if (document.getElementById("twseSec7").checked) sections.push(7);
+  if (document.getElementById("twseSec9").checked) sections.push(9);
   if (!sections.length) { statusEl.textContent = "⚠ 請至少勾選一個段落"; return; }
 
   const { baseUrl, jwt } = await chrome.storage.local.get(["baseUrl", "jwt"]);

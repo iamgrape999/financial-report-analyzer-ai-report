@@ -1782,7 +1782,7 @@ async def auto_fetch_documents(
 class TWSEImportRequest(BaseModel):
     stock_code: str
     apply_mode: str = "only_empty"       # "only_empty" | "overwrite"
-    sections: list[int] = [4, 7]         # §1, §3, §4, §5, §7 supported
+    sections: list[int] = [4, 7]         # §1, §3, §4, §5, §7, §9 supported
 
 
 class TWSEImportResult(BaseModel):
@@ -1801,7 +1801,7 @@ async def import_twse_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
-    """Fetch company data from TWSE OpenAPI and merge into SectionInputs for §1/§3/§4/§5/§7."""
+    """Fetch company data from TWSE OpenAPI and merge into SectionInputs for §1/§3/§4/§5/§7/§9."""
     import json as _json
     import uuid as _uuid
     from datetime import datetime, timezone

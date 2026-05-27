@@ -370,7 +370,13 @@ async def fetch_twse_company(stock_code: str) -> TWSECompanyData | None:
         board_members          = board_members,
         material_news          = material_news,
         monthly_revenues       = monthly_revenues,
-        raw                    = {"company": company_row, "shareholders": _find_all(sh_rows, stock_code), "board": board_data},
+        raw                    = {
+            "company": company_row,
+            "shareholders": _find_all(sh_rows, stock_code),
+            "board": board_data,
+            "material_news": raw_news,
+            "monthly_revenues": rev_rows,
+        },
     )
 
 
@@ -385,10 +391,13 @@ def _paid_in_capital_ntd_bn(ntd: int) -> float | None:
 
 def _latest_ytd_revenue(data: TWSECompanyData) -> tuple[int, float]:
     """Return (gregorian_year, ytd_revenue_ntd_millions) from the most recent monthly row.
-    monthly_revenues[0] is the newest; ytd_revenue_k_ntd / 1000 = NTD millions."""
-    if not data.monthly_revenues:
+
+    Sorts by year_month DESC so we don't depend on TWSE API ordering;
+    ytd_revenue_k_ntd / 1000 = NTD millions."""
+    valid = [r for r in data.monthly_revenues if r.year_month]
+    if not valid:
         return (0, 0.0)
-    latest = data.monthly_revenues[0]
+    latest = max(valid, key=lambda r: r.year_month)
     yr, _ = _roc_year_month_to_gregorian(latest.year_month)
     if yr <= 0:
         return (0, 0.0)
@@ -614,6 +623,10 @@ def map_to_section7_financials(data: TWSECompanyData) -> dict[str, Any]:
         if yr > 2000:
             year_months[yr].append(rev)
 
+    def _month_int(r: MonthlyRevenue) -> int:
+        s = r.year_month
+        return int(s[-2:]) if s and s[-2:].isdigit() else 0
+
     for year, months in sorted(year_months.items()):
         fy_key = f"FY{year}"
         # Annual revenue = sum of all available months for that year (in NTD millions)
@@ -621,19 +634,12 @@ def map_to_section7_financials(data: TWSECompanyData) -> dict[str, Any]:
         if annual_revenue_m > 0:
             _put(f"7A_borrower_financials.income_statement.{fy_key}.revenue", annual_revenue_m)
 
-        # Most recent month's YoY for the full year estimate
-        if len(months) == 12:
-            # Full year: use the December (last month) YTD values
-            dec = max(months, key=lambda r: int(r.year_month[-2:]) if r.year_month else 0)
-            if dec.ytd_yoy_pct != 0:
-                _put(f"7A_borrower_financials.income_statement.{fy_key}.revenue_yoy_pct",
-                     round(dec.ytd_yoy_pct, 1))
-        elif months:
-            # Partial year: use the latest month's YTD YoY
-            latest = months[-1]
-            if latest.ytd_yoy_pct != 0:
-                _put(f"7A_borrower_financials.income_statement.{fy_key}.revenue_yoy_pct",
-                     round(latest.ytd_yoy_pct, 1))
+        # Use the latest available month's YTD YoY (full or partial year).
+        # Don't trust insertion order — TWSE API may return newest-first or oldest-first.
+        latest = max(months, key=_month_int)
+        if latest.ytd_yoy_pct != 0:
+            _put(f"7A_borrower_financials.income_statement.{fy_key}.revenue_yoy_pct",
+                 round(latest.ytd_yoy_pct, 1))
 
     return mapping
 
@@ -674,7 +680,8 @@ def map_to_section4_event_risk(data: TWSECompanyData) -> dict[str, Any]:
 
     if all_news:
         mapping["4G_risk_events.has_material_news"] = True
-        mapping["4G_risk_events.news_count_90d"] = len(data.material_news)
+        # t187ap04_L is a daily snapshot of today's filings, not a rolling 90d window.
+        mapping["4G_risk_events.news_count_recent"] = len(data.material_news)
         mapping["4G_risk_events.high_risk_categories"] = list(
             {n.risk_category for n in high_risk}
         )

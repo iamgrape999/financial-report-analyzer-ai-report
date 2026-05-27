@@ -893,7 +893,7 @@ def test_section4_event_risk_populated():
     data = TWSECompanyData(stock_code="2603", company_name_zh="長榮", material_news=news)
     result = map_to_section4_event_risk(data)
     assert result["4G_risk_events.has_material_news"] is True
-    assert result["4G_risk_events.news_count_90d"] == 2
+    assert result["4G_risk_events.news_count_recent"] == 2
     assert "litigation" in result["4G_risk_events.high_risk_categories"]
 
 
@@ -1128,6 +1128,124 @@ async def test_import_twse_sections_1_3_4_5_7_9_success(ac):
     body = r.json()
     assert body["not_found"] is False
     assert set(body["sections_updated"]) == {1, 3, 4, 5, 7, 9}
+
+
+# ── Phase 3 robustness: ordering-independent revenue + raw payload ───────────
+
+def test_latest_ytd_revenue_unordered_input():
+    """API may return monthly data in any order; helper must still pick the latest."""
+    revs = [
+        MonthlyRevenue(year_month="11301", ytd_revenue_k_ntd=10_000_000.0),
+        MonthlyRevenue(year_month="11312", ytd_revenue_k_ntd=120_000_000.0),
+        MonthlyRevenue(year_month="11306", ytd_revenue_k_ntd=60_000_000.0),
+    ]
+    data = TWSECompanyData(stock_code="2603", monthly_revenues=revs)
+    yr, m = _latest_ytd_revenue(data)
+    assert yr == 2024
+    assert m == pytest.approx(120_000.0)
+
+
+def test_latest_ytd_revenue_skips_blank_year_month():
+    revs = [
+        MonthlyRevenue(year_month="", ytd_revenue_k_ntd=999_000.0),
+        MonthlyRevenue(year_month="11312", ytd_revenue_k_ntd=120_000_000.0),
+    ]
+    data = TWSECompanyData(stock_code="2603", monthly_revenues=revs)
+    yr, m = _latest_ytd_revenue(data)
+    assert yr == 2024 and m == pytest.approx(120_000.0)
+
+
+def test_section7_financials_partial_year_uses_latest_month_yoy():
+    """Partial year (jan + jun + nov, unordered) must pick Nov's YTD YoY, not insertion order."""
+    from credit_report.api.twse_importer import map_to_section7_financials
+    revs = [
+        # Insertion order: oldest-first would have broken Phase 2 partial-year branch.
+        MonthlyRevenue(year_month="11301", revenue_k_ntd=10_000_000.0,
+                       ytd_revenue_k_ntd=10_000_000.0, ytd_yoy_pct=1.1),
+        MonthlyRevenue(year_month="11306", revenue_k_ntd=10_000_000.0,
+                       ytd_revenue_k_ntd=60_000_000.0, ytd_yoy_pct=3.3),
+        MonthlyRevenue(year_month="11311", revenue_k_ntd=10_000_000.0,
+                       ytd_revenue_k_ntd=110_000_000.0, ytd_yoy_pct=7.7),
+    ]
+    data = TWSECompanyData(stock_code="2603", monthly_revenues=revs)
+    result = map_to_section7_financials(data)
+    # Latest available month is Nov → ytd_yoy_pct = 7.7
+    assert result["7A_borrower_financials.income_statement.FY2024.revenue_yoy_pct"] == pytest.approx(7.7)
+
+
+def test_section7_financials_groups_multiple_years():
+    """Multiple Gregorian years must each produce their own FY{year} key."""
+    from credit_report.api.twse_importer import map_to_section7_financials
+    revs = [
+        MonthlyRevenue(year_month="11212", revenue_k_ntd=5_000_000.0),   # FY2023
+        MonthlyRevenue(year_month="11312", revenue_k_ntd=10_000_000.0),  # FY2024
+    ]
+    data = TWSECompanyData(stock_code="2603", monthly_revenues=revs)
+    result = map_to_section7_financials(data)
+    assert "7A_borrower_financials.income_statement.FY2023.revenue" in result
+    assert "7A_borrower_financials.income_statement.FY2024.revenue" in result
+
+
+def test_section4_event_risk_news_count_uses_recent_label():
+    """The label is news_count_recent (not _90d) because t187ap04_L is a daily snapshot."""
+    from credit_report.api.twse_importer import (
+        MaterialNewsItem, map_to_section4_event_risk,
+    )
+    news = [MaterialNewsItem(subject="訴訟", risk_category="litigation")]
+    data = TWSECompanyData(stock_code="2603", material_news=news)
+    result = map_to_section4_event_risk(data)
+    assert "4G_risk_events.news_count_recent" in result
+    assert "4G_risk_events.news_count_90d" not in result
+
+
+def test_section4_event_risk_only_general_news_has_empty_categories():
+    """If every news item is 'general', high_risk_categories is an empty list (not absent)."""
+    from credit_report.api.twse_importer import (
+        MaterialNewsItem, map_to_section4_event_risk,
+    )
+    news = [
+        MaterialNewsItem(subject="例行公告", risk_category="general"),
+        MaterialNewsItem(subject="季度公告", risk_category="general"),
+    ]
+    data = TWSECompanyData(stock_code="2603", material_news=news)
+    result = map_to_section4_event_risk(data)
+    # has_material_news is True (news exists), but no high-risk categories
+    assert result["4G_risk_events.has_material_news"] is True
+    assert result["4G_risk_events.high_risk_categories"] == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_twse_company_raw_includes_news_and_revenue():
+    """raw dict must capture all source rows (news + revenue) for audit trail."""
+    from credit_report.api.twse_importer import fetch_twse_company
+
+    _NEWS = [{"公司代號": "2603", "主旨": "訴訟", "符合條款": "訴訟", "出表日期": "20250101"}]
+    _REVS = [{"公司代號": "2603", "資料年月": "11312", "當月營收": "50000000",
+              "當月累計營收": "500000000"}]
+
+    async def mock_get(url, **kwargs):
+        class R:
+            def raise_for_status(self): pass
+            def json(self):
+                if "t187ap03_L" in url:   return [_SAMPLE_COMPANY]
+                if "t187ap04_L" in url:   return _NEWS
+                if "t21sc03_1"  in url:   return _REVS
+                return []
+        return R()
+
+    with patch("httpx.AsyncClient") as mock_cls:
+        mc = AsyncMock()
+        mc.__aenter__ = AsyncMock(return_value=mc)
+        mc.__aexit__ = AsyncMock(return_value=None)
+        mc.get = mock_get
+        mock_cls.return_value = mc
+        result = await fetch_twse_company("2603")
+
+    assert result is not None
+    assert "material_news" in result.raw
+    assert "monthly_revenues" in result.raw
+    assert len(result.raw["material_news"]) == 1
+    assert len(result.raw["monthly_revenues"]) == 1
 
 
 @pytest.mark.asyncio
