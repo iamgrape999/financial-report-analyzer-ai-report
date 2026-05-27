@@ -16,10 +16,12 @@ os.environ.setdefault("ADMIN_PASSWORD", "admin123")
 
 from credit_report.api.twse_importer import (
     BoardMember,
+    MonthlyRevenue,
     SUPPORTED_SECTIONS,
     TWSECompanyData,
     _find_all,
     _find_one,
+    _latest_ytd_revenue,
     _parse_twse_date,
     apply_field_mapping,
     deep_get,
@@ -30,6 +32,7 @@ from credit_report.api.twse_importer import (
     map_to_section4,
     map_to_section5,
     map_to_section7_metadata,
+    map_to_section9,
 )
 
 BASE = "/api/credit-report"
@@ -135,7 +138,7 @@ _SAMPLE_DATA = TWSECompanyData(
 # ── SUPPORTED_SECTIONS constant ───────────────────────────────────────────────
 
 def test_supported_sections():
-    assert SUPPORTED_SECTIONS == frozenset({1, 3, 4, 5, 7})
+    assert SUPPORTED_SECTIONS == frozenset({1, 3, 4, 5, 7, 9})
 
 
 # ── _parse_twse_date ──────────────────────────────────────────────────────────
@@ -968,3 +971,179 @@ async def test_fetch_twse_company_includes_material_news():
     assert result.material_news[0].risk_category == "litigation"
     assert len(result.monthly_revenues) == 1
     assert result.monthly_revenues[0].revenue_k_ntd == 50_000_000.0
+
+
+# ── Phase 3 tests ─────────────────────────────────────────────────────────────
+
+# ── Phase 3: _latest_ytd_revenue helper ──────────────────────────────────────
+
+def test_latest_ytd_revenue_no_data():
+    data = TWSECompanyData(stock_code="2603")
+    assert _latest_ytd_revenue(data) == (0, 0.0)
+
+
+def test_latest_ytd_revenue_returns_year_and_millions():
+    # 120,000,000 thousands NTD → 120,000 NTD million
+    revs = [MonthlyRevenue(year_month="11312", revenue_k_ntd=5_000_000.0,
+                           ytd_revenue_k_ntd=120_000_000.0)]
+    data = TWSECompanyData(stock_code="2603", monthly_revenues=revs)
+    yr, m = _latest_ytd_revenue(data)
+    assert yr == 2024
+    assert m == pytest.approx(120_000.0)
+
+
+def test_latest_ytd_revenue_invalid_year_month():
+    revs = [MonthlyRevenue(year_month="abc", ytd_revenue_k_ntd=1_000_000.0)]
+    data = TWSECompanyData(stock_code="2603", monthly_revenues=revs)
+    assert _latest_ytd_revenue(data) == (0, 0.0)
+
+
+# ── Phase 3: map_to_section4 new fields ──────────────────────────────────────
+
+def _sample_with_revenue() -> TWSECompanyData:
+    """_SAMPLE_DATA augmented with monthly revenue for fiscal-year snapshot tests."""
+    revs = [MonthlyRevenue(year_month="11312", revenue_k_ntd=5_000_000.0,
+                           ytd_revenue_k_ntd=120_000_000.0)]
+    import dataclasses
+    return dataclasses.replace(_SAMPLE_DATA, monthly_revenues=revs)
+
+
+def test_section4_isin_code():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert m["4A_borrower.isin_code"] == "TW0002603004"
+
+
+def test_section4_listing_date():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert m["4A_borrower.listing_date"] == "1987-09-25"
+
+
+def test_section4_shares_outstanding():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert m["4A_borrower.shares_outstanding"] == "3880800000"
+
+
+def test_section4_cfo_name_from_spokesperson():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert m["4C_management.cfo_name"] == "蔡文瑞"
+    assert m["4C_management.cfo_title"] == "財務長"
+
+
+def test_section4_industry_category():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert m["4D_business.industry_category"] == "航運業"
+
+
+def test_section4_reporting_type():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert m["4D_business.reporting_type"] == "合併"
+
+
+def test_section4_fiscal_year_from_monthly_revenue():
+    data = _sample_with_revenue()
+    m = map_to_section4(data)
+    assert m["4E_financials.fiscal_year"] == "2024"
+
+
+def test_section4_revenue_from_ytd_in_ntd_million():
+    data = _sample_with_revenue()
+    m = map_to_section4(data)
+    assert m["4E_financials.revenue"] == pytest.approx(120_000.0)
+
+
+def test_section4_unit_from_monthly_revenue():
+    data = _sample_with_revenue()
+    m = map_to_section4(data)
+    assert m["4E_financials.unit"] == "NTD million"
+
+
+def test_section4_no_revenue_omits_fiscal_year_and_revenue():
+    m = map_to_section4(_SAMPLE_DATA)
+    assert "4E_financials.fiscal_year" not in m
+    assert "4E_financials.revenue" not in m
+
+
+# ── Phase 3: map_to_section5 revenue_twd_bn ──────────────────────────────────
+
+def test_section5_revenue_twd_bn():
+    data = _sample_with_revenue()
+    m = map_to_section5(data)
+    # 120,000 NTD million = 120 NTD billion
+    assert m["5F_corporate_guarantee.revenue_twd_bn"] == pytest.approx(120.0, rel=1e-3)
+
+
+def test_section5_no_revenue_omits_revenue_twd_bn():
+    m = map_to_section5(_SAMPLE_DATA)
+    assert "5F_corporate_guarantee.revenue_twd_bn" not in m
+
+
+# ── Phase 3: map_to_section9 ──────────────────────────────────────────────────
+
+def test_section9_item16_entity_name_en():
+    m = map_to_section9(_SAMPLE_DATA)
+    assert m["9A_checklist.item16_entity_name"] == "Evergreen Marine Corp"
+
+
+def test_section9_falls_back_to_zh():
+    data = TWSECompanyData(stock_code="2603", company_name_zh="長榮海運", company_name_en="")
+    m = map_to_section9(data)
+    assert m["9A_checklist.item16_entity_name"] == "長榮海運"
+
+
+def test_section9_no_name_returns_empty():
+    m = map_to_section9(TWSECompanyData(stock_code="2603"))
+    assert m == {}
+
+
+# ── Phase 3: dispatch includes §9 ────────────────────────────────────────────
+
+def test_map_to_section9_via_dispatch():
+    result = map_to_section(9, _SAMPLE_DATA)
+    assert "9A_checklist.item16_entity_name" in result
+
+
+def test_map_to_section_unsupported_still_returns_empty():
+    assert map_to_section(2, _SAMPLE_DATA) == {}
+    assert map_to_section(6, _SAMPLE_DATA) == {}
+    assert map_to_section(10, _SAMPLE_DATA) == {}
+
+
+# ── Phase 3: integration — sections 1/3/4/5/7/9 all updated ──────────────────
+
+@pytest.mark.asyncio
+async def test_import_twse_sections_1_3_4_5_7_9_success(ac):
+    """Importing all supported sections including §9 writes entity name to checklist."""
+    hdrs = await _login(ac)
+    cr = await ac.post(f"{BASE}/reports",
+                       json={"borrower_name": "TWImportAll9", "industry": "marine"},
+                       headers=hdrs)
+    rid = cr.json()["id"]
+    with patch("credit_report.api.twse_importer.fetch_twse_company",
+               new=AsyncMock(return_value=_SAMPLE_DATA)):
+        r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
+                          json={"stock_code": "2603", "apply_mode": "overwrite",
+                                "sections": [1, 3, 4, 5, 7, 9]},
+                          headers=hdrs)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["not_found"] is False
+    assert set(body["sections_updated"]) == {1, 3, 4, 5, 7, 9}
+
+
+@pytest.mark.asyncio
+async def test_import_twse_section9_writes_entity_name(ac):
+    """§9 import writes item16_entity_name to the checklist section."""
+    hdrs = await _login(ac)
+    cr = await ac.post(f"{BASE}/reports",
+                       json={"borrower_name": "TWSec9Check", "industry": "marine"},
+                       headers=hdrs)
+    rid = cr.json()["id"]
+    with patch("credit_report.api.twse_importer.fetch_twse_company",
+               new=AsyncMock(return_value=_SAMPLE_DATA)):
+        await ac.post(f"{BASE}/reports/{rid}/import-twse",
+                      json={"stock_code": "2603", "apply_mode": "overwrite",
+                            "sections": [9]},
+                      headers=hdrs)
+    si = await ac.get(f"{BASE}/reports/{rid}/inputs/9", headers=hdrs)
+    ij = si.json()["input_json"]
+    assert ij["9A_checklist"]["item16_entity_name"] == "Evergreen Marine Corp"

@@ -47,7 +47,7 @@ _TWSE_MONTHLY_REVENUE_L_URL = "https://openapi.twse.com.tw/v1/opendata/t21sc03_1
 _TWSE_MONTHLY_REVENUE_P_URL = "https://openapi.twse.com.tw/v1/opendata/t21sc03_2"
 
 # Sections for which TWSE provides meaningful auto-fill data
-SUPPORTED_SECTIONS: frozenset[int] = frozenset({1, 3, 4, 5, 7})
+SUPPORTED_SECTIONS: frozenset[int] = frozenset({1, 3, 4, 5, 7, 9})
 
 _HEADERS = {
     "User-Agent": (
@@ -383,6 +383,18 @@ def _paid_in_capital_ntd_bn(ntd: int) -> float | None:
     return round(ntd / 1_000_000_000, 3)
 
 
+def _latest_ytd_revenue(data: TWSECompanyData) -> tuple[int, float]:
+    """Return (gregorian_year, ytd_revenue_ntd_millions) from the most recent monthly row.
+    monthly_revenues[0] is the newest; ytd_revenue_k_ntd / 1000 = NTD millions."""
+    if not data.monthly_revenues:
+        return (0, 0.0)
+    latest = data.monthly_revenues[0]
+    yr, _ = _roc_year_month_to_gregorian(latest.year_month)
+    if yr <= 0:
+        return (0, 0.0)
+    return (yr, round(latest.ytd_revenue_k_ntd / 1000.0, 1))
+
+
 def _incorporation_country(data: TWSECompanyData) -> str:
     """Use raw foreign-registration country if non-empty, else default to Taiwan."""
     return data.incorporation_country_raw if data.incorporation_country_raw else (
@@ -471,6 +483,9 @@ def map_to_section4(data: TWSECompanyData) -> dict[str, Any]:
     _put("4A_borrower.company_name_zh",       data.company_name_zh)
     _put("4A_borrower.company_name_en",       data.company_name_en or data.company_name_abbrev_en)
     _put("4A_borrower.registration_number",   data.tax_id)
+    _put("4A_borrower.isin_code",             data.isin_code)
+    _put("4A_borrower.listing_date",          data.listing_date)
+    _put("4A_borrower.shares_outstanding",    data.shares_outstanding)
     _put("4A_borrower.incorporation_country", _incorporation_country(data))
     _put("4A_borrower.incorporation_date",    data.incorporation_date)
     _put("4A_borrower.legal_entity_type",     _legal_entity_type(data))
@@ -484,18 +499,28 @@ def map_to_section4(data: TWSECompanyData) -> dict[str, Any]:
         ]
         _put("4B_ownership.ultimate_beneficial_owner", data.major_shareholders[0])
 
-    # §4C — management
+    # §4C — management; spokesperson (發言人) is typically the CFO / IR contact
     _put("4C_management.ceo_name",  data.ceo)
     _put("4C_management.ceo_title", "President" if data.ceo else "")
+    _put("4C_management.cfo_name",  data.spokesperson)
+    _put("4C_management.cfo_title", data.spokesperson_title)
 
-    # §4D — business profile
-    _put("4D_business.primary_business", data.primary_business)
+    # §4D — business profile, industry category, and financial-report type
+    _put("4D_business.primary_business",  data.primary_business)
+    _put("4D_business.industry_category", data.industry_zh)
+    _put("4D_business.reporting_type",    data.financial_report_type)
 
-    # §4E — financials header
+    # §4E — financials header + YTD revenue snapshot from monthly revenue data
     _put("4E_financials.currency", "NTD")
     cap_bn = _paid_in_capital_ntd_bn(data.paid_in_capital_ntd)
     if cap_bn is not None:
         mapping["4E_financials.paid_in_capital_ntd_bn"] = cap_bn
+
+    yr, ytd_m = _latest_ytd_revenue(data)
+    if yr > 0 and ytd_m > 0:
+        _put("4E_financials.fiscal_year", str(yr))
+        _put("4E_financials.revenue",     ytd_m)
+        _put("4E_financials.unit",        "NTD million")
 
     return mapping
 
@@ -520,6 +545,11 @@ def map_to_section5(data: TWSECompanyData) -> dict[str, Any]:
         _put("5F_corporate_guarantee.guarantor_listed_exchange", "Taiwan Stock Exchange")
     elif data.market_type == "上櫃":
         _put("5F_corporate_guarantee.guarantor_listed_exchange", "Taipei Exchange")
+
+    # §5F — annual revenue for guarantor creditworthiness (NTD billions)
+    _, ytd_m = _latest_ytd_revenue(data)
+    if ytd_m > 0:
+        _put("5F_corporate_guarantee.revenue_twd_bn", round(ytd_m / 1000.0, 3))
 
     # §5G — responsible person is typically the chairman
     chairman = _chairman_name(data)
@@ -608,6 +638,25 @@ def map_to_section7_financials(data: TWSECompanyData) -> dict[str, Any]:
     return mapping
 
 
+def map_to_section9(data: TWSECompanyData) -> dict[str, Any]:
+    """
+    §9 — Credit checklist: ACRA entity name for the item-16 register lookup.
+
+    item16_entity_name is used by the analyst to search the ACRA / TWSE
+    registry for outstanding charge or lien records.
+    """
+    mapping: dict[str, Any] = {}
+
+    def _put(path: str, value: Any) -> None:
+        if value is not None and value != "":
+            mapping[path] = value
+
+    _put("9A_checklist.item16_entity_name",
+         data.company_name_en or data.company_name_zh)
+
+    return mapping
+
+
 def map_to_section4_event_risk(data: TWSECompanyData) -> dict[str, Any]:
     """
     §4 — Populate 4G_risk_events from material news (t187ap04_L).
@@ -647,6 +696,7 @@ def map_to_section(section_no: int, data: TWSECompanyData) -> dict[str, Any]:
         4: lambda d: {**map_to_section4(d), **map_to_section4_event_risk(d)},
         5: map_to_section5,
         7: lambda d: {**map_to_section7_metadata(d), **map_to_section7_financials(d)},
+        9: map_to_section9,
     }
     fn = dispatch.get(section_no)
     return fn(data) if fn else {}
