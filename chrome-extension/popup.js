@@ -312,6 +312,95 @@ function renderConflictCard(c) {
   </div>`;
 }
 
+// ── Fetch panel ───────────────────────────────────────────────────────────────
+
+document.getElementById("fetchBtn").addEventListener("click", async () => {
+  const rid = getReportId();
+  if (!rid) return;
+
+  const stockCode   = document.getElementById("fetchStockCode").value.trim();
+  const companyName = document.getElementById("fetchCompanyName").value.trim();
+  const rawUrls     = document.getElementById("fetchDirectUrls").value
+                        .split("\n").map(s => s.trim()).filter(Boolean).slice(0, 5);
+  const sources = [];
+  if (document.getElementById("srcMops").checked)   sources.push("mops");
+  if (document.getElementById("srcEdgar").checked)  sources.push("edgar");
+  if (document.getElementById("srcDirect").checked) sources.push("direct");
+
+  if (!sources.length) { alert("請至少選擇一個來源"); return; }
+  if (sources.includes("mops")   && !stockCode)   { alert("MOPS 需要台灣股票代號"); return; }
+  if (sources.includes("edgar")  && !companyName) { alert("EDGAR 需要公司英文名"); return; }
+  if (sources.includes("direct") && !rawUrls.length) { alert("直接 URL 來源需要至少一條 URL"); return; }
+
+  const btn = document.getElementById("fetchBtn");
+  const statusEl   = document.getElementById("fetchStatus");
+  const resultsEl  = document.getElementById("fetchResults");
+  btn.disabled = true;
+  btn.textContent = "⏳ Fetching…";
+  statusEl.textContent = "正在從公開來源搜尋並下載文件…";
+  resultsEl.innerHTML = "";
+
+  try {
+    const token = await new Promise(r => chrome.storage.local.get(["token"], r))
+                          .then(d => d.token);
+    const { baseUrl } = await new Promise(r => chrome.storage.local.get(["baseUrl"], r));
+    if (!baseUrl || !token) throw new Error("請先在 Settings 登入");
+
+    const resp = await fetch(`${baseUrl}/api/credit-report/reports/${rid}/fetch-documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify({
+        sources,
+        stock_code:   stockCode   || null,
+        company_name: companyName || null,
+        direct_urls:  rawUrls,
+      }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+
+    statusEl.textContent =
+      `✅ 已下載並上傳 ${data.fetched} 份文件` +
+      (data.errors?.length ? `，${data.errors.length} 項錯誤` : "");
+
+    let html = "";
+    if (data.documents?.length) {
+      html += '<div style="margin-top:6px">';
+      for (const d of data.documents) {
+        const kb = Math.round(d.file_size_bytes / 1024);
+        html += `<div style="padding:4px 0;border-bottom:1px solid #1e293b;font-size:11px">
+          <span style="color:#34d399">✓</span>
+          <span style="color:#e2e8f0">${esc(d.filename)}</span>
+          <span style="color:#64748b"> · ${esc(d.source)} · ${kb} KB</span>
+        </div>`;
+      }
+      html += "</div>";
+    }
+    if (data.errors?.length) {
+      html += '<div style="margin-top:6px">';
+      for (const e of data.errors) {
+        html += `<div style="padding:3px 0;font-size:10px;color:#f87171">
+          ⚠ [${esc(e.source)}] ${esc(e.message)}</div>`;
+      }
+      html += "</div>";
+    }
+    if (data.fetched > 0) {
+      html += `<p style="margin-top:8px;font-size:11px;color:#94a3b8">
+        文件已上傳完成，請切換到 🚀 Automate 面板，點擊 <strong>📂 ETL</strong> 處理這些文件。</p>`;
+    }
+    resultsEl.innerHTML = html;
+
+  } catch (e) {
+    statusEl.textContent = "❌ " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔍 Fetch & Upload to Report";
+  }
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadSettings();
 

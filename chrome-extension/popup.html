@@ -91,6 +91,7 @@
 
 <div class="tab-bar">
   <div class="tab active" data-tab="auto">🚀 Automate</div>
+  <div class="tab" data-tab="fetch">🔍 Fetch</div>
   <div class="tab" data-tab="conflicts">⚠️ Conflicts</div>
   <div class="tab" data-tab="settings">⚙️ Settings</div>
 </div>
@@ -168,6 +169,50 @@
       <div class="step-body"><div class="step-name">Complete</div><div class="step-detail" id="d-done">–</div></div>
     </div>
   </div>
+</div>
+
+<!-- ── FETCH PANEL ─────────────────────────────────────────────────────────── -->
+<div class="panel" id="panel-fetch">
+  <p class="info" style="margin-bottom:8px">
+    Auto-download financial documents from public sources and register them for ETL.
+    No browser required — uses structured APIs on the server.
+  </p>
+
+  <div class="field">
+    <label>台灣股票代號 <span class="info">(MOPS/TWSE 年報)</span></label>
+    <input type="text" id="fetchStockCode" placeholder="e.g. 2603, 2412, 2330" />
+  </div>
+
+  <div class="field">
+    <label>公司英文名 <span class="info">(SEC EDGAR 10-K/20-F)</span></label>
+    <input type="text" id="fetchCompanyName" placeholder="e.g. Evergreen Marine Corp" />
+  </div>
+
+  <div class="field">
+    <label>直接下載 URL <span class="info">(逐行填入，最多 5 條)</span></label>
+    <textarea id="fetchDirectUrls"
+      style="width:100%;background:#1e293b;border:1px solid #334155;border-radius:6px;
+             padding:6px 10px;color:#e2e8f0;font-size:11px;resize:vertical;height:54px"
+      placeholder="https://example.com/annual_report.pdf"></textarea>
+  </div>
+
+  <div class="field">
+    <label>來源</label>
+    <div style="display:flex;gap:10px;padding-top:2px">
+      <label style="color:#e2e8f0;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="srcMops" checked style="margin-right:4px">MOPS 台股</label>
+      <label style="color:#e2e8f0;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="srcEdgar" checked style="margin-right:4px">EDGAR 美股</label>
+      <label style="color:#e2e8f0;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="srcDirect" style="margin-right:4px">直接 URL</label>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" id="fetchBtn">🔍 Fetch &amp; Upload to Report</button>
+
+  <div id="fetchStatus" style="margin-top:10px;font-size:11px;color:#64748b"></div>
+
+  <div id="fetchResults" style="margin-top:8px"></div>
 </div>
 
 <!-- ── CONFLICTS PANEL ────────────────────────────────────────────────────── -->

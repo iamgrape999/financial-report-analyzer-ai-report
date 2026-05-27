@@ -1667,6 +1667,116 @@ async def gap_fill_report(
     )
 
 
+class AutoFetchRequest(BaseModel):
+    sources: list[str] = ["mops", "edgar"]
+    stock_code: Optional[str] = None
+    company_name: Optional[str] = None
+    direct_urls: list[str] = []
+
+
+@router.post("/fetch-documents", status_code=202)
+async def auto_fetch_documents(
+    report_id: str,
+    payload: AutoFetchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Auto-fetch documents from MOPS (Taiwan), SEC EDGAR, or direct URLs.
+
+    Downloads matching PDFs/filings and registers them as SectionDocuments
+    ready for ETL — equivalent to a manual upload for each file.
+
+    Supported sources:
+      - "mops"   → Taiwan annual reports via TWSE (requires stock_code)
+      - "edgar"  → SEC 10-K / 20-F via EDGAR (requires company_name)
+      - "direct" → any publicly reachable URL (requires direct_urls list)
+    """
+    from credit_report.api.doc_fetcher import run_auto_fetch
+    from functools import partial as _partial
+
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports cannot be modified")
+
+    valid_sources = {"mops", "edgar", "direct"}
+    sources = [s for s in (payload.sources or []) if s in valid_sources]
+    if not sources:
+        raise HTTPException(status_code=422, detail="At least one valid source required: mops, edgar, direct")
+
+    fetched_docs, fetch_errors = await run_auto_fetch(
+        sources=sources,
+        stock_code=payload.stock_code or None,
+        company_name=payload.company_name or None,
+        direct_urls=payload.direct_urls or [],
+    )
+
+    registered: list[dict] = []
+    upload_errors: list[dict] = []
+
+    for fdoc in fetched_docs:
+        fname = fdoc.filename
+        ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+        if ext not in ALLOWED_EXTENSIONS:
+            upload_errors.append({"filename": fname, "error": f"Unsupported extension .{ext}"})
+            continue
+        if len(fdoc.data) > _MAX_UPLOAD_BYTES:
+            upload_errors.append({"filename": fname, "error": "File exceeds 50 MB upload limit"})
+            continue
+        if not _check_magic(fdoc.data, ext):
+            upload_errors.append({"filename": fname, "error": "Magic-byte mismatch — file rejected"})
+            continue
+
+        doc_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        try:
+            text, detected_fmt = await asyncio.wait_for(
+                loop.run_in_executor(None, _partial(extract_text_from_file, fdoc.data, fname)),
+                timeout=180.0,
+            )
+        except (asyncio.TimeoutError, Exception) as exc:
+            upload_errors.append({"filename": fname, "error": f"Text extraction failed: {exc}"})
+            continue
+
+        save_document_text(report_id, doc_id, text)
+        save_document_binary(report_id, doc_id, fdoc.data, fname)
+
+        doc = SectionDocument(
+            id=doc_id,
+            report_id=report_id,
+            original_filename=fname,
+            file_size_bytes=len(fdoc.data),
+            document_type=fdoc.document_type,
+            file_format=detected_fmt,
+            etl_status="pending",
+            uploaded_by=current_user.id,
+        )
+        db.add(doc)
+        await db.flush()
+        logger.info(
+            "auto_fetch: registered doc=%s source=%s file=%r bytes=%d report=%s",
+            doc_id, fdoc.source, fname, len(fdoc.data), report_id,
+        )
+        registered.append({
+            "id": doc_id,
+            "filename": fname,
+            "source": fdoc.source,
+            "document_type": fdoc.document_type,
+            "file_size_bytes": len(fdoc.data),
+            "text_chars": len(text.strip()),
+        })
+
+    all_errors = [{"source": e.source, "message": e.message} for e in fetch_errors]
+    all_errors.extend(upload_errors)
+
+    return {
+        "fetched": len(registered),
+        "documents": registered,
+        "errors": all_errors,
+    }
+
+
 @router.get("/generate/stream/{task_id}")
 async def generation_stream_events(
     request: Request,
