@@ -15,7 +15,11 @@ os.environ.setdefault("ADMIN_EMAIL", "admin@example.com")
 os.environ.setdefault("ADMIN_PASSWORD", "admin123")
 
 from credit_report.api.twse_importer import (
+    BalanceSheetFact,
     BoardMember,
+    CashFlowFact,
+    DividendInfo,
+    IncomeStatementFact,
     MonthlyRevenue,
     SUPPORTED_SECTIONS,
     TWSECompanyData,
@@ -1265,3 +1269,421 @@ async def test_import_twse_section9_writes_entity_name(ac):
     si = await ac.get(f"{BASE}/reports/{rid}/inputs/9", headers=hdrs)
     ij = si.json()["input_json"]
     assert ij["9A_checklist"]["item16_entity_name"] == "Evergreen Marine Corp"
+
+
+# ── Phase 4 (P1 financial statements) ────────────────────────────────────────
+
+_SAMPLE_IS = IncomeStatementFact(
+    fiscal_year=2024,
+    revenue_k_ntd=500_000_000.0,      # 500 billion NTD (realistic for Evergreen)
+    gross_profit_k_ntd=100_000_000.0,
+    op_profit_k_ntd=60_000_000.0,
+    net_income_k_ntd=50_000_000.0,
+)
+
+_SAMPLE_BS = BalanceSheetFact(
+    fiscal_year=2024,
+    total_assets_k_ntd=1_000_000_000.0,
+    total_equity_k_ntd=400_000_000.0,
+    total_liabilities_k_ntd=600_000_000.0,
+    current_assets_k_ntd=300_000_000.0,
+    current_liabilities_k_ntd=200_000_000.0,
+    cash_k_ntd=100_000_000.0,
+    short_term_debt_k_ntd=150_000_000.0,
+    long_term_debt_k_ntd=250_000_000.0,
+)
+
+_SAMPLE_CF = CashFlowFact(
+    fiscal_year=2024,
+    ocf_k_ntd=70_000_000.0,
+    capex_k_ntd=20_000_000.0,
+    da_k_ntd=10_000_000.0,
+)
+
+
+def _sample_with_financials():
+    """_SAMPLE_DATA extended with P1 IS/BS/CF facts."""
+    import dataclasses
+    return dataclasses.replace(
+        _SAMPLE_DATA,
+        income_statements=[_SAMPLE_IS],
+        balance_sheets=[_SAMPLE_BS],
+        cash_flows=[_SAMPLE_CF],
+    )
+
+
+# ── _parse_roc_or_gregorian_year ──────────────────────────────────────────────
+
+def test_parse_roc_or_gregorian_year_roc_113():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("113") == 2024
+
+
+def test_parse_roc_or_gregorian_year_roc_114():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("114") == 2025
+
+
+def test_parse_roc_or_gregorian_year_gregorian():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("2024") == 2024
+
+
+def test_parse_roc_or_gregorian_year_invalid():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("abc") == 0
+
+
+def test_parse_roc_or_gregorian_year_zero():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("") == 0
+
+
+# ── _parse_is_rows ────────────────────────────────────────────────────────────
+
+def test_parse_is_rows_annual_only():
+    from credit_report.api.twse_importer import _parse_is_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "營業收入": "500000000", "毛利（毛損）": "100000000",
+         "營業利益（損失）": "60000000", "本期淨利（淨損）": "50000000"},
+        {"公司代號": "2603", "年度": "113", "季別": "3", "營業收入": "350000000"},
+    ]
+    result = _parse_is_rows(rows, "2603")
+    assert len(result) == 1
+    assert result[0].fiscal_year == 2024
+    assert result[0].revenue_k_ntd == 500_000_000.0
+    assert result[0].gross_profit_k_ntd == 100_000_000.0
+    assert result[0].op_profit_k_ntd == 60_000_000.0
+    assert result[0].net_income_k_ntd == 50_000_000.0
+
+
+def test_parse_is_rows_multiple_years_sorted_newest_first():
+    from credit_report.api.twse_importer import _parse_is_rows
+    rows = [
+        {"公司代號": "2603", "年度": "112", "季別": "4", "營業收入": "400000000"},
+        {"公司代號": "2603", "年度": "113", "季別": "4", "營業收入": "500000000"},
+    ]
+    result = _parse_is_rows(rows, "2603")
+    assert result[0].fiscal_year == 2024
+    assert result[1].fiscal_year == 2023
+
+
+def test_parse_is_rows_wrong_company_skipped():
+    from credit_report.api.twse_importer import _parse_is_rows
+    rows = [{"公司代號": "2412", "年度": "113", "季別": "4", "營業收入": "1000"}]
+    assert _parse_is_rows(rows, "2603") == []
+
+
+# ── _parse_bs_rows ────────────────────────────────────────────────────────────
+
+def test_parse_bs_rows_basic():
+    from credit_report.api.twse_importer import _parse_bs_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "資產總計": "1000000000", "股東權益合計": "400000000",
+         "流動資產": "300000000", "流動負債": "200000000",
+         "現金及約當現金": "100000000",
+         "短期借款": "150000000", "長期借款": "250000000"},
+    ]
+    result = _parse_bs_rows(rows, "2603")
+    assert len(result) == 1
+    bs = result[0]
+    assert bs.fiscal_year == 2024
+    assert bs.total_assets_k_ntd == 1_000_000_000.0
+    assert bs.total_equity_k_ntd == 400_000_000.0
+    assert bs.cash_k_ntd == 100_000_000.0
+    assert bs.short_term_debt_k_ntd == 150_000_000.0
+    assert bs.long_term_debt_k_ntd == 250_000_000.0
+
+
+def test_parse_bs_rows_liabilities_derived_when_missing():
+    from credit_report.api.twse_importer import _parse_bs_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "資產總計": "1000000000", "股東權益合計": "400000000"},
+    ]
+    result = _parse_bs_rows(rows, "2603")
+    assert result[0].total_liabilities_k_ntd == pytest.approx(600_000_000.0)
+
+
+# ── _parse_cf_rows ────────────────────────────────────────────────────────────
+
+def test_parse_cf_rows_basic():
+    from credit_report.api.twse_importer import _parse_cf_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "來自營運活動之現金流量": "70000000",
+         "取得不動產廠房及設備": "-20000000",
+         "折舊費用": "10000000"},
+    ]
+    result = _parse_cf_rows(rows, "2603")
+    assert len(result) == 1
+    cf = result[0]
+    assert cf.fiscal_year == 2024
+    assert cf.ocf_k_ntd == 70_000_000.0
+    assert cf.capex_k_ntd == 20_000_000.0  # stored as positive abs value
+    assert cf.da_k_ntd == 10_000_000.0
+
+
+def test_parse_cf_rows_capex_positive_raw():
+    """Capex that arrives as a positive number is stored as-is (abs is idempotent)."""
+    from credit_report.api.twse_importer import _parse_cf_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "來自營運活動之現金流量": "70000000",
+         "取得不動產廠房及設備": "20000000"},
+    ]
+    result = _parse_cf_rows(rows, "2603")
+    assert result[0].capex_k_ntd == 20_000_000.0
+
+
+# ── map_to_section7_income_statement ─────────────────────────────────────────
+
+def test_section7_is_revenue():
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    m = map_to_section7_income_statement(_sample_with_financials())
+    # 500,000,000 k NTD / 1000 = 500,000 NTD million
+    assert m["7A_borrower_financials.income_statement.FY2024.revenue"] == pytest.approx(500_000.0)
+
+
+def test_section7_is_gross_profit():
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    m = map_to_section7_income_statement(_sample_with_financials())
+    assert m["7A_borrower_financials.income_statement.FY2024.gross_profit"] == pytest.approx(100_000.0)
+
+
+def test_section7_is_op_profit():
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    m = map_to_section7_income_statement(_sample_with_financials())
+    assert m["7A_borrower_financials.income_statement.FY2024.op_profit"] == pytest.approx(60_000.0)
+
+
+def test_section7_is_net_income():
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    m = map_to_section7_income_statement(_sample_with_financials())
+    assert m["7A_borrower_financials.income_statement.FY2024.net_income"] == pytest.approx(50_000.0)
+
+
+def test_section7_is_empty_returns_empty():
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    assert map_to_section7_income_statement(TWSECompanyData(stock_code="2603")) == {}
+
+
+# ── map_to_section7_balance_sheet ─────────────────────────────────────────────
+
+def test_section7_bs_total_assets():
+    from credit_report.api.twse_importer import map_to_section7_balance_sheet
+    m = map_to_section7_balance_sheet(_sample_with_financials())
+    assert m["7A_borrower_financials.balance_sheet.FY2024.total_assets"] == pytest.approx(1_000_000.0)
+
+
+def test_section7_bs_total_equity():
+    from credit_report.api.twse_importer import map_to_section7_balance_sheet
+    m = map_to_section7_balance_sheet(_sample_with_financials())
+    assert m["7A_borrower_financials.balance_sheet.FY2024.total_equity"] == pytest.approx(400_000.0)
+
+
+def test_section7_bs_total_debt():
+    from credit_report.api.twse_importer import map_to_section7_balance_sheet
+    m = map_to_section7_balance_sheet(_sample_with_financials())
+    # (150,000,000 + 250,000,000) k NTD / 1000 = 400,000 NTD million
+    assert m["7A_borrower_financials.balance_sheet.FY2024.total_debt"] == pytest.approx(400_000.0)
+
+
+def test_section7_bs_cash():
+    from credit_report.api.twse_importer import map_to_section7_balance_sheet
+    m = map_to_section7_balance_sheet(_sample_with_financials())
+    assert m["7A_borrower_financials.balance_sheet.FY2024.cash_and_equivalents"] == pytest.approx(100_000.0)
+
+
+def test_section7_bs_net_debt():
+    from credit_report.api.twse_importer import map_to_section7_balance_sheet
+    m = map_to_section7_balance_sheet(_sample_with_financials())
+    # net_debt = 400,000 - 100,000 = 300,000 NTD million
+    assert m["7A_borrower_financials.balance_sheet.FY2024.net_debt"] == pytest.approx(300_000.0)
+
+
+def test_section7_bs_empty_returns_empty():
+    from credit_report.api.twse_importer import map_to_section7_balance_sheet
+    assert map_to_section7_balance_sheet(TWSECompanyData(stock_code="2603")) == {}
+
+
+# ── map_to_section7_cash_flow ─────────────────────────────────────────────────
+
+def test_section7_cf_ocf():
+    from credit_report.api.twse_importer import map_to_section7_cash_flow
+    m = map_to_section7_cash_flow(_sample_with_financials())
+    assert m["7A_borrower_financials.cash_flow.FY2024.ocf"] == pytest.approx(70_000.0)
+
+
+def test_section7_cf_capex():
+    from credit_report.api.twse_importer import map_to_section7_cash_flow
+    m = map_to_section7_cash_flow(_sample_with_financials())
+    assert m["7A_borrower_financials.cash_flow.FY2024.capex"] == pytest.approx(20_000.0)
+
+
+def test_section7_cf_fcf():
+    from credit_report.api.twse_importer import map_to_section7_cash_flow
+    m = map_to_section7_cash_flow(_sample_with_financials())
+    # fcf = ocf - capex = 70,000 - 20,000 = 50,000 NTD million
+    assert m["7A_borrower_financials.cash_flow.FY2024.fcf"] == pytest.approx(50_000.0)
+
+
+def test_section7_cf_empty_returns_empty():
+    from credit_report.api.twse_importer import map_to_section7_cash_flow
+    assert map_to_section7_cash_flow(TWSECompanyData(stock_code="2603")) == {}
+
+
+# ── map_to_section7_ratios ────────────────────────────────────────────────────
+
+def test_section7_ratios_gross_margin():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    m = map_to_section7_ratios(_sample_with_financials())
+    # 100,000 / 500,000 * 100 = 20%
+    assert m["7B_key_ratios.FY2024.gross_margin_pct"] == pytest.approx(20.0)
+
+
+def test_section7_ratios_ni_margin():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    m = map_to_section7_ratios(_sample_with_financials())
+    # 50,000 / 500,000 * 100 = 10%
+    assert m["7B_key_ratios.FY2024.ni_margin_pct"] == pytest.approx(10.0)
+
+
+def test_section7_ratios_ebitda_margin():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    m = map_to_section7_ratios(_sample_with_financials())
+    # ebitda = op_profit + da = 60,000,000 + 10,000,000 = 70,000,000 k NTD
+    # margin = 70,000,000 / 500,000,000 * 100 = 14%
+    assert m["7B_key_ratios.FY2024.ebitda_margin_pct"] == pytest.approx(14.0)
+
+
+def test_section7_ratios_roe():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    m = map_to_section7_ratios(_sample_with_financials())
+    # 50,000,000 / 400,000,000 * 100 = 12.5%
+    assert m["7B_key_ratios.FY2024.roe_pct"] == pytest.approx(12.5)
+
+
+def test_section7_ratios_debt_equity():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    m = map_to_section7_ratios(_sample_with_financials())
+    # (150 + 250) M / 400 M = 1.0
+    assert m["7B_key_ratios.FY2024.debt_equity"] == pytest.approx(1.0)
+
+
+def test_section7_ratios_current_ratio():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    m = map_to_section7_ratios(_sample_with_financials())
+    # 300,000,000 / 200,000,000 = 1.5
+    assert m["7B_key_ratios.FY2024.current_ratio"] == pytest.approx(1.5)
+
+
+def test_section7_ratios_empty_without_p1():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    assert map_to_section7_ratios(TWSECompanyData(stock_code="2603")) == {}
+
+
+def test_section7_ratios_requires_both_is_and_bs():
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    import dataclasses
+    is_only = dataclasses.replace(_SAMPLE_DATA, income_statements=[_SAMPLE_IS])
+    bs_only = dataclasses.replace(_SAMPLE_DATA, balance_sheets=[_SAMPLE_BS])
+    assert map_to_section7_ratios(is_only) == {}
+    assert map_to_section7_ratios(bs_only) == {}
+
+
+# ── map_to_section5_from_financials ──────────────────────────────────────────
+
+def test_section5_financials_net_worth():
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    m = map_to_section5_from_financials(_sample_with_financials())
+    # 400,000,000 k NTD / 1,000,000 = 400 NTD billion
+    assert m["5F_corporate_guarantee.net_worth_twd_bn"] == pytest.approx(400.0, rel=1e-3)
+
+
+def test_section5_financials_total_debt():
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    m = map_to_section5_from_financials(_sample_with_financials())
+    # (150 + 250) million k NTD = 400 billion
+    assert m["5F_corporate_guarantee.total_debt_twd_bn"] == pytest.approx(400.0, rel=1e-3)
+
+
+def test_section5_financials_cash():
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    m = map_to_section5_from_financials(_sample_with_financials())
+    assert m["5F_corporate_guarantee.cash_twd_bn"] == pytest.approx(100.0, rel=1e-3)
+
+
+def test_section5_financials_ebitda():
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    m = map_to_section5_from_financials(_sample_with_financials())
+    # ebitda = (60,000,000 + 10,000,000) k NTD = 70 billion
+    assert m["5F_corporate_guarantee.ebitda_twd_bn"] == pytest.approx(70.0, rel=1e-3)
+
+
+def test_section5_financials_net_margin():
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    m = map_to_section5_from_financials(_sample_with_financials())
+    # 50,000,000 / 500,000,000 * 100 = 10%
+    assert m["5F_corporate_guarantee.net_margin_pct"] == pytest.approx(10.0)
+
+
+def test_section5_financials_roe():
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    m = map_to_section5_from_financials(_sample_with_financials())
+    # 50,000,000 / 400,000,000 * 100 = 12.5%
+    assert m["5F_corporate_guarantee.roe_pct"] == pytest.approx(12.5)
+
+
+def test_section5_financials_empty_without_bs():
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    assert map_to_section5_from_financials(TWSECompanyData(stock_code="2603")) == {}
+
+
+# ── Dispatch integration: §5 and §7 with P1 data ─────────────────────────────
+
+def test_map_to_section7_dispatch_includes_is_bs_cf_ratios():
+    from credit_report.api.twse_importer import map_to_section
+    m = map_to_section(7, _sample_with_financials())
+    # Metadata still present
+    assert "7A_borrower_financials.reporting_currency" in m
+    # IS fields
+    assert "7A_borrower_financials.income_statement.FY2024.gross_profit" in m
+    # BS fields
+    assert "7A_borrower_financials.balance_sheet.FY2024.total_assets" in m
+    # CF fields
+    assert "7A_borrower_financials.cash_flow.FY2024.ocf" in m
+    # Ratio fields
+    assert "7B_key_ratios.FY2024.gross_margin_pct" in m
+
+
+def test_map_to_section5_dispatch_includes_financials():
+    from credit_report.api.twse_importer import map_to_section
+    m = map_to_section(5, _sample_with_financials())
+    # Original §5 fields still present
+    assert "5F_corporate_guarantee.guarantor_full_name" in m
+    assert "5G_responsible_person.name" in m
+    # P1-derived fields
+    assert "5F_corporate_guarantee.net_worth_twd_bn" in m
+    assert "5F_corporate_guarantee.ebitda_twd_bn" in m
+
+
+def test_map_to_section7_no_p1_data_still_has_metadata():
+    """§7 dispatch works even when P1 endpoints returned empty (403 in dev)."""
+    from credit_report.api.twse_importer import map_to_section
+    m = map_to_section(7, _SAMPLE_DATA)
+    assert "7A_borrower_financials.reporting_currency" in m
+    # No IS/BS/CF keys when P1 data is absent
+    assert not any("gross_profit" in k for k in m)
+    assert not any("total_assets" in k for k in m)
+
+
+# ── DividendInfo dataclass ────────────────────────────────────────────────────
+
+def test_dividend_info_defaults():
+    d = DividendInfo(fiscal_year=2024, cash_dividend_per_share=3.5)
+    assert d.fiscal_year == 2024
+    assert d.cash_dividend_per_share == 3.5
+    assert d.stock_dividend_per_share == 0.0

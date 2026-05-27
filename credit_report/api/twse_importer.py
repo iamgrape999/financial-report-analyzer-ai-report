@@ -1,20 +1,28 @@
 """
 TWSE OpenAPI importer — fetches Taiwan Stock Exchange structured data
-and maps it to SectionInput field paths across sections §1, §3, §4, §5, §7.
+and maps it to SectionInput field paths across sections §1, §3, §4, §5, §7, §9.
 
-APIs used (no auth, public JSON):
-  t187ap03_L  — all listed companies: comprehensive basic info
-                (name, ISIN, listing date, industry, chairman, CEO,
-                 paid-in capital, auditor, incorporation date, tax ID,
-                 spokesperson, address, phone, primary business …)
-  t187ap03_P  — OTC/public companies: same schema as t187ap03_L (fallback)
+P0 APIs (confirmed, no network restriction):
+  t187ap03_L  — all listed companies: name, ISIN, listing date, industry, chairman, CEO,
+                paid-in capital, auditor, incorporation date, tax ID, spokesperson ...
+  t187ap03_P  — OTC/public companies: same schema (fallback)
   t187ap02_L  — major shareholders holding >10% of listed companies
   t187ap11_L  — board / supervisor shareholding detail (title, name, shares, pledge)
-  t187ap04_L  — daily material news (Phase 2: material event risk for §4G)
-  t21sc03_1   — monthly revenue for listed companies (Phase 2: §7 income_statement)
-  t21sc03_2   — monthly revenue for OTC companies (Phase 2: §7 fallback)
+  t187ap04_L  — daily material news (event risk for §4G)
+  t21sc03_1   — monthly revenue for listed companies (§7 income_statement revenue)
+  t21sc03_2   — monthly revenue for OTC companies (fallback)
+
+P1 APIs (work in production; may return 403 from restricted dev networks):
+  t163sb03_1  — income statement general industry (§7A IS, §7B margins, §5F IS snapshot)
+  t163sb04_1  — balance sheet general industry (§7A BS, §7B ratios, §5F BS snapshot)
+  t163sb05_1  — cash flow statement general industry (§7A CF, free cash flow)
+  t187ap14_L  — dividend distribution (§4D)
+
+P2 APIs:
+  t22sr01_1   — individual stock daily trade / market cap (§4E market cap)
 
 All arrays are filtered client-side by 公司代號 == stock_code.
+P1/P2 endpoints degrade gracefully to [] on 403 or network error.
 """
 from __future__ import annotations
 
@@ -35,16 +43,20 @@ _TWSE_COMPANY_L_URL    = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 _TWSE_COMPANY_P_URL    = "https://openapi.twse.com.tw/v1/opendata/t187ap03_P"
 _TWSE_SHAREHOLDERS_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap02_L"
 _TWSE_BOARD_URL        = "https://openapi.twse.com.tw/v1/opendata/t187ap11_L"
+_TWSE_MATERIAL_NEWS_URL        = "https://openapi.twse.com.tw/v1/opendata/t187ap04_L"
+_TWSE_MONTHLY_REVENUE_L_URL    = "https://openapi.twse.com.tw/v1/opendata/t21sc03_1"
+_TWSE_MONTHLY_REVENUE_P_URL    = "https://openapi.twse.com.tw/v1/opendata/t21sc03_2"
 
-# ── Phase 2 additions ─────────────────────────────────────────────────────────
+# ── P1: Financial statement endpoints ────────────────────────────────────────
+# These return 403 in restricted dev environments but work in production.
+# Parsers are implemented so no code change is needed when production access is granted.
+_TWSE_IS_GENERAL_URL    = "https://openapi.twse.com.tw/v1/opendata/t163sb03_1"   # Income Statement
+_TWSE_BS_GENERAL_URL    = "https://openapi.twse.com.tw/v1/opendata/t163sb04_1"   # Balance Sheet
+_TWSE_CF_GENERAL_URL    = "https://openapi.twse.com.tw/v1/opendata/t163sb05_1"   # Cash Flow
+_TWSE_DIVIDEND_URL      = "https://openapi.twse.com.tw/v1/opendata/t187ap14_L"   # Dividends
 
-# t187ap04_L: 上市公司每日重大訊息 (daily material news)
-_TWSE_MATERIAL_NEWS_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap04_L"
-
-# Monthly revenue — listed companies (every month, all companies, filter client-side)
-# Run scripts/twse_swagger_parser.py to verify this path:
-_TWSE_MONTHLY_REVENUE_L_URL = "https://openapi.twse.com.tw/v1/opendata/t21sc03_1"
-_TWSE_MONTHLY_REVENUE_P_URL = "https://openapi.twse.com.tw/v1/opendata/t21sc03_2"
+# ── P2: Market data ───────────────────────────────────────────────────────────
+_TWSE_DAILY_TRADE_URL   = "https://openapi.twse.com.tw/v1/opendata/t22sr01_1"    # Stock price
 
 # Sections for which TWSE provides meaningful auto-fill data
 SUPPORTED_SECTIONS: frozenset[int] = frozenset({1, 3, 4, 5, 7, 9})
@@ -80,6 +92,47 @@ class MonthlyRevenue:
     yoy_pct: float = 0.0         # 去年同月增減%
     ytd_revenue_k_ntd: float = 0.0  # 當月累計營收 (thousands NT$)
     ytd_yoy_pct: float = 0.0     # 前期比較增減%
+
+
+@dataclass
+class IncomeStatementFact:
+    """One fiscal-year income statement from t163sb03_1 (general industry, annual Q4)."""
+    fiscal_year: int = 0              # Gregorian year (e.g. 2024)
+    revenue_k_ntd: float = 0.0        # 營業收入 (thousands NTD)
+    gross_profit_k_ntd: float = 0.0   # 毛利 (thousands NTD)
+    op_profit_k_ntd: float = 0.0      # 營業利益 (thousands NTD)
+    net_income_k_ntd: float = 0.0     # 本期淨利 (thousands NTD)
+
+
+@dataclass
+class BalanceSheetFact:
+    """One fiscal-year balance sheet from t163sb04_1 (general industry, annual Q4)."""
+    fiscal_year: int = 0
+    total_assets_k_ntd: float = 0.0         # 資產總計 (thousands NTD)
+    total_equity_k_ntd: float = 0.0         # 股東權益合計 (thousands NTD)
+    total_liabilities_k_ntd: float = 0.0    # 負債總計 (thousands NTD)
+    current_assets_k_ntd: float = 0.0       # 流動資產 (thousands NTD)
+    current_liabilities_k_ntd: float = 0.0  # 流動負債 (thousands NTD)
+    cash_k_ntd: float = 0.0                 # 現金及約當現金 (thousands NTD)
+    short_term_debt_k_ntd: float = 0.0      # 短期借款 (thousands NTD)
+    long_term_debt_k_ntd: float = 0.0       # 長期借款 (thousands NTD)
+
+
+@dataclass
+class CashFlowFact:
+    """One fiscal-year cash flow statement from t163sb05_1 (general industry, annual Q4)."""
+    fiscal_year: int = 0
+    ocf_k_ntd: float = 0.0    # 營業活動現金流量 (thousands NTD)
+    capex_k_ntd: float = 0.0  # 資本支出, stored as positive (thousands NTD)
+    da_k_ntd: float = 0.0     # 折舊及攤銷調整項 (thousands NTD)
+
+
+@dataclass
+class DividendInfo:
+    """One year of dividend data from t187ap14_L."""
+    fiscal_year: int = 0
+    cash_dividend_per_share: float = 0.0   # 現金股利
+    stock_dividend_per_share: float = 0.0  # 股票股利
 
 
 @dataclass
@@ -138,6 +191,18 @@ class TWSECompanyData:
 
     # ── From t21sc03_1 / t21sc03_2 ───────────────────────────────────────────
     monthly_revenues: list[MonthlyRevenue] = field(default_factory=list)  # newest first, up to 24
+
+    # ── From t163sb03_1 (P1) ─────────────────────────────────────────────────
+    income_statements: list[IncomeStatementFact] = field(default_factory=list)  # newest first
+
+    # ── From t163sb04_1 (P1) ─────────────────────────────────────────────────
+    balance_sheets: list[BalanceSheetFact] = field(default_factory=list)  # newest first
+
+    # ── From t163sb05_1 (P1) ─────────────────────────────────────────────────
+    cash_flows: list[CashFlowFact] = field(default_factory=list)  # newest first
+
+    # ── From t187ap14_L (P1) ─────────────────────────────────────────────────
+    dividends: list[DividendInfo] = field(default_factory=list)  # newest first
 
     # ── Raw ──────────────────────────────────────────────────────────────────
     raw: dict = field(default_factory=dict, repr=False)
@@ -257,13 +322,20 @@ async def fetch_twse_company(stock_code: str) -> TWSECompanyData | None:
         news_task         = asyncio.create_task(_fetch_json(client, _TWSE_MATERIAL_NEWS_URL))
         rev_l_task        = asyncio.create_task(_fetch_json(client, _TWSE_MONTHLY_REVENUE_L_URL))
         rev_p_task        = asyncio.create_task(_fetch_json(client, _TWSE_MONTHLY_REVENUE_P_URL))
+        # P1 endpoints: degrade gracefully to [] on 403 (handled by _fetch_json)
+        is_task           = asyncio.create_task(_fetch_json(client, _TWSE_IS_GENERAL_URL))
+        bs_task           = asyncio.create_task(_fetch_json(client, _TWSE_BS_GENERAL_URL))
+        cf_task           = asyncio.create_task(_fetch_json(client, _TWSE_CF_GENERAL_URL))
+        div_task          = asyncio.create_task(_fetch_json(client, _TWSE_DIVIDEND_URL))
 
         (
             company_l_rows, company_p_rows, sh_rows, board_rows,
             news_rows, rev_l_rows, rev_p_rows,
+            is_rows, bs_rows, cf_rows, div_rows,
         ) = await asyncio.gather(
             company_l_task, company_p_task, shareholders_task, board_task,
             news_task, rev_l_task, rev_p_task,
+            is_task, bs_task, cf_task, div_task,
         )
 
     # Prefer listed (L) over OTC (P)
@@ -336,6 +408,12 @@ async def fetch_twse_company(stock_code: str) -> TWSECompanyData | None:
             ytd_yoy_pct       = _safe_float(row.get("前期比較增減%", 0)),
         ))
 
+    # ── P1: Parse financial statements ────────────────────────────────────────
+    income_statements = _parse_is_rows(is_rows, stock_code)
+    balance_sheets    = _parse_bs_rows(bs_rows, stock_code)
+    cash_flows        = _parse_cf_rows(cf_rows, stock_code)
+    dividends         = _parse_dividend_rows(div_rows, stock_code)
+
     return TWSECompanyData(
         stock_code=stock_code,
         company_name_zh        = company_row.get("公司名稱", "").strip(),
@@ -370,12 +448,19 @@ async def fetch_twse_company(stock_code: str) -> TWSECompanyData | None:
         board_members          = board_members,
         material_news          = material_news,
         monthly_revenues       = monthly_revenues,
+        income_statements      = income_statements,
+        balance_sheets         = balance_sheets,
+        cash_flows             = cash_flows,
+        dividends              = dividends,
         raw                    = {
             "company": company_row,
             "shareholders": _find_all(sh_rows, stock_code),
             "board": board_data,
             "material_news": raw_news,
             "monthly_revenues": rev_rows,
+            "income_statements": _find_all(is_rows, stock_code),
+            "balance_sheets": _find_all(bs_rows, stock_code),
+            "cash_flows": _find_all(cf_rows, stock_code),
         },
     )
 
@@ -402,6 +487,150 @@ def _latest_ytd_revenue(data: TWSECompanyData) -> tuple[int, float]:
     if yr <= 0:
         return (0, 0.0)
     return (yr, round(latest.ytd_revenue_k_ntd / 1000.0, 1))
+
+
+def _parse_roc_or_gregorian_year(val: Any) -> int:
+    """Parse TWSE financial statement year field.
+
+    TWSE uses ROC years (e.g. "113" = Gregorian 2024) in IS/BS/CF endpoints.
+    Values >= 1900 are treated as Gregorian; values in 80-200 are treated as ROC.
+    """
+    try:
+        y = int(str(val).strip())
+        if 1900 <= y <= 2100:
+            return y
+        if 80 <= y <= 200:
+            return y + 1911
+    except (ValueError, TypeError):
+        pass
+    return 0
+
+
+def _col(row: dict, *keys: str) -> str:
+    """Return first non-empty string value from row for any of the given column keys."""
+    for k in keys:
+        v = row.get(k, "")
+        if v and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _parse_num(row: dict, *keys: str) -> float:
+    """Extract a numeric value from a TWSE row, trying multiple column names."""
+    for k in keys:
+        v = row.get(k, "")
+        if v and str(v).strip():
+            try:
+                return float(str(v).replace(",", "").strip())
+            except (ValueError, TypeError):
+                pass
+    return 0.0
+
+
+# ── P1 row parsers ────────────────────────────────────────────────────────────
+
+def _parse_is_rows(rows: list[dict], stock_code: str) -> list[IncomeStatementFact]:
+    """Parse t163sb03_1 into IncomeStatementFact; annual (Q4) reports only, newest first."""
+    facts: list[IncomeStatementFact] = []
+    for row in _find_all(rows, stock_code):
+        quarter = _col(row, "季別")
+        if quarter and quarter not in ("4",):
+            continue
+        year = _parse_roc_or_gregorian_year(_col(row, "年度"))
+        if year <= 0:
+            continue
+        facts.append(IncomeStatementFact(
+            fiscal_year      = year,
+            revenue_k_ntd    = _parse_num(row, "營業收入", "淨收益", "收入合計"),
+            gross_profit_k_ntd = _parse_num(row, "毛利（毛損）", "毛利", "毛利毛損"),
+            op_profit_k_ntd  = _parse_num(row, "營業利益（損失）", "營業利益", "營業損益"),
+            net_income_k_ntd = _parse_num(
+                row,
+                "本期淨利（淨損）", "稅後淨利", "本期稅後純益（純損）",
+                "本期綜合損益總額",
+            ),
+        ))
+    facts.sort(key=lambda f: f.fiscal_year, reverse=True)
+    return facts
+
+
+def _parse_bs_rows(rows: list[dict], stock_code: str) -> list[BalanceSheetFact]:
+    """Parse t163sb04_1 into BalanceSheetFact; annual (Q4) reports only, newest first."""
+    facts: list[BalanceSheetFact] = []
+    for row in _find_all(rows, stock_code):
+        quarter = _col(row, "季別")
+        if quarter and quarter not in ("4",):
+            continue
+        year = _parse_roc_or_gregorian_year(_col(row, "年度"))
+        if year <= 0:
+            continue
+        total_assets = _parse_num(row, "資產總計", "資產總額", "資產合計")
+        total_equity = _parse_num(row, "股東權益合計", "股東權益總額", "權益合計")
+        total_liab   = _parse_num(row, "負債總計", "負債總額", "負債合計")
+        facts.append(BalanceSheetFact(
+            fiscal_year             = year,
+            total_assets_k_ntd      = total_assets,
+            total_equity_k_ntd      = total_equity,
+            total_liabilities_k_ntd = total_liab if total_liab > 0 else max(total_assets - total_equity, 0.0),
+            current_assets_k_ntd    = _parse_num(row, "流動資產"),
+            current_liabilities_k_ntd = _parse_num(row, "流動負債"),
+            cash_k_ntd              = _parse_num(row, "現金及約當現金"),
+            short_term_debt_k_ntd   = _parse_num(row, "短期借款", "應付短期票券"),
+            long_term_debt_k_ntd    = _parse_num(row, "長期借款", "長期負債"),
+        ))
+    facts.sort(key=lambda f: f.fiscal_year, reverse=True)
+    return facts
+
+
+def _parse_cf_rows(rows: list[dict], stock_code: str) -> list[CashFlowFact]:
+    """Parse t163sb05_1 into CashFlowFact; annual (Q4) reports only, newest first.
+
+    capex_k_ntd is stored as a positive value (abs of the cash outflow for PPE acquisition).
+    """
+    facts: list[CashFlowFact] = []
+    for row in _find_all(rows, stock_code):
+        quarter = _col(row, "季別")
+        if quarter and quarter not in ("4",):
+            continue
+        year = _parse_roc_or_gregorian_year(_col(row, "年度"))
+        if year <= 0:
+            continue
+        capex_raw = _parse_num(
+            row,
+            "取得不動產廠房及設備", "取得不動產、廠房及設備",
+            "購置不動產廠房及設備", "資本支出",
+        )
+        facts.append(CashFlowFact(
+            fiscal_year = year,
+            ocf_k_ntd   = _parse_num(
+                row,
+                "來自營運活動之現金流量", "營業活動之淨現金流入（流出）",
+                "來自(用於)營業活動之淨現金流量", "營業活動現金流量",
+            ),
+            capex_k_ntd = abs(capex_raw),
+            da_k_ntd    = _parse_num(
+                row,
+                "折舊費用", "不動產廠房及設備折舊費用", "攤銷費用", "折舊及攤銷",
+            ),
+        ))
+    facts.sort(key=lambda f: f.fiscal_year, reverse=True)
+    return facts
+
+
+def _parse_dividend_rows(rows: list[dict], stock_code: str) -> list[DividendInfo]:
+    """Parse t187ap14_L into DividendInfo; newest year first."""
+    facts: list[DividendInfo] = []
+    for row in _find_all(rows, stock_code):
+        year = _parse_roc_or_gregorian_year(_col(row, "年度", "所屬年度"))
+        if year <= 0:
+            continue
+        facts.append(DividendInfo(
+            fiscal_year                = year,
+            cash_dividend_per_share    = _parse_num(row, "現金股利", "現金股利合計"),
+            stock_dividend_per_share   = _parse_num(row, "股票股利", "股票股利合計"),
+        ))
+    facts.sort(key=lambda f: f.fiscal_year, reverse=True)
+    return facts
 
 
 def _incorporation_country(data: TWSECompanyData) -> str:
@@ -693,6 +922,187 @@ def map_to_section4_event_risk(data: TWSECompanyData) -> dict[str, Any]:
     return mapping
 
 
+# ── P1 financial statement mappers ───────────────────────────────────────────
+
+def map_to_section7_income_statement(data: TWSECompanyData) -> dict[str, Any]:
+    """§7A income statement from P1 t163sb03_1 (NTD millions).
+
+    Fields: gross_profit, op_profit, net_income (and revenue — overrides monthly sum
+    with audited annual figure when P1 data is available).
+    """
+    if not data.income_statements:
+        return {}
+    mapping: dict[str, Any] = {}
+
+    for is_f in data.income_statements:
+        fy = f"FY{is_f.fiscal_year}"
+        base = f"7A_borrower_financials.income_statement.{fy}"
+        if is_f.revenue_k_ntd > 0:
+            mapping[f"{base}.revenue"]      = round(is_f.revenue_k_ntd / 1000.0, 1)
+        if is_f.gross_profit_k_ntd != 0.0:
+            mapping[f"{base}.gross_profit"] = round(is_f.gross_profit_k_ntd / 1000.0, 1)
+        if is_f.op_profit_k_ntd != 0.0:
+            mapping[f"{base}.op_profit"]    = round(is_f.op_profit_k_ntd / 1000.0, 1)
+        if is_f.net_income_k_ntd != 0.0:
+            mapping[f"{base}.net_income"]   = round(is_f.net_income_k_ntd / 1000.0, 1)
+
+    return mapping
+
+
+def map_to_section7_balance_sheet(data: TWSECompanyData) -> dict[str, Any]:
+    """§7A balance sheet from P1 t163sb04_1 (NTD millions).
+
+    Fields: total_assets, total_equity, cash_and_equivalents, total_debt, net_debt.
+    total_debt = short_term_debt + long_term_debt.
+    """
+    if not data.balance_sheets:
+        return {}
+    mapping: dict[str, Any] = {}
+
+    for bs in data.balance_sheets:
+        fy = f"FY{bs.fiscal_year}"
+        base = f"7A_borrower_financials.balance_sheet.{fy}"
+        if bs.total_assets_k_ntd > 0:
+            mapping[f"{base}.total_assets"]  = round(bs.total_assets_k_ntd / 1000.0, 1)
+        if bs.total_equity_k_ntd != 0.0:
+            mapping[f"{base}.total_equity"]  = round(bs.total_equity_k_ntd / 1000.0, 1)
+        if bs.cash_k_ntd > 0:
+            cash_m = round(bs.cash_k_ntd / 1000.0, 1)
+            mapping[f"{base}.cash_and_equivalents"] = cash_m
+        total_debt_k = bs.short_term_debt_k_ntd + bs.long_term_debt_k_ntd
+        if total_debt_k > 0:
+            total_debt_m = round(total_debt_k / 1000.0, 1)
+            mapping[f"{base}.total_debt"] = total_debt_m
+            cash_m = round(bs.cash_k_ntd / 1000.0, 1)
+            mapping[f"{base}.net_debt"]   = round(total_debt_m - cash_m, 1)
+
+    return mapping
+
+
+def map_to_section7_cash_flow(data: TWSECompanyData) -> dict[str, Any]:
+    """§7A cash flow from P1 t163sb05_1 (NTD millions).
+
+    Fields: ocf, capex (positive, cash spent), fcf = ocf - capex.
+    """
+    if not data.cash_flows:
+        return {}
+    mapping: dict[str, Any] = {}
+
+    for cf in data.cash_flows:
+        fy = f"FY{cf.fiscal_year}"
+        base = f"7A_borrower_financials.cash_flow.{fy}"
+        if cf.ocf_k_ntd != 0.0:
+            ocf_m = round(cf.ocf_k_ntd / 1000.0, 1)
+            mapping[f"{base}.ocf"] = ocf_m
+            if cf.capex_k_ntd > 0:
+                capex_m = round(cf.capex_k_ntd / 1000.0, 1)
+                mapping[f"{base}.capex"] = capex_m
+                mapping[f"{base}.fcf"]   = round(ocf_m - capex_m, 1)
+
+    return mapping
+
+
+def map_to_section7_ratios(data: TWSECompanyData) -> dict[str, Any]:
+    """§7B key ratios derived from P1 IS + BS + CF data.
+
+    Produces per-FY ratios: gross_margin_pct, ni_margin_pct, ebitda_margin_pct,
+    roe_pct, debt_equity, debt_ebitda, current_ratio.
+    """
+    if not data.income_statements or not data.balance_sheets:
+        return {}
+    mapping: dict[str, Any] = {}
+
+    is_by_year = {f.fiscal_year: f for f in data.income_statements}
+    bs_by_year = {f.fiscal_year: f for f in data.balance_sheets}
+    cf_by_year = {f.fiscal_year: f for f in data.cash_flows}
+
+    for year in sorted(set(is_by_year) & set(bs_by_year)):
+        is_f = is_by_year[year]
+        bs_f = bs_by_year[year]
+        cf_f = cf_by_year.get(year)
+        base = f"7B_key_ratios.FY{year}"
+
+        rev        = is_f.revenue_k_ntd
+        eq         = bs_f.total_equity_k_ntd
+        total_debt = bs_f.short_term_debt_k_ntd + bs_f.long_term_debt_k_ntd
+        cur_assets = bs_f.current_assets_k_ntd
+        cur_liab   = bs_f.current_liabilities_k_ntd
+        da         = cf_f.da_k_ntd if cf_f else 0.0
+        ebitda     = is_f.op_profit_k_ntd + da
+
+        if rev > 0:
+            if is_f.gross_profit_k_ntd != 0.0:
+                mapping[f"{base}.gross_margin_pct"]  = round(is_f.gross_profit_k_ntd / rev * 100, 2)
+            if is_f.net_income_k_ntd != 0.0:
+                mapping[f"{base}.ni_margin_pct"]     = round(is_f.net_income_k_ntd / rev * 100, 2)
+            if ebitda != 0.0:
+                mapping[f"{base}.ebitda_margin_pct"] = round(ebitda / rev * 100, 2)
+
+        if eq > 0:
+            if is_f.net_income_k_ntd != 0.0:
+                mapping[f"{base}.roe_pct"]   = round(is_f.net_income_k_ntd / eq * 100, 2)
+            if total_debt > 0:
+                mapping[f"{base}.debt_equity"] = round(total_debt / eq, 2)
+
+        if ebitda > 0 and total_debt > 0:
+            mapping[f"{base}.debt_ebitda"] = round(total_debt / ebitda, 2)
+
+        if cur_liab > 0 and cur_assets > 0:
+            mapping[f"{base}.current_ratio"] = round(cur_assets / cur_liab, 2)
+
+    return mapping
+
+
+def map_to_section5_from_financials(data: TWSECompanyData) -> dict[str, Any]:
+    """§5F guarantor creditworthiness snapshot from P1 BS + IS data.
+
+    Populates net_worth_twd_bn, total_debt_twd_bn, cash_twd_bn, ebitda_twd_bn,
+    net_margin_pct, roe_pct using the most recent year's annual data.
+    Units: NTD billions (thousands NTD ÷ 1,000,000).
+    """
+    if not data.balance_sheets:
+        return {}
+    mapping: dict[str, Any] = {}
+    bs = data.balance_sheets[0]  # newest first
+
+    def _k_to_bn(k_ntd: float) -> float:
+        return round(k_ntd / 1_000_000.0, 3)
+
+    eq   = bs.total_equity_k_ntd
+    debt = bs.short_term_debt_k_ntd + bs.long_term_debt_k_ntd
+    cash = bs.cash_k_ntd
+
+    if eq != 0.0:
+        mapping["5F_corporate_guarantee.net_worth_twd_bn"] = _k_to_bn(eq)
+    if debt > 0:
+        mapping["5F_corporate_guarantee.total_debt_twd_bn"] = _k_to_bn(debt)
+    if cash > 0:
+        mapping["5F_corporate_guarantee.cash_twd_bn"] = _k_to_bn(cash)
+
+    is_by_year = {f.fiscal_year: f for f in data.income_statements}
+    cf_by_year = {f.fiscal_year: f for f in data.cash_flows}
+    is_f = is_by_year.get(bs.fiscal_year)
+    cf_f = cf_by_year.get(bs.fiscal_year)
+
+    if is_f:
+        da     = cf_f.da_k_ntd if cf_f else 0.0
+        ebitda = is_f.op_profit_k_ntd + da
+        rev    = is_f.revenue_k_ntd
+        if ebitda > 0:
+            mapping["5F_corporate_guarantee.ebitda_twd_bn"] = _k_to_bn(ebitda)
+        if rev > 0:
+            if is_f.net_income_k_ntd != 0.0:
+                mapping["5F_corporate_guarantee.net_margin_pct"] = round(
+                    is_f.net_income_k_ntd / rev * 100, 2
+                )
+            if eq > 0 and is_f.net_income_k_ntd != 0.0:
+                mapping["5F_corporate_guarantee.roe_pct"] = round(
+                    is_f.net_income_k_ntd / eq * 100, 2
+                )
+
+    return mapping
+
+
 # ── Section dispatch ──────────────────────────────────────────────────────────
 
 def map_to_section(section_no: int, data: TWSECompanyData) -> dict[str, Any]:
@@ -701,8 +1111,15 @@ def map_to_section(section_no: int, data: TWSECompanyData) -> dict[str, Any]:
         1: map_to_section1,
         3: map_to_section3,
         4: lambda d: {**map_to_section4(d), **map_to_section4_event_risk(d)},
-        5: map_to_section5,
-        7: lambda d: {**map_to_section7_metadata(d), **map_to_section7_financials(d)},
+        5: lambda d: {**map_to_section5(d), **map_to_section5_from_financials(d)},
+        7: lambda d: {
+            **map_to_section7_metadata(d),
+            **map_to_section7_financials(d),
+            **map_to_section7_income_statement(d),
+            **map_to_section7_balance_sheet(d),
+            **map_to_section7_cash_flow(d),
+            **map_to_section7_ratios(d),
+        },
         9: map_to_section9,
     }
     fn = dispatch.get(section_no)
