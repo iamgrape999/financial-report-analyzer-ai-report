@@ -209,7 +209,23 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
           </select>
           <div class="d-flex gap-2">
             <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.tif,.xlsx,.xls" class="form-control form-control-sm">
-            <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()" data-i18n="rd.upload">Upload</button>
+            <button class="btn btn-outline-primary btn-sm" id="uploadFileBtn" onclick="uploadPDF()" data-i18n="rd.upload">Upload</button>
+          </div>
+          <div class="input-group input-group-sm">
+            <input type="url" id="docUrlInput" class="form-control" placeholder="https://example.com/annual-report.pdf" aria-label="Document URL">
+            <button class="btn btn-outline-primary" id="uploadUrlBtn" onclick="uploadDocumentUrl()" data-i18n="rd.upload_url">Upload URL</button>
+          </div>
+          <div class="input-group input-group-sm">
+            <input type="text" id="twseCodeInput" class="form-control" maxlength="8" placeholder="2603" aria-label="TWSE stock code">
+            <select id="twseRole" class="form-select" style="max-width:115px">
+              <option value="guarantor">Guarantor</option>
+              <option value="borrower">Borrower</option>
+            </select>
+            <button class="btn btn-outline-success" id="twseImportBtn" onclick="importTWSEOpenAPI()" data-i18n="rd.twse_import">TWSE Import</button>
+          </div>
+          <div id="uploadStatus" class="d-none">
+            <div class="progress" style="height:6px;"><div id="uploadProgressBar" class="progress-bar" style="width:0%"></div></div>
+            <small id="uploadProgressText" class="text-muted"></small>
           </div>
           <small class="text-muted" data-i18n="rd.file_hint">PDF · DOCX · PPTX · XLSX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
           <div id="docList"><span class="text-muted" data-i18n="rd.no_docs">No documents uploaded yet.</span></div>
@@ -698,6 +714,8 @@ const TRANSLATIONS={
     'rd.report_info':'Report Info',
     'rd.evidence_header':'📎 Evidence Documents <small class="text-muted fw-normal">(optional — enables ETL &amp; improves AI quality)</small>',
     'rd.upload':'Upload',
+    'rd.upload_url':'Upload URL',
+    'rd.twse_import':'TWSE Import',
     'rd.file_hint':'PDF · DOCX · PPTX · XLSX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR',
     'rd.no_docs':'No documents uploaded yet.',
     'rd.actions':'Actions',
@@ -837,6 +855,8 @@ const TRANSLATIONS={
     'rd.report_info':'報告資訊',
     'rd.evidence_header':'📎 佐證文件 <small class="text-muted fw-normal">（選填 — 啟用ETL並提升AI分析品質）</small>',
     'rd.upload':'上傳',
+    'rd.upload_url':'URL上傳',
+    'rd.twse_import':'TWSE匯入',
     'rd.file_hint':'PDF · DOCX · PPTX · XLSX · TXT · JPG · PNG · WEBP · BMP（最大50 MB）— 圖片/掃描PDF使用Gemini Vision OCR',
     'rd.no_docs':'尚未上傳任何文件。',
     'rd.actions':'操作',
@@ -2760,7 +2780,43 @@ async function regenSec2(){
   finally{sp.classList.add('d-none');}
 }
 
-// ── Upload PDF ────────────────────────────────────────────────────────────────
+// ── Upload documents ─────────────────────────────────────────────────────────
+function setUploadProgress(pct,msg,show=true){
+  const wrap=document.getElementById('uploadStatus');
+  const bar=document.getElementById('uploadProgressBar');
+  const text=document.getElementById('uploadProgressText');
+  if(!wrap||!bar||!text)return;
+  wrap.classList.toggle('d-none',!show);
+  bar.style.width=Math.max(0,Math.min(100,pct))+'%';
+  text.textContent=msg||'';
+}
+
+function setUploadBusy(busy){
+  ['uploadFileBtn','uploadUrlBtn','twseImportBtn'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=busy;});
+}
+
+function uploadWithProgress(url,form,fileName){
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',url);
+    xhr.setRequestHeader('Authorization','Bearer '+token);
+    xhr.upload.onprogress=(e)=>{
+      if(e.lengthComputable){
+        const pct=Math.min(95,Math.round((e.loaded/e.total)*95));
+        setUploadProgress(pct,tl(`Uploading ${fileName}… ${pct}%`,`正在上傳 ${fileName}… ${pct}%`));
+      }
+    };
+    xhr.onload=()=>{
+      let data={};
+      try{data=xhr.responseText?JSON.parse(xhr.responseText):{};}catch(_){data={detail:xhr.responseText};}
+      if(xhr.status>=200&&xhr.status<300)resolve(data);
+      else reject(new Error(data.detail||tl('Upload failed','上傳失敗')));
+    };
+    xhr.onerror=()=>reject(new Error(tl('Network error while uploading','上傳時發生網路錯誤')));
+    xhr.send(form);
+  });
+}
+
 async function uploadPDF(){
   const inp=document.getElementById('pdfInput');
   if(!inp.files.length){toast(tl('Select a file','請選擇檔案'),'warning');return;}
@@ -2773,13 +2829,54 @@ async function uploadPDF(){
   form.append('file',file);
   form.append('document_type',docType);
   toast(tl(`Uploading ${file.name}…`,`正在上傳 ${file.name}…`),'info');
+  setUploadBusy(true);setUploadProgress(1,tl(`Preparing ${file.name}…`,`準備上傳 ${file.name}…`));
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/documents',{method:'POST',headers:H(),body:form});
-    const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||tl('Upload failed','上傳失敗'));
+    await uploadWithProgress(API+'/reports/'+currentRid+'/documents',form,file.name);
+    setUploadProgress(100,tl('Upload accepted — document is now listed. Text extraction continues in the background.','上傳已受理 — 文件會立即出現在清單，文字擷取於背景繼續。'));
     toast(tl(`✓ Uploaded: ${file.name}`,`✓ 已上傳：${file.name}`),'success');inp.value='';
     await loadReportDetail(currentRid);
-  }catch(e){toast(e.message,'danger');}
+  }catch(e){toast(e.message,'danger');setUploadProgress(0,e.message,true);}
+  finally{setUploadBusy(false);setTimeout(()=>setUploadProgress(0,'',false),5000);}
+}
+
+async function uploadDocumentUrl(){
+  const inp=document.getElementById('docUrlInput');
+  const url=(inp.value||'').trim();
+  if(!url){toast(tl('Enter a document URL','請輸入文件URL'),'warning');return;}
+  const docType=document.getElementById('docType').value||'other';
+  toast(tl('Downloading document from URL…','正在從URL下載文件…'),'info');
+  setUploadBusy(true);setUploadProgress(20,tl('Downloading document from URL…','正在從URL下載文件…'));
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/documents/url',{
+      method:'POST',headers:HJ(),body:JSON.stringify({url,document_type:docType})
+    });
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(d.detail||tl('URL upload failed','URL上傳失敗'));
+    setUploadProgress(100,tl('URL upload accepted — document is now listed.','URL上傳已受理 — 文件會立即出現在清單。'));
+    toast(tl(`✓ Uploaded: ${d.original_filename||url}`,`✓ 已上傳：${d.original_filename||url}`),'success');inp.value='';
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');setUploadProgress(0,e.message,true);}
+  finally{setUploadBusy(false);setTimeout(()=>setUploadProgress(0,'',false),5000);}
+}
+
+async function importTWSEOpenAPI(){
+  const code=(document.getElementById('twseCodeInput').value||'').replace(/\D/g,'');
+  const role=document.getElementById('twseRole').value||'guarantor';
+  if(code.length!==4){toast(tl('Enter a 4-digit TWSE stock code','請輸入4碼TWSE股票代號'),'warning');return;}
+  setUploadBusy(true);setUploadProgress(15,tl(`Importing TWSE OpenAPI data for ${code}…`,`正在匯入 ${code} 的TWSE OpenAPI資料…`));
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/twse/import',{
+      method:'POST',headers:HJ(),
+      body:JSON.stringify({stock_code:code,role,section_no:7,merge_existing:true})
+    });
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(d.detail||tl('TWSE import failed','TWSE匯入失敗'));
+    const fields=(d.fields_imported||0).toLocaleString();
+    setUploadProgress(100,tl(`TWSE import complete — ${fields} fields merged into §7.`,`TWSE匯入完成 — ${fields} 個欄位已合併至§7。`));
+    toast(tl(`✓ TWSE imported ${fields} fields into §7`,`✓ TWSE已匯入 ${fields} 個欄位至§7`),'success');
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');setUploadProgress(0,e.message,true);}
+  finally{setUploadBusy(false);setTimeout(()=>setUploadProgress(0,'',false),6000);}
 }
 
 async function deleteDocument(docId){

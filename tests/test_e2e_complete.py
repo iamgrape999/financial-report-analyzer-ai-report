@@ -461,6 +461,40 @@ class TestDocuments:
         )
         assert r.status_code == 201
 
+    async def test_upload_document_from_url(self, ac, admin_hdrs, report, monkeypatch):
+        async def fake_download(url: str):
+            assert url == "https://example.com/reports/annual-report.txt"
+            return b"URL annual report revenue USD 10m", "annual-report.txt"
+
+        monkeypatch.setattr("credit_report.api.generate._download_document_url", fake_download)
+        r = await ac.post(
+            f"{REPORTS}/{report['id']}/documents/url",
+            json={"url": "https://example.com/reports/annual-report.txt", "document_type": "annual_report"},
+            headers=admin_hdrs,
+        )
+        assert r.status_code == 201
+        doc = r.json()
+        assert doc["original_filename"] == "annual-report.txt"
+        assert doc["file_format"] == "txt"
+
+        listed = await ac.get(f"{REPORTS}/{report['id']}/documents", headers=admin_hdrs)
+        assert listed.status_code == 200
+        assert doc["id"] in [d["id"] for d in listed.json()]
+
+    async def test_url_upload_rejects_unsupported_extension(self, ac, admin_hdrs, report, monkeypatch):
+        async def fake_download(url: str):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Unsupported file type '.exe'. Allowed")
+
+        monkeypatch.setattr("credit_report.api.generate._download_document_url", fake_download)
+        r = await ac.post(
+            f"{REPORTS}/{report['id']}/documents/url",
+            json={"url": "https://example.com/malware.exe", "document_type": "other"},
+            headers=admin_hdrs,
+        )
+        assert r.status_code == 400
+        assert "unsupported" in r.json()["detail"].lower()
+
     async def test_list_documents(self, ac, admin_hdrs, report):
         content = b"Test document content for list test."
         await ac.post(
@@ -553,6 +587,77 @@ class TestDocuments:
         )
         assert r.status_code == 200
 
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# D2 — TWSE OpenAPI enrichment
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTWSEOpenAPIImport:
+
+    async def test_twse_import_merges_high_coverage_financials(self, ac, admin_hdrs, report, monkeypatch):
+        sample_bundle = {
+            "company_profile": [{
+                "公司代號": "2603", "公司名稱": "長榮海運股份有限公司", "公司簡稱": "長榮",
+                "產業別": "航運業", "董事長": "張衍義", "總經理": "謝惠全",
+                "簽證會計師事務所": "勤業眾信", "上市日期": "1987/09/21",
+                "英文簡稱": "EVERGREEN MARINE", "網址": "https://www.evergreen-marine.com",
+            }],
+            "income_statement_general": [
+                {"公司代號": "2603", "年度": "2024", "會計項目": "營業收入", "金額": "385,200,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "營業毛利", "金額": "105,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "營業利益", "金額": "91,500,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "利息費用", "金額": "2,500,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "本期淨利", "金額": "78,500,000"},
+                {"公司代號": "2603", "年度": "2023", "會計項目": "營業收入", "金額": "275,000,000"},
+                {"公司代號": "2603", "年度": "2023", "會計項目": "本期淨利", "金額": "35,100,000"},
+            ],
+            "balance_sheet_general": [
+                {"公司代號": "2603", "年度": "2024", "會計項目": "現金及約當現金", "金額": "195,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "應收帳款", "金額": "42,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "流動資產合計", "金額": "285,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "不動產、廠房及設備", "金額": "520,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "非流動資產合計", "金額": "610,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "資產總計", "金額": "895,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "短期借款", "金額": "30,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "流動負債合計", "金額": "180,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "長期借款", "金額": "98,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "非流動負債合計", "金額": "295,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "負債總計", "金額": "475,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "權益總計", "金額": "420,000,000"},
+            ],
+            "monthly_revenue": [{"公司代號": "2603", "年度": "2024", "月份": "12", "營業收入": "32,000,000"}],
+            "valuation_ratios": [{"證券代號": "2603", "本益比": "4.5", "股價淨值比": "1.1"}],
+            "daily_trading": [{"證券代號": "2603", "收盤價": "180.5", "成交股數": "10,000,000"}],
+            "monthly_average": [],
+            "dividend": [{"公司代號": "2603", "股利年度": "2024", "現金股利": "8.0"}],
+        }
+
+        async def fake_fetch_company_bundle(self, stock_code):
+            assert stock_code == "2603"
+            return sample_bundle
+
+        monkeypatch.setattr("credit_report.integrations.twse.TWSEOpenAPIClient.fetch_company_bundle", fake_fetch_company_bundle)
+        r = await ac.post(
+            f"{REPORTS}/{report['id']}/twse/import",
+            json={"stock_code": "2603", "role": "guarantor"},
+            headers=admin_hdrs,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["fields_imported"] > 30
+        data = body["input_json"]
+        assert data["7C_guarantor_financials"]["revenue_fy2024"] == 385200000.0
+        assert data["7C_guarantor_financials"]["cash_fy2024"] == 195000000.0
+        assert data["7C_guarantor_financials"]["income_statement"]["FY2024"]["net_income"] == 78500000.0
+        assert data["7C_guarantor_financials"]["balance_sheet"]["FY2024"]["total_equity"] == 420000000.0
+        assert data["7B_key_ratios"]["fy2024_interest_coverage"] == 36.6
+        assert data["twse_import"]["coverage_fields"]["balance_sheet_metrics"] >= 12
+
+        saved = await ac.get(f"{REPORTS}/{report['id']}/inputs/7", headers=admin_hdrs)
+        assert saved.status_code == 200
+        assert saved.json()["input_json"]["twse_import"]["stock_code"] == "2603"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # E — Generation
