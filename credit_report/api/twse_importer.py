@@ -534,8 +534,18 @@ _Q4_VALUES = frozenset({"4", "04", "Q4", "Annual", "annual"})
 
 
 def _is_annual_quarter(quarter: str) -> bool:
-    """Return True if quarter string indicates a full-year (Q4 / annual) filing."""
-    return not quarter or quarter.lstrip("0") in ("4", "Q4", "Annual", "annual")
+    """Return True if quarter string indicates a full-year (Q4 / annual) filing.
+
+    Tolerant of whitespace and case: handles "4", "04", "Q4", "q4", "ANNUAL", etc.
+    """
+    if not quarter:
+        return True   # missing quarter → assume annual (TWSE sometimes omits it)
+    q = quarter.strip()
+    if not q:
+        return True
+    q_lc_nostrip = q.lstrip("0")
+    # Case-insensitive comparison for Q4/Annual/annual variants
+    return q_lc_nostrip in ("4", "Q4", "q4", "Annual", "annual", "ANNUAL")
 
 
 def _parse_is_rows(rows: list[dict], stock_code: str) -> list[IncomeStatementFact]:

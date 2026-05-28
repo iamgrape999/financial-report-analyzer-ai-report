@@ -1754,6 +1754,26 @@ def test_parse_cf_rows_accepts_q4_string():
     assert result[0].ocf_k_ntd == 70_000_000.0
 
 
+def test_is_annual_quarter_defense_in_depth_variants():
+    """_is_annual_quarter must tolerate whitespace, case, and missing input."""
+    from credit_report.api.twse_importer import _is_annual_quarter
+    # Accept variants
+    assert _is_annual_quarter("4")
+    assert _is_annual_quarter("04")
+    assert _is_annual_quarter(" 4 ")        # whitespace tolerated
+    assert _is_annual_quarter("Q4")
+    assert _is_annual_quarter("q4")         # lowercase Q
+    assert _is_annual_quarter("Annual")
+    assert _is_annual_quarter("annual")
+    assert _is_annual_quarter("ANNUAL")
+    assert _is_annual_quarter("")           # empty → assume annual
+    assert _is_annual_quarter("   ")        # whitespace-only → assume annual
+    # Reject non-Q4
+    assert not _is_annual_quarter("1")
+    assert not _is_annual_quarter("Q1")
+    assert not _is_annual_quarter("3")
+
+
 # ── Fix #2: map_to_section7_income_statement writes ebitda when DA available ──
 
 def test_section7_is_ebitda_written_when_cf_da_available():
