@@ -5168,8 +5168,12 @@ async function runBulkApply(){
   const body=document.getElementById('bulkApplyBody');
   body.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary"></div><div class="mt-2 small text-muted">Scanning all sections for matching facts…</div></div>';
   try{
-    const data=await apiCall(`/reports/${currentRid}/sections/bulk-suggest-apply`,'POST',
-      {sections:[1,2,3,4,5,6,7,8,9,10],min_confidence:conf,apply_mode:mode});
+    const resp=await fetch(API+`/reports/${currentRid}/sections/bulk-suggest-apply`,{
+      method:'POST',headers:HJ(),
+      body:JSON.stringify({sections:[1,2,3,4,5,6,7,8,9,10],min_confidence:conf,apply_mode:mode})
+    });
+    if(!resp.ok)throw new Error((await resp.json()).detail||resp.statusText);
+    const data=await resp.json();
     const res=document.getElementById('bulkApplyResult');
     res.classList.remove('d-none');
     // Build result table
@@ -5190,10 +5194,13 @@ async function runBulkApply(){
     // Refresh the currently open section form if any
     if(currentPanelSec&&sectionInputDataMap[currentPanelSec]){
       try{
-        const inp=await apiCall(`/reports/${currentRid}/inputs/${currentPanelSec}`,'GET');
-        const j=inp.input_json||{};
-        sectionInputDataMap[currentPanelSec]=j;
-        syncJsonToForm();
+        const r=await fetch(API+`/reports/${currentRid}/inputs/${currentPanelSec}`,{headers:H()});
+        if(r.ok){
+          const inp=await r.json();
+          const j=inp.input_json||{};
+          sectionInputDataMap[currentPanelSec]=j;
+          syncJsonToForm();
+        }
       }catch(_){}
     }
     // Refresh section table to show updated input indicators
