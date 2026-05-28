@@ -331,9 +331,27 @@ async def fetch_direct_url(
     filename: str | None = None,
 ) -> tuple[FetchedDoc | None, FetchError | None]:
     """Download a single document from a direct URL."""
-    data = await _download_bytes(client, url)
-    if not data:
-        return None, FetchError("direct", f"Failed to download: {url}")
+    try:
+        r = await client.get(url, headers=_HEADERS, timeout=120.0, follow_redirects=True)
+        r.raise_for_status()
+        data = r.content
+    except httpx.HTTPStatusError as exc:
+        return None, FetchError("direct", f"HTTP {exc.response.status_code} from server — URL may require authentication or the file no longer exists: {url}")
+    except httpx.TimeoutException:
+        return None, FetchError("direct", f"Download timed out (120 s) — file may be too large or the server is slow: {url}")
+    except httpx.HTTPError as exc:
+        return None, FetchError("direct", f"Network error downloading {url}: {exc}")
+
+    if len(data) > _MAX_FILE_BYTES:
+        return None, FetchError("direct", f"File too large ({len(data) // 1_048_576} MB) — max 50 MB: {url}")
+
+    content_type = r.headers.get("content-type", "")
+    if "text/html" in content_type:
+        preview = data[:120].decode("utf-8", errors="replace").strip()
+        return None, FetchError("direct", f"Server returned an HTML page instead of a document (the URL may redirect to a login wall). Preview: {preview!r}")
+
+    if len(data) < 512:
+        return None, FetchError("direct", f"Response only {len(data)} bytes — likely an error page, not a document: {url}")
 
     if not filename:
         path_part = url.split("?")[0].rstrip("/").split("/")[-1]

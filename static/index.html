@@ -3723,7 +3723,9 @@ async function uploadPDF(){
           _uploadProgressUpdate(pct,tl(`Uploading… ${pct}%`,`上傳中… ${pct}%`));
         }
       };
+      let _uploadPhaseComplete=false;
       xhr.upload.onload=()=>{
+        _uploadPhaseComplete=true;
         _uploadProgressUpdate(95,tl('Extracting text on server (this can take 30–90s for large PDFs)…','伺服器處理中（大型 PDF 約需 30–90 秒）…'));
       };
       xhr.onload=()=>{
@@ -3735,8 +3737,14 @@ async function uploadPDF(){
           reject(new Error(`HTTP ${xhr.status}: response could not be parsed (${parseErr.message})`));
         }
       };
-      xhr.onerror=()=>reject(new Error(tl('Network error — check connection and retry. Large files on mobile networks often fail; consider using the URL fetch button instead.',
-                                          '網路錯誤 — 請檢查連線後重試。手機網路上傳大檔常常失敗，可改用 URL 抓取按鈕。')));
+      xhr.onerror=()=>{
+        if(_uploadPhaseComplete){
+          reject(new Error(tl('File uploaded but server text extraction was cut off (server timeout or memory limit). Try a smaller/compressed PDF, or use TWSE Import to skip PDF processing.',
+                              '檔案已上傳但伺服器文字萃取被中斷（逾時或記憶體不足）。請嘗試更小或壓縮後的 PDF，或改用 TWSE 匯入來跳過 PDF 處理。')));
+        }else{
+          reject(new Error(tl('Network error during upload — check connection and retry.','上傳時發生網路錯誤 — 請檢查連線後重試。')));
+        }
+      };
       xhr.ontimeout=()=>reject(new Error(tl('Upload timed out after 5 minutes. Try a smaller file or use URL fetch.','上傳逾時（5 分鐘）。請改用更小的檔案或 URL 抓取。')));
       xhr.onabort=()=>reject(new Error(tl('Upload cancelled','上傳已取消')));
       xhr.send(form);
@@ -3781,18 +3789,18 @@ async function fetchFromUrl(){
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||`HTTP ${res.status}`);
     _uploadProgressUpdate(100,tl('Done','完成'));
-    const okCount=(d.registered||[]).length;
-    const errs=(d.upload_errors||[]).concat(d.fetch_errors||[]);
+    const okCount=(d.documents||[]).length;
+    const errs=(d.errors||[]);
     if(okCount>0){
-      const names=(d.registered||[]).map(r=>r.filename||'(file)').join(', ');
+      const names=(d.documents||[]).map(r=>r.filename||'(file)').join(', ');
       toast(tl(`✓ Fetched ${okCount} document(s): ${names}`,`✓ 已抓取 ${okCount} 份文件：${names}`),'success');
     }
     if(errs.length>0){
       const err=errs.map(e=>e.error||e.message||JSON.stringify(e)).join('; ');
-      toast(tl(`⚠️ Fetch errors: ${err}`,`⚠️ 抓取錯誤：${err}`),'warning');
+      toast(tl(`⚠️ Fetch error: ${err}`,`⚠️ 抓取錯誤：${err}`),'warning');
     }
     if(okCount===0&&errs.length===0){
-      toast(tl('No documents were fetched. Check the URL and try again.','未抓取到任何文件，請確認 URL 後重試。'),'warning');
+      toast(tl('No documents were fetched. The URL may be inaccessible from the server — try uploading directly.','未抓取到任何文件。伺服器可能無法存取此 URL，請改用直接上傳。'),'warning');
     }
     inp.value='';
     await loadReportDetail(currentRid);
