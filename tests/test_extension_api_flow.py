@@ -278,16 +278,28 @@ class TestExtensionStep7AISuggest:
         assert resp.status_code == 404
 
     async def test_ai_suggest_schema(self, client: AsyncClient, token: str, report_id: str):
-        """If open conflicts exist, ai-suggest returns the correct schema."""
-        # First list conflicts
+        """ai-suggest returns the correct response schema."""
+        # Seed two conflicting facts so this test is self-contained and never skips.
+        from credit_report.database import AsyncSessionLocal
+        from credit_report.fact_store.repository import upsert_facts
+        async with AsyncSessionLocal() as db:
+            await upsert_facts(db, [
+                {"report_id": report_id, "metric_name": "ebitda_ext_flow", "entity": "Co",
+                 "period": "FY2024", "value": 100.0, "value_text": "100",
+                 "source_type": "pdf_extraction", "state": "extracted"},
+                {"report_id": report_id, "metric_name": "ebitda_ext_flow", "entity": "Co",
+                 "period": "FY2024", "value": 180.0, "value_text": "180",
+                 "source_type": "ocr_extraction", "state": "extracted"},
+            ])
+            await db.commit()
+
         list_resp = await client.get(
             f"/api/credit-report/reports/{report_id}/facts/conflicts",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert list_resp.status_code == 200
         conflicts = list_resp.json()
-        if not conflicts:
-            pytest.skip("No open conflicts in this report — schema test skipped")
+        assert len(conflicts) >= 1, "Seeded conflicting facts must produce a FactConflict"
 
         cid = conflicts[0]["id"]
         with patch(

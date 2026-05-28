@@ -4,6 +4,7 @@ External HTTP calls are patched with unittest.mock — no live network traffic.
 """
 from __future__ import annotations
 
+import os
 import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,6 +21,9 @@ from credit_report.api.doc_fetcher import (
     fetch_mops_annual_reports,
     run_auto_fetch,
 )
+
+os.environ.setdefault("ADMIN_EMAIL",    "admin@example.com")
+os.environ.setdefault("ADMIN_PASSWORD", "admin123")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -421,9 +425,11 @@ def ac():
 
 
 async def _login(ac) -> dict:
-    r = await ac.post(f"{BASE}/auth/login", data={"username": "admin@test.com", "password": "adminpass"})
+    email = os.environ.get("ADMIN_EMAIL", "admin@example.com")
+    password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    r = await ac.post(f"{BASE}/auth/login", data={"username": email, "password": password})
     if r.status_code != 200:
-        pytest.skip("admin login failed")
+        pytest.skip(f"admin login failed (status {r.status_code})")
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
