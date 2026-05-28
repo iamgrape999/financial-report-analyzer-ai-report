@@ -211,9 +211,26 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
           </select>
           <div class="d-flex gap-2">
             <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.tif,.xlsx,.xls" class="form-control form-control-sm">
-            <button class="btn btn-outline-primary btn-sm" onclick="uploadPDF()" data-i18n="rd.upload">Upload</button>
+            <button class="btn btn-outline-primary btn-sm" id="btnUpload" onclick="uploadPDF()" data-i18n="rd.upload">Upload</button>
+          </div>
+          <div id="uploadProgressWrap" class="d-none">
+            <div class="progress" style="height:14px;">
+              <div id="uploadProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width:0%">0%</div>
+            </div>
+            <div id="uploadProgressLabel" class="text-muted small mt-1">Uploading…</div>
+          </div>
+          <div class="d-flex gap-2">
+            <input type="url" id="urlInput" class="form-control form-control-sm" placeholder="https://… (PDF URL — fetch from server)">
+            <button class="btn btn-outline-success btn-sm" id="btnUrlFetch" onclick="fetchFromUrl()" title="Server fetches the file directly — bypasses mobile network timeout">📥 URL</button>
           </div>
           <small class="text-muted" data-i18n="rd.file_hint">PDF · DOCX · PPTX · XLSX · TXT · JPG · PNG · WEBP · BMP (max 50 MB) — Images/scanned PDFs use Gemini Vision OCR</small>
+          <hr class="my-2">
+          <label class="form-label fw-semibold small mb-1">🇹🇼 TWSE Import / 證交所匯入</label>
+          <div class="d-flex gap-2">
+            <input type="text" id="twseStockCode" class="form-control form-control-sm" placeholder="2330" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6">
+            <button class="btn btn-success btn-sm" id="btnTwseImport" onclick="importFromTWSE()" title="Auto-fill §1/§3/§4/§5/§7/§9 from TWSE OpenAPI">📊 Import</button>
+          </div>
+          <small class="text-muted">Fills §1/§3/§4/§5/§7/§9 (company name, board, monthly revenue, IS/BS/CF, dividends) from TWSE OpenAPI</small>
           <div id="docList"><span class="text-muted" data-i18n="rd.no_docs">No documents uploaded yet.</span></div>
         </div>
       </div>
@@ -3653,33 +3670,190 @@ async function regenSec2(){
 }
 
 // ── Upload PDF ────────────────────────────────────────────────────────────────
+function _uploadProgressShow(label){
+  const wrap=document.getElementById('uploadProgressWrap');
+  const bar=document.getElementById('uploadProgressBar');
+  const lab=document.getElementById('uploadProgressLabel');
+  wrap.classList.remove('d-none');
+  bar.style.width='0%'; bar.textContent='0%';
+  lab.textContent=label;
+}
+function _uploadProgressUpdate(pct,label){
+  const bar=document.getElementById('uploadProgressBar');
+  bar.style.width=pct+'%'; bar.textContent=pct+'%';
+  if(label)document.getElementById('uploadProgressLabel').textContent=label;
+}
+function _uploadProgressHide(){
+  document.getElementById('uploadProgressWrap').classList.add('d-none');
+}
+
 async function uploadPDF(){
   const inp=document.getElementById('pdfInput');
   if(!inp.files.length){toast(tl('Select a file','請選擇檔案'),'warning');return;}
   const file=inp.files[0];
   const docType=document.getElementById('docType').value||'other';
-  // Duplicate detection — warn if same filename already uploaded
+  // Client-side size guard so the user doesn't wait minutes only to be rejected
+  const MAX_MB=50;
+  if(file.size>MAX_MB*1024*1024){
+    toast(tl(`⚠️ File too large: ${(file.size/1024/1024).toFixed(1)} MB (max ${MAX_MB} MB). Try compressing the PDF or splitting it.`,
+            `⚠️ 檔案過大：${(file.size/1024/1024).toFixed(1)} MB（上限 ${MAX_MB} MB）。請壓縮或拆分檔案。`),'danger');
+    return;
+  }
+  // Duplicate detection
   const dup=uploadedDocs.find(d=>d.original_filename===file.name);
   if(dup){if(!confirm(tl(`"${file.name}" is already uploaded to this report.\nUpload again as a separate copy?`,`「${file.name}」已上傳至此報告。\n是否再次上傳為獨立副本？`)))return;}
   const form=new FormData();
   form.append('file',file);
   form.append('document_type',docType);
-  toast(tl(`Uploading ${file.name}…`,`正在上傳 ${file.name}…`),'info');
+  const sizeM=(file.size/1024/1024).toFixed(1);
+  const btn=document.getElementById('btnUpload');
+  btn.disabled=true;
+  _uploadProgressShow(tl(`Uploading ${file.name} (${sizeM} MB)…`,`上傳中 ${file.name}（${sizeM} MB）…`));
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/documents',{method:'POST',headers:H(),body:form});
-    const d=await res.json();
-    if(!res.ok)throw new Error(d.detail||tl('Upload failed','上傳失敗'));
-    // Surface text extraction quality to the analyst immediately
+    // Use XMLHttpRequest so we can stream upload progress to the UI.
+    // fetch() has no upload-progress API — without XHR the bar would jump 0→100.
+    const d=await new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      xhr.open('POST',API+'/reports/'+currentRid+'/documents');
+      xhr.setRequestHeader('Authorization','Bearer '+token);
+      xhr.timeout=300000;   // 5 minutes — large PDFs + Gemini Vision OCR can be slow
+      xhr.upload.onprogress=(e)=>{
+        if(e.lengthComputable){
+          const pct=Math.round(e.loaded/e.total*90);   // reserve 90-100% for server processing
+          _uploadProgressUpdate(pct,tl(`Uploading… ${pct}%`,`上傳中… ${pct}%`));
+        }
+      };
+      xhr.upload.onload=()=>{
+        _uploadProgressUpdate(95,tl('Extracting text on server (this can take 30–90s for large PDFs)…','伺服器處理中（大型 PDF 約需 30–90 秒）…'));
+      };
+      xhr.onload=()=>{
+        try{
+          const body=xhr.responseText?JSON.parse(xhr.responseText):{};
+          if(xhr.status>=200&&xhr.status<300){resolve(body);}
+          else{reject(new Error(body.detail||`HTTP ${xhr.status} ${xhr.statusText||''}`.trim()));}
+        }catch(parseErr){
+          reject(new Error(`HTTP ${xhr.status}: response could not be parsed (${parseErr.message})`));
+        }
+      };
+      xhr.onerror=()=>reject(new Error(tl('Network error — check connection and retry. Large files on mobile networks often fail; consider using the URL fetch button instead.',
+                                          '網路錯誤 — 請檢查連線後重試。手機網路上傳大檔常常失敗，可改用 URL 抓取按鈕。')));
+      xhr.ontimeout=()=>reject(new Error(tl('Upload timed out after 5 minutes. Try a smaller file or use URL fetch.','上傳逾時（5 分鐘）。請改用更小的檔案或 URL 抓取。')));
+      xhr.onabort=()=>reject(new Error(tl('Upload cancelled','上傳已取消')));
+      xhr.send(form);
+    });
+    _uploadProgressUpdate(100,tl('Done','完成'));
     if(d.extraction_quality==='empty'){
-      toast(tl(`⚠️ Uploaded: ${file.name} — text extraction returned EMPTY. The document may be a scanned image that Vision OCR could not read. Try a higher-resolution scan or a text-based PDF.`,`⚠️ 已上傳：${file.name} — 文字萃取結果為空。文件可能是 Vision OCR 無法讀取的掃描圖像，請嘗試更高解析度或可選字文字的 PDF。`),'warning');
+      toast(tl(`⚠️ Uploaded ${file.name} — text extraction returned EMPTY. Try a higher-resolution scan or a text-based PDF.`,
+               `⚠️ 已上傳 ${file.name} — 文字萃取結果為空。請改用高解析度或可選字的 PDF。`),'warning');
     }else if(d.extraction_quality==='low'){
-      toast(tl(`⚠️ Uploaded: ${file.name} — low-quality text extracted (${(d.text_chars||0).toLocaleString()} chars). Some data may be missing; consider re-uploading a cleaner copy.`,`⚠️ 已上傳：${file.name} — 萃取文字品質偏低（${(d.text_chars||0).toLocaleString()} 字元），部分資料可能遺失，建議重新上傳更清晰的版本。`),'warning');
+      toast(tl(`⚠️ Uploaded ${file.name} — low-quality text (${(d.text_chars||0).toLocaleString()} chars).`,
+               `⚠️ 已上傳 ${file.name} — 文字品質偏低（${(d.text_chars||0).toLocaleString()} 字元）。`),'warning');
     }else{
-      toast(tl(`✓ Uploaded: ${file.name} (${(d.text_chars||0).toLocaleString()} chars extracted)`,`✓ 已上傳：${file.name}（已萃取 ${(d.text_chars||0).toLocaleString()} 字元）`),'success');
+      toast(tl(`✓ Uploaded ${file.name} (${(d.text_chars||0).toLocaleString()} chars extracted)`,
+               `✓ 已上傳 ${file.name}（已萃取 ${(d.text_chars||0).toLocaleString()} 字元）`),'success');
     }
     inp.value='';
     await loadReportDetail(currentRid);
-  }catch(e){toast(e.message,'danger');}
+  }catch(e){
+    console.error('uploadPDF failed:',e);
+    toast(tl(`Upload failed: ${e.message}`,`上傳失敗：${e.message}`),'danger');
+  }finally{
+    btn.disabled=false;
+    setTimeout(_uploadProgressHide,2000);
+  }
+}
+
+async function fetchFromUrl(){
+  const inp=document.getElementById('urlInput');
+  const url=(inp.value||'').trim();
+  if(!url){toast(tl('Paste a PDF URL first','請先貼上 PDF URL'),'warning');return;}
+  if(!/^https?:\/\//i.test(url)){toast(tl('URL must start with http:// or https://','URL 須以 http:// 或 https:// 開頭'),'warning');return;}
+  const btn=document.getElementById('btnUrlFetch');
+  btn.disabled=true;
+  _uploadProgressShow(tl('Server is fetching the file from the URL — this may take 30–120 seconds…',
+                         '伺服器正從 URL 抓取檔案 — 預計 30–120 秒…'));
+  _uploadProgressUpdate(20,tl('Downloading on server…','伺服器下載中…'));
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/fetch-documents',{
+      method:'POST',headers:HJ(),
+      body:JSON.stringify({sources:['direct'],direct_urls:[url]})
+    });
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||`HTTP ${res.status}`);
+    _uploadProgressUpdate(100,tl('Done','完成'));
+    const okCount=(d.registered||[]).length;
+    const errs=(d.upload_errors||[]).concat(d.fetch_errors||[]);
+    if(okCount>0){
+      const names=(d.registered||[]).map(r=>r.filename||'(file)').join(', ');
+      toast(tl(`✓ Fetched ${okCount} document(s): ${names}`,`✓ 已抓取 ${okCount} 份文件：${names}`),'success');
+    }
+    if(errs.length>0){
+      const err=errs.map(e=>e.error||e.message||JSON.stringify(e)).join('; ');
+      toast(tl(`⚠️ Fetch errors: ${err}`,`⚠️ 抓取錯誤：${err}`),'warning');
+    }
+    if(okCount===0&&errs.length===0){
+      toast(tl('No documents were fetched. Check the URL and try again.','未抓取到任何文件，請確認 URL 後重試。'),'warning');
+    }
+    inp.value='';
+    await loadReportDetail(currentRid);
+  }catch(e){
+    console.error('fetchFromUrl failed:',e);
+    toast(tl(`URL fetch failed: ${e.message}`,`URL 抓取失敗：${e.message}`),'danger');
+  }finally{
+    btn.disabled=false;
+    setTimeout(_uploadProgressHide,2000);
+  }
+}
+
+async function importFromTWSE(){
+  const inp=document.getElementById('twseStockCode');
+  const code=(inp.value||'').trim();
+  if(!code){toast(tl('Enter a TWSE stock code (e.g. 2330)','請輸入證交所股票代號（例如 2330）'),'warning');return;}
+  if(!/^\d{4,6}$/.test(code)){toast(tl('Stock code must be 4-6 digits','股票代號須為 4–6 位數字'),'warning');return;}
+  const btn=document.getElementById('btnTwseImport');
+  btn.disabled=true;
+  _uploadProgressShow(tl(`Fetching ${code} from TWSE OpenAPI…`,`正在從證交所 OpenAPI 抓取 ${code} 資料…`));
+  _uploadProgressUpdate(30,tl('Calling TWSE endpoints (12 concurrent requests)…','呼叫證交所端點中（12 個並行請求）…'));
+  try{
+    const res=await fetch(API+`/reports/${currentRid}/import-twse`,{
+      method:'POST',headers:HJ(),
+      body:JSON.stringify({
+        stock_code:code,
+        apply_mode:'only_empty',
+        sections:[1,3,4,5,7,9],
+      }),
+    });
+    const d=await res.json();
+    if(!res.ok)throw new Error(d.detail||`HTTP ${res.status}`);
+    _uploadProgressUpdate(100,tl('Done','完成'));
+    if(d.not_found){
+      toast(tl(`⚠️ Stock code ${code} not found on TWSE — verify it's a listed/OTC ticker`,
+               `⚠️ 證交所查無 ${code} — 請確認為上市/上櫃代號`),'warning');
+      return;
+    }
+    const secList=(d.sections_updated||[]).map(s=>'§'+s).join(', ')||'none';
+    toast(tl(`✓ TWSE Import: ${d.company_name||code} — ${d.fields_written} field(s) written into ${secList} (${d.fields_skipped} skipped — already filled)`,
+             `✓ 證交所匯入：${d.company_name||code} — 已寫入 ${d.fields_written} 個欄位至 ${secList}（跳過 ${d.fields_skipped} 個已填欄位）`),'success');
+    inp.value='';
+    await loadReportDetail(currentRid);
+    // Refresh open section panel if it's one of the updated sections
+    if(currentPanelSec&&(d.sections_updated||[]).includes(currentPanelSec)){
+      try{
+        const r=await fetch(API+`/reports/${currentRid}/inputs/${currentPanelSec}`,{headers:H()});
+        if(r.ok){
+          const ij=await r.json();
+          sectionInputDataMap[currentPanelSec]=ij.input_json||{};
+          syncJsonToForm();
+        }
+      }catch(_){}
+    }
+  }catch(e){
+    console.error('importFromTWSE failed:',e);
+    toast(tl(`TWSE import failed: ${e.message}`,`證交所匯入失敗：${e.message}`),'danger');
+  }finally{
+    btn.disabled=false;
+    setTimeout(_uploadProgressHide,2000);
+  }
 }
 
 async function deleteDocument(docId){
