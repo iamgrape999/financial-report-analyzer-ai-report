@@ -20,6 +20,7 @@ ENDPOINTS = {
     "monthly_revenue": "/opendata/t187ap05_L",
     "income_statement_general": "/opendata/t187ap06_L_ci",
     "balance_sheet_general": "/opendata/t187ap07_L_ci",
+    "cash_flow_general": "/opendata/t187ap08_L_ci",
     "valuation_ratios": "/exchangeReport/BWIBBU_ALL",
     "daily_trading": "/exchangeReport/STOCK_DAY_ALL",
     "monthly_average": "/exchangeReport/STOCK_DAY_AVG_ALL",
@@ -29,6 +30,9 @@ ENDPOINTS = {
 REPORTING_ENTITY_ALIASES = ("公司代號", "公司代碼", "證券代號", "股票代號", "Code", "code")
 PERIOD_ALIASES = ("年度", "年", "資料年度", "出表年度", "Year", "year")
 QUARTER_ALIASES = ("季別", "季度", "Quarter", "quarter")
+STATEMENT_LABEL_ALIASES = ("會計項目", "會計科目", "項目", "會計項目名稱", "會計科目名稱", "Account", "account")
+STATEMENT_VALUE_ALIASES = ("金額", "本期金額", "本期", "當期金額", "本年度金額", "數值", "Amount", "amount")
+STATEMENT_META_ALIASES = set(REPORTING_ENTITY_ALIASES + PERIOD_ALIASES + QUARTER_ALIASES + ("公司名稱", "公司簡稱", "出表日期", "出表時間", "資料日期"))
 
 INCOME_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "revenue": ("營業收入", "收益", "收入", "營收"),
@@ -43,6 +47,7 @@ INCOME_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "total_comprehensive_income": ("本期綜合損益總額", "綜合損益總額"),
     "depreciation_amortization": ("折舊", "折舊費用", "折舊及攤銷", "折舊與攤銷"),
     "interest_expense": ("利息費用",),
+    "ebitda": ("稅前息前折舊攤銷前淨利", "EBITDA"),
 }
 
 BALANCE_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
@@ -67,6 +72,22 @@ BALANCE_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "share_capital": ("股本", "普通股股本"),
     "retained_earnings": ("保留盈餘", "保留盈餘合計"),
     "total_equity": ("權益總計", "權益合計", "歸屬於母公司業主之權益合計", "股東權益總計"),
+    "treasury_shares": ("庫藏股票",),
+    "other_equity": ("其他權益",),
+    "total_liabilities_and_equity": ("負債及權益總計", "負債及股東權益總計"),
+}
+
+CASH_FLOW_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "operating_cash_flow": ("營業活動之淨現金流入", "營業活動之淨現金流出", "營業活動現金流量", "營業活動之淨現金流量"),
+    "investing_cash_flow": ("投資活動之淨現金流入", "投資活動之淨現金流出", "投資活動現金流量", "投資活動之淨現金流量"),
+    "financing_cash_flow": ("籌資活動之淨現金流入", "籌資活動之淨現金流出", "籌資活動現金流量", "籌資活動之淨現金流量"),
+    "capex": ("取得不動產、廠房及設備", "購置不動產、廠房及設備", "資本支出"),
+    "depreciation_amortization": ("折舊費用", "折舊及攤銷", "折舊與攤銷"),
+    "interest_paid": ("支付之利息", "利息支付"),
+    "dividends_paid": ("發放現金股利", "支付之股利", "股利支付"),
+    "cash_beginning": ("期初現金及約當現金餘額",),
+    "cash_ending": ("期末現金及約當現金餘額",),
+    "free_cash_flow": ("自由現金流量",),
 }
 
 PROFILE_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
@@ -159,17 +180,38 @@ def _metric_from_label(label: str, alias_map: dict[str, tuple[str, ...]]) -> Opt
 
 
 def _find_statement_label(row: dict[str, Any]) -> str:
+    explicit = _get(row, STATEMENT_LABEL_ALIASES)
+    if explicit not in (None, ""):
+        return str(explicit)
     for key, val in row.items():
-        if key in {"公司代號", "公司名稱", "年度", "季別", "出表日期"}:
+        if key in STATEMENT_META_ALIASES:
             continue
         if val and _to_number(val) is None:
             return str(val)
     # Sometimes the account name is the column key and the amount is its value.
     for key in row:
         metric_key = str(key)
-        if _metric_from_label(metric_key, {**INCOME_METRIC_ALIASES, **BALANCE_METRIC_ALIASES}):
+        if _metric_from_label(metric_key, {**INCOME_METRIC_ALIASES, **BALANCE_METRIC_ALIASES, **CASH_FLOW_METRIC_ALIASES}):
             return metric_key
     return ""
+
+
+def _clean_line_item_key(label: str) -> str:
+    cleaned = re.sub(r"\s+", "_", str(label or "").strip())
+    cleaned = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff]+", "_", cleaned).strip("_")
+    return cleaned[:80] or "unnamed_line_item"
+
+
+def _statement_value(row: dict[str, Any], label: str) -> Optional[float]:
+    explicit = _get(row, STATEMENT_VALUE_ALIASES)
+    value = _to_number(explicit)
+    if value is not None:
+        return value
+    excluded = set(STATEMENT_META_ALIASES) | set(STATEMENT_LABEL_ALIASES) | {label}
+    value = _first_number(row, excluded)
+    if value is not None:
+        return value
+    return _to_number(row.get(label))
 
 
 def _rows_for_code(rows: list[dict[str, Any]], stock_code: str) -> list[dict[str, Any]]:
@@ -180,15 +222,41 @@ def _parse_statement(rows: list[dict[str, Any]], stock_code: str, aliases: dict[
     periods: dict[str, dict[str, float]] = defaultdict(dict)
     for row in _rows_for_code(rows, stock_code):
         label = _find_statement_label(row)
-        metric = _metric_from_label(label, aliases)
-        if not metric:
+        if label:
+            metric = _metric_from_label(label, aliases)
+            value = _statement_value(row, label)
+            if metric and value is not None:
+                periods[_period_key(row)][metric] = value
             continue
-        value = _first_number(row, {"公司代號", "公司名稱", "年度", "季別", "出表日期", label})
-        if value is None:
-            value = _to_number(row.get(label))
-        if value is None:
+
+        # Wide-format fallback: treat matching account columns as individual metrics.
+        for key, val in row.items():
+            if key in STATEMENT_META_ALIASES:
+                continue
+            metric = _metric_from_label(str(key), aliases)
+            value = _to_number(val)
+            if metric and value is not None:
+                periods[_period_key(row)][metric] = value
+    return dict(periods)
+
+
+def _parse_statement_line_items(rows: list[dict[str, Any]], stock_code: str) -> dict[str, dict[str, float]]:
+    """Preserve every numeric statement line item, not only curated ratio fields."""
+    periods: dict[str, dict[str, float]] = defaultdict(dict)
+    for row in _rows_for_code(rows, stock_code):
+        period = _period_key(row)
+        label = _find_statement_label(row)
+        if label:
+            value = _statement_value(row, label)
+            if value is not None:
+                periods[period][_clean_line_item_key(label)] = value
             continue
-        periods[_period_key(row)][metric] = value
+        for key, val in row.items():
+            if key in STATEMENT_META_ALIASES:
+                continue
+            value = _to_number(val)
+            if value is not None:
+                periods[period][_clean_line_item_key(str(key))] = value
     return dict(periods)
 
 
@@ -210,6 +278,7 @@ def _derive_ratios(income: dict[str, dict[str, float]], balance: dict[str, dict[
         inc = income.get(period, {})
         bal = balance.get(period, {})
         total_debt = sum(v for v in (bal.get("short_term_borrowings"), bal.get("current_borrowings"), bal.get("current_lease_liabilities"), bal.get("long_term_borrowings"), bal.get("non_current_lease_liabilities")) if v is not None) or None
+        net_debt = (total_debt - bal.get("cash")) if total_debt is not None and bal.get("cash") is not None else None
         ebitda = inc.get("ebitda")
         if ebitda is None and inc.get("operating_profit") is not None:
             ebitda = inc.get("operating_profit", 0) + (inc.get("depreciation_amortization") or 0)
@@ -221,9 +290,12 @@ def _derive_ratios(income: dict[str, dict[str, float]], balance: dict[str, dict[
             "liabilities_to_assets": _safe_div(bal.get("total_liabilities"), bal.get("total_assets")),
             "debt_to_equity": _safe_div(total_debt, bal.get("total_equity")),
             "debt_to_ebitda": _safe_div(total_debt, ebitda),
+            "net_debt_to_ebitda": _safe_div(net_debt, ebitda),
             "interest_coverage": _safe_div(inc.get("operating_profit"), inc.get("interest_expense")),
             "roe_pct": _safe_div(inc.get("net_income"), bal.get("total_equity")),
             "roa_pct": _safe_div(inc.get("net_income"), bal.get("total_assets")),
+            "equity_to_assets": _safe_div(bal.get("total_equity"), bal.get("total_assets")),
+            "quick_ratio": _safe_div((bal.get("current_assets") - bal.get("inventories")) if bal.get("current_assets") is not None and bal.get("inventories") is not None else None, bal.get("current_liabilities")),
         }
         ratios[period] = {k: v for k, v in row.items() if v is not None}
     return ratios
@@ -276,6 +348,10 @@ def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]
 
     income = _parse_statement(bundle.get("income_statement_general", []), stock_code, INCOME_METRIC_ALIASES)
     balance = _parse_statement(bundle.get("balance_sheet_general", []), stock_code, BALANCE_METRIC_ALIASES)
+    cash_flow = _parse_statement(bundle.get("cash_flow_general", []), stock_code, CASH_FLOW_METRIC_ALIASES)
+    income_line_items = _parse_statement_line_items(bundle.get("income_statement_general", []), stock_code)
+    balance_line_items = _parse_statement_line_items(bundle.get("balance_sheet_general", []), stock_code)
+    cash_flow_line_items = _parse_statement_line_items(bundle.get("cash_flow_general", []), stock_code)
     ratios = _derive_ratios(income, balance)
     latest = _latest_period(balance) or _latest_period(income)
     latest_income = income.get(latest or "", {})
@@ -296,6 +372,10 @@ def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]
             "profile": len(profile),
             "income_statement_metrics": sum(len(v) for v in income.values()),
             "balance_sheet_metrics": sum(len(v) for v in balance.values()),
+            "cash_flow_metrics": sum(len(v) for v in cash_flow.values()),
+            "raw_income_statement_line_items": sum(len(v) for v in income_line_items.values()),
+            "raw_balance_sheet_line_items": sum(len(v) for v in balance_line_items.values()),
+            "raw_cash_flow_line_items": sum(len(v) for v in cash_flow_line_items.values()),
             "derived_ratio_metrics": sum(len(v) for v in ratios.values()),
             "monthly_revenue_rows": len(monthly_revenue),
             "valuation_rows": len(valuation),
@@ -312,7 +392,11 @@ def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]
         "unit": "thousands",
         "income_statement": income,
         "balance_sheet": balance,
+        "cash_flow_statement": cash_flow,
         "key_ratios_by_period": ratios,
+        "raw_income_statement_line_items": income_line_items,
+        "raw_balance_sheet_line_items": balance_line_items,
+        "raw_cash_flow_line_items": cash_flow_line_items,
         "latest_period": latest,
         "twse_company_profile": profile,
         "twse_monthly_revenue": monthly_revenue,
@@ -376,7 +460,11 @@ def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]
             "total_equity_fy2024": latest_balance.get("total_equity"),
             "income_statement": income,
             "balance_sheet": balance,
+            "cash_flow_statement": cash_flow,
             "key_ratios_by_period": ratios,
+            "raw_income_statement_line_items": income_line_items,
+            "raw_balance_sheet_line_items": balance_line_items,
+            "raw_cash_flow_line_items": cash_flow_line_items,
             "twse_company_profile": profile,
             "twse_monthly_revenue": monthly_revenue,
             "twse_valuation_ratios": valuation,

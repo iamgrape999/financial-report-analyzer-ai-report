@@ -119,7 +119,32 @@ def _extract_and_save_document_text(report_id: str, doc_id: str, file_bytes: byt
             doc_id, detected_fmt, len(text), report_id,
         )
     except Exception as exc:
+        # Extraction failures must never roll back or hide an already-accepted upload.
         logger.exception("document_text_extraction: failed doc=%s file=%r report=%s: %s", doc_id, fname, report_id, exc)
+
+
+def _schedule_document_text_extraction(report_id: str, doc_id: str, file_bytes: bytes, fname: str) -> None:
+    """Run document text extraction fully detached from the upload HTTP response.
+
+    Starlette BackgroundTasks are executed as part of response finalisation.  For large
+    PDFs/OCR this can keep XHR/fetch requests waiting after the browser has sent the
+    request body, which users experience as the progress bar being stuck at ~95%.
+    The upload endpoints now commit metadata first, return the document immediately,
+    and let this task continue independently in a worker thread.
+    """
+
+    async def runner() -> None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            partial(_extract_and_save_document_text, report_id, doc_id, file_bytes, fname),
+        )
+
+    try:
+        asyncio.create_task(runner())
+    except RuntimeError:
+        # Defensive fallback for non-ASGI/unit-test contexts without a running loop.
+        _extract_and_save_document_text(report_id, doc_id, file_bytes, fname)
 
 
 async def _download_document_url(url: str) -> tuple[bytes, str]:
@@ -433,7 +458,8 @@ async def upload_document(
     )
     db.add(doc)
     await db.flush()
-    background_tasks.add_task(_extract_and_save_document_text, report_id, doc_id, file_bytes, fname)
+    await db.commit()
+    _schedule_document_text_extraction(report_id, doc_id, file_bytes, fname)
     return doc
 
 
@@ -469,7 +495,8 @@ async def upload_document_url(
     )
     db.add(doc)
     await db.flush()
-    background_tasks.add_task(_extract_and_save_document_text, report_id, doc_id, file_bytes, fname)
+    await db.commit()
+    _schedule_document_text_extraction(report_id, doc_id, file_bytes, fname)
     return doc
 
 
