@@ -27,6 +27,7 @@ GEMINI_OCR_MODEL: str = os.getenv("GEMINI_OCR_MODEL", GEMINI_MODEL)
 GEMINI_ETL_MODEL: str = os.getenv("GEMINI_ETL_MODEL", GEMINI_MODEL)
 CR_SECTION_MAX_TOKENS: int = int(os.getenv("CR_SECTION_MAX_TOKENS", "8192"))
 CR_MAX_CONCURRENT_GENERATIONS: int = int(os.getenv("CR_MAX_CONCURRENT_GENERATIONS", "2"))
+CR_MAX_CONCURRENT_EXTRACTIONS: int = int(os.getenv("CR_MAX_CONCURRENT_EXTRACTIONS", "1"))
 DAILY_TOKEN_LIMIT: int = int(os.getenv("DAILY_TOKEN_LIMIT", "4000000"))
 LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "180"))
 
@@ -46,7 +47,8 @@ SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
 # ── Storage ──────────────────────────────────────────────────────────────────────────────────────
 CREDIT_REPORTS_ROOT: Path = Path(os.getenv("CREDIT_REPORTS_ROOT", "./data/credit_reports"))
 CR_MAX_CHUNKS_PER_SECTION: int = int(os.getenv("CR_MAX_CHUNKS_PER_SECTION", "12"))
-CREDIT_REPORT_MAX_UPLOAD_MB: int = int(os.getenv("CREDIT_REPORT_MAX_UPLOAD_MB", "50"))
+CREDIT_REPORT_MAX_UPLOAD_MB: int = int(os.getenv("CREDIT_REPORT_MAX_UPLOAD_MB", "20"))
+CR_ETL_MAX_TEXT_CHARS: int = int(os.getenv("CR_ETL_MAX_TEXT_CHARS", "120000"))
 
 CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "*")
 

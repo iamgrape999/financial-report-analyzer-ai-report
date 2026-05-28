@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import re
 import uuid
 from functools import partial
+from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote, urlparse
 
@@ -16,9 +18,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, GEMINI_API_KEY
+from credit_report import config as runtime_config
+from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, CR_MAX_CONCURRENT_EXTRACTIONS, GEMINI_API_KEY
 from credit_report.database import get_db
-from credit_report.generation.evidence import extract_text_from_file, save_document_binary, save_document_text
+from credit_report.generation.evidence import extract_text_from_file, extract_text_from_file_path, save_document_text
 from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
 from credit_report.generation.models import SectionDocument
 from credit_report.integrations.twse import TWSEOpenAPIClient, build_section7_input
@@ -37,6 +40,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/reports/{report_id}", tags=["generation"])
 
 _MAX_UPLOAD_BYTES = CREDIT_REPORT_MAX_UPLOAD_MB * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+_extraction_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_EXTRACTIONS)
+_TASK_TTL_SECONDS = 6 * 60 * 60
+_MAX_GENERATION_TASKS = 200
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -110,9 +117,44 @@ def _ensure_supported_extension(filename: str) -> str:
     return ext
 
 
-def _extract_and_save_document_text(report_id: str, doc_id: str, file_bytes: bytes, fname: str) -> None:
+def _document_dir(report_id: str) -> Path:
+    doc_dir = runtime_config.CREDIT_REPORTS_ROOT / report_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    return doc_dir
+
+
+def _document_binary_path(report_id: str, doc_id: str) -> Path:
+    return _document_dir(report_id) / f"{doc_id}.bin"
+
+
+def _save_document_filename(report_id: str, doc_id: str, filename: str) -> None:
+    (_document_dir(report_id) / f"{doc_id}.fname").write_text(filename, encoding="utf-8")
+
+
+async def _persist_upload_to_disk(report_id: str, doc_id: str, file: UploadFile, filename: str) -> tuple[Path, int]:
+    """Stream an UploadFile to disk with an incremental size guard."""
+    binary_path = _document_binary_path(report_id, doc_id)
+    total = 0
     try:
-        text, detected_fmt = extract_text_from_file(file_bytes, fname)
+        with binary_path.open("wb") as out:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
+                out.write(chunk)
+    except Exception:
+        binary_path.unlink(missing_ok=True)
+        raise
+    _save_document_filename(report_id, doc_id, filename)
+    return binary_path, total
+
+
+def _extract_and_save_document_text(report_id: str, doc_id: str, binary_path: Path, fname: str) -> None:
+    try:
+        text, detected_fmt = extract_text_from_file_path(binary_path, fname)
         save_document_text(report_id, doc_id, text)
         logger.info(
             "document_text_extraction: saved text doc=%s fmt=%s chars=%d report=%s",
@@ -123,37 +165,31 @@ def _extract_and_save_document_text(report_id: str, doc_id: str, file_bytes: byt
         logger.exception("document_text_extraction: failed doc=%s file=%r report=%s: %s", doc_id, fname, report_id, exc)
 
 
-def _schedule_document_text_extraction(report_id: str, doc_id: str, file_bytes: bytes, fname: str) -> None:
-    """Run document text extraction fully detached from the upload HTTP response.
-
-    Starlette BackgroundTasks are executed as part of response finalisation.  For large
-    PDFs/OCR this can keep XHR/fetch requests waiting after the browser has sent the
-    request body, which users experience as the progress bar being stuck at ~95%.
-    The upload endpoints now commit metadata first, return the document immediately,
-    and let this task continue independently in a worker thread.
-    """
+def _schedule_document_text_extraction(report_id: str, doc_id: str, binary_path: Path, fname: str) -> None:
+    """Run text extraction detached from the response without retaining upload bytes."""
 
     async def runner() -> None:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None,
-            partial(_extract_and_save_document_text, report_id, doc_id, file_bytes, fname),
-        )
+        async with _extraction_semaphore:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                partial(_extract_and_save_document_text, report_id, doc_id, binary_path, fname),
+            )
 
     try:
         asyncio.create_task(runner())
     except RuntimeError:
-        # Defensive fallback for non-ASGI/unit-test contexts without a running loop.
-        _extract_and_save_document_text(report_id, doc_id, file_bytes, fname)
+        _extract_and_save_document_text(report_id, doc_id, binary_path, fname)
 
 
-async def _download_document_url(url: str) -> tuple[bytes, str]:
+async def _download_document_url_to_disk(url: str, report_id: str, doc_id: str) -> tuple[Path, int, str]:
     parsed = urlparse(url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(status_code=400, detail="URL must be an http(s) document link")
 
     max_bytes = _MAX_UPLOAD_BYTES
-    data = bytearray()
+    binary_path = _document_binary_path(report_id, doc_id)
+    total = 0
     content_type = ""
     filename = ""
     try:
@@ -175,9 +211,71 @@ async def _download_document_url(url: str) -> tuple[bytes, str]:
                         exceeds_limit = False
                     if exceeds_limit:
                         raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
+                with binary_path.open("wb") as out:
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
+                        out.write(chunk)
+    except HTTPException:
+        binary_path.unlink(missing_ok=True)
+        raise
+    except httpx.RequestError as exc:
+        binary_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"URL download failed: {exc}") from exc
+    except Exception:
+        binary_path.unlink(missing_ok=True)
+        raise
+
+    if total == 0:
+        binary_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="URL returned an empty file")
+    filename = filename or _filename_from_url(url, content_type)
+    try:
+        _ensure_supported_extension(filename)
+    except HTTPException:
+        binary_path.unlink(missing_ok=True)
+        raise
+    _save_document_filename(report_id, doc_id, filename)
+    return binary_path, total, filename
+
+
+async def _download_document_url(url: str) -> tuple[bytes, str]:
+    """Compatibility download hook for tests and legacy callers.
+
+    Production URL uploads use _download_document_url_to_disk() to avoid holding
+    a large remote file in memory. Tests may monkeypatch this symbol; the endpoint
+    detects that and writes the returned bytes to disk before scheduling extraction.
+    """
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="URL must be an http(s) document link")
+
+    data = bytearray()
+    content_type = ""
+    filename = ""
+    try:
+        timeout = httpx.Timeout(30.0, connect=10.0, read=30.0)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            async with client.stream("GET", url, headers={"User-Agent": "financial-report-analyzer/1.0"}) as resp:
+                if resp.status_code >= 400:
+                    raise HTTPException(status_code=400, detail=f"URL download failed with HTTP {resp.status_code}")
+                content_type = resp.headers.get("content-type", "")
+                disposition = resp.headers.get("content-disposition", "")
+                match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', disposition, re.IGNORECASE)
+                if match:
+                    filename = _safe_filename(match.group(1), "downloaded_document")
+                content_length = resp.headers.get("content-length")
+                if content_length:
+                    try:
+                        exceeds_limit = int(content_length) > _MAX_UPLOAD_BYTES
+                    except ValueError:
+                        exceeds_limit = False
+                    if exceeds_limit:
+                        raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
                 async for chunk in resp.aiter_bytes():
                     data.extend(chunk)
-                    if len(data) > max_bytes:
+                    if len(data) > _MAX_UPLOAD_BYTES:
                         raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
     except HTTPException:
         raise
@@ -189,6 +287,9 @@ async def _download_document_url(url: str) -> tuple[bytes, str]:
     filename = filename or _filename_from_url(url, content_type)
     _ensure_supported_extension(filename)
     return bytes(data), filename
+
+
+_download_document_url._streaming_compat = True
 
 
 class DocumentOut(BaseModel):
@@ -270,6 +371,42 @@ _generation_tasks: dict[str, dict] = {}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _cleanup_generation_tasks(now: float | None = None) -> None:
+    """Bound the in-memory task registry used by the polling API."""
+    now = time.time() if now is None else now
+    expired = [
+        task_id for task_id, task in _generation_tasks.items()
+        if now - float(task.get("updated_at", task.get("created_at", now))) > _TASK_TTL_SECONDS
+    ]
+    for task_id in expired:
+        _generation_tasks.pop(task_id, None)
+
+    overflow = len(_generation_tasks) - _MAX_GENERATION_TASKS
+    if overflow > 0:
+        oldest = sorted(
+            _generation_tasks,
+            key=lambda tid: float(_generation_tasks[tid].get("updated_at", _generation_tasks[tid].get("created_at", 0))),
+        )
+        for task_id in oldest[:overflow]:
+            _generation_tasks.pop(task_id, None)
+
+
+def _create_generation_task(initial: dict) -> str:
+    _cleanup_generation_tasks()
+    task_id = str(uuid.uuid4())
+    now = time.time()
+    _generation_tasks[task_id] = {**initial, "created_at": now, "updated_at": now}
+    return task_id
+
+
+def _update_generation_task(task_id: str, updates: dict) -> None:
+    _cleanup_generation_tasks()
+    task = _generation_tasks.get(task_id)
+    if task is None:
+        return
+    task.update(updates)
+    task["updated_at"] = time.time()
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
     result = await db.execute(
@@ -437,20 +574,15 @@ async def upload_document(
     fname = _safe_filename(file.filename or "upload", "upload")
     ext = _ensure_supported_extension(fname)
 
-    file_bytes = await file.read()
-    if len(file_bytes) > _MAX_UPLOAD_BYTES:
-        logger.warning("upload_document: file too large bytes=%d limit=%dMB report=%s", len(file_bytes), CREDIT_REPORT_MAX_UPLOAD_MB, report_id)
-        raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
-
     doc_id = str(uuid.uuid4())
-    save_document_binary(report_id, doc_id, file_bytes, fname)
-    logger.info("upload_document: accepted file=%r type=%s bytes=%d doc=%s report=%s user=%s", fname, document_type, len(file_bytes), doc_id, report_id, current_user.id)
+    binary_path, file_size = await _persist_upload_to_disk(report_id, doc_id, file, fname)
+    logger.info("upload_document: accepted file=%r type=%s bytes=%d doc=%s report=%s user=%s", fname, document_type, file_size, doc_id, report_id, current_user.id)
 
     doc = SectionDocument(
         id=doc_id,
         report_id=report_id,
         original_filename=fname,
-        file_size_bytes=len(file_bytes),
+        file_size_bytes=file_size,
         document_type=document_type,
         file_format=ext,
         etl_status="pending",
@@ -459,7 +591,7 @@ async def upload_document(
     db.add(doc)
     await db.flush()
     await db.commit()
-    _schedule_document_text_extraction(report_id, doc_id, file_bytes, fname)
+    _schedule_document_text_extraction(report_id, doc_id, binary_path, fname)
     return doc
 
 
@@ -476,18 +608,29 @@ async def upload_document_url(
     _assert_owner_or_admin(report, current_user)
 
     document_type = _clean_document_type(payload.document_type)
-    file_bytes, fname = await _download_document_url(payload.url)
+    doc_id = str(uuid.uuid4())
+    if getattr(_download_document_url, "_streaming_compat", False):
+        binary_path, file_size, fname = await _download_document_url_to_disk(payload.url, report_id, doc_id)
+    else:
+        # Test/legacy monkeypatch path: preserve the public helper seam while
+        # still persisting bytes before scheduling background extraction.
+        file_bytes, fname = await _download_document_url(payload.url)
+        _ensure_supported_extension(fname)
+        if len(file_bytes) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"File exceeds the {CREDIT_REPORT_MAX_UPLOAD_MB} MB upload limit")
+        binary_path = _document_binary_path(report_id, doc_id)
+        binary_path.write_bytes(file_bytes)
+        _save_document_filename(report_id, doc_id, fname)
+        file_size = len(file_bytes)
     ext = _extension_from_filename(fname)
 
-    doc_id = str(uuid.uuid4())
-    save_document_binary(report_id, doc_id, file_bytes, fname)
-    logger.info("upload_document_url: accepted url=%r file=%r type=%s bytes=%d doc=%s report=%s user=%s", payload.url, fname, document_type, len(file_bytes), doc_id, report_id, current_user.id)
+    logger.info("upload_document_url: accepted url=%r file=%r type=%s bytes=%d doc=%s report=%s user=%s", payload.url, fname, document_type, file_size, doc_id, report_id, current_user.id)
 
     doc = SectionDocument(
         id=doc_id,
         report_id=report_id,
         original_filename=fname,
-        file_size_bytes=len(file_bytes),
+        file_size_bytes=file_size,
         document_type=document_type,
         file_format=ext,
         etl_status="pending",
@@ -496,7 +639,7 @@ async def upload_document_url(
     db.add(doc)
     await db.flush()
     await db.commit()
-    _schedule_document_text_extraction(report_id, doc_id, file_bytes, fname)
+    _schedule_document_text_extraction(report_id, doc_id, binary_path, fname)
     return doc
 
 
@@ -528,9 +671,7 @@ async def etl_document_endpoint(
     Returns extracted field values per section so the UI can show them and let the
     analyst review/save them as section inputs.
     """
-    from credit_report.generation.evidence import load_document_texts, save_document_text
-    from pathlib import Path
-    from credit_report.config import CREDIT_REPORTS_ROOT
+    from credit_report.generation.evidence import save_document_text
 
     report = await _require_report(db, report_id)
     _assert_can_view(report, current_user)
@@ -547,7 +688,7 @@ async def etl_document_endpoint(
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Load extracted text — if .txt is missing, re-extract from stored binary (server restart recovery)
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = runtime_config.CREDIT_REPORTS_ROOT / report_id
     txt_path = doc_dir / f"{doc_id}.txt"
     if not txt_path.exists():
         bin_path = doc_dir / f"{doc_id}.bin"
@@ -563,9 +704,10 @@ async def etl_document_endpoint(
                 doc_id, stored_fname, report_id,
             )
             loop = asyncio.get_event_loop()
-            reextracted_text, _ = await loop.run_in_executor(
-                None, partial(extract_text_from_file, bin_path.read_bytes(), stored_fname)
-            )
+            async with _extraction_semaphore:
+                reextracted_text, _ = await loop.run_in_executor(
+                    None, partial(extract_text_from_file_path, bin_path, stored_fname)
+                )
             save_document_text(report_id, doc_id, reextracted_text)
         else:
             raise HTTPException(
@@ -707,10 +849,12 @@ async def generation_task_status(
     current_user: User = Depends(get_current_user),
 ):
     """Poll the status of a background generation task."""
+    _cleanup_generation_tasks()
     task = _generation_tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found or server was restarted")
-    return GenerateTaskResult(task_id=task_id, **task)
+    public_task = {k: v for k, v in task.items() if k not in {"created_at", "updated_at"}}
+    return GenerateTaskResult(task_id=task_id, **public_task)
 
 
 @router.post("/generate/{section_no}", status_code=202, response_model=GenerateTaskResult)
@@ -742,8 +886,7 @@ async def generate_section(
             detail=f"Hard dependencies not yet generated: sections {missing}",
         )
 
-    task_id = str(uuid.uuid4())
-    _generation_tasks[task_id] = {"status": "running", "section_no": section_no}
+    task_id = _create_generation_task({"status": "running", "section_no": section_no})
     user_id, user_role = current_user.id, current_user.role
     output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
@@ -774,7 +917,7 @@ async def generate_section(
                     output_language=output_lang,
                 )
                 await bg_db.commit()
-                _generation_tasks[task_id].update({
+                _update_generation_task(task_id, {
                     "status": output.status,
                     "tokens_used": output.tokens_used,
                 })
@@ -787,7 +930,7 @@ async def generate_section(
                     await bg_db.rollback()
                 except Exception:
                     pass
-                _generation_tasks[task_id].update({
+                _update_generation_task(task_id, {
                     "status": "error",
                     "detail": str(exc)[:500],
                 })
@@ -837,8 +980,7 @@ async def generate_full_report(
             detail="GEMINI_API_KEY is not configured. Set it in Render environment variables to enable AI generation.",
         )
 
-    task_id = str(uuid.uuid4())
-    _generation_tasks[task_id] = {"status": "running"}
+    task_id = _create_generation_task({"status": "running"})
     user_id, user_role = current_user.id, current_user.role
     full_output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
@@ -859,7 +1001,7 @@ async def generate_full_report(
                 )
                 await bg_db.commit()
                 done = sum(1 for v in results.values() if v == "done")
-                _generation_tasks[task_id].update({
+                _update_generation_task(task_id, {
                     "status": "done",
                     "sections": {str(k): v for k, v in results.items()},
                 })
@@ -872,7 +1014,7 @@ async def generate_full_report(
                     await bg_db.rollback()
                 except Exception:
                     pass
-                _generation_tasks[task_id].update({
+                _update_generation_task(task_id, {
                     "status": "error",
                     "detail": str(exc)[:500],
                 })

@@ -31,6 +31,12 @@ services:
         value: "4000000"
       - key: CR_MAX_CONCURRENT_GENERATIONS
         value: "1"
+      - key: CR_MAX_CONCURRENT_EXTRACTIONS
+        value: "1"
+      - key: CREDIT_REPORT_MAX_UPLOAD_MB
+        value: "20"
+      - key: CR_ETL_MAX_TEXT_CHARS
+        value: "120000"
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
       - key: CORS_ALLOW_ORIGINS
