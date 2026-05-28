@@ -13,6 +13,8 @@ import logging
 import time
 from typing import Optional
 
+from credit_report.config import CR_ETL_MAX_TEXT_CHARS
+
 logger = logging.getLogger(__name__)
 
 # Which sections are relevant for each document type
@@ -1199,7 +1201,7 @@ def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> 
         SECTION_EXTRACTION_SCHEMA[n] for n in section_nos if n in SECTION_EXTRACTION_SCHEMA
     )
     doc_type_label = document_type.replace("_", " ").title()
-    text_snippet = text[:400000]
+    text_snippet = text[:CR_ETL_MAX_TEXT_CHARS]
     user_prompt = (
         f"Document type: {doc_type_label}\n\n"
         f"Target sections to extract: {section_nos}\n\n"

@@ -194,6 +194,9 @@ async def export_pdf(
     current_user: User = Depends(get_current_user),
 ):
     """Generate and stream a PDF file for all completed sections (requires weasyprint)."""
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, current_user)
+
     try:
         from weasyprint import HTML, CSS
     except ImportError:
@@ -201,9 +204,6 @@ async def export_pdf(
             status_code=503,
             detail="PDF export unavailable — weasyprint is not installed on this server",
         )
-
-    report = await _require_report(db, report_id)
-    _assert_can_view(report, current_user)
 
     result = await db.execute(
         select(SectionOutput)

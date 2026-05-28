@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import heapq
 import logging
 import time
+from itertools import count
 from pathlib import Path
 from typing import Optional
 
@@ -60,32 +62,59 @@ def load_document_texts(report_id: str) -> list[str]:
     return texts
 
 
+def _iter_text_chunks(text: str):
+    """Yield overlapping chunks without materialising a second list for large documents."""
+    i = 0
+    step = CHUNK_SIZE - CHUNK_OVERLAP
+    while i < len(text):
+        chunk = text[i : i + CHUNK_SIZE].strip()
+        if chunk:
+            yield chunk
+        i += step
+
+
 def retrieve_evidence(
     report_id: str,
     section_no: int,
     max_chunks: int = CR_MAX_CHUNKS_PER_SECTION,
 ) -> list[str]:
-    """
-    Return the most keyword-relevant text chunks for a section.
-
-    Chunks are scored by how many of the section's retrieval keywords they contain,
-    then the top-scoring chunks (up to max_chunks) are returned.
-    """
+    """Return the top keyword-relevant chunks without retaining every chunk in memory."""
     keywords = SECTION_RETRIEVAL_KEYWORDS.get(section_no, [])
-    if not keywords:
+    if not keywords or max_chunks <= 0:
         return []
 
-    all_texts = load_document_texts(report_id)
-    if not all_texts:
-        return []
+    doc_dir = CREDIT_REPORTS_ROOT / report_id
 
-    all_chunks: list[str] = []
-    for text in all_texts:
-        all_chunks.extend(_chunk_text(text))
+    # Min-heap stores only the best max_chunks items instead of every chunk from
+    # every uploaded document. This keeps prompt retrieval stable on low-memory
+    # Render instances even when users upload long annual reports.
+    top: list[tuple[int, int, str]] = []
+    seq = count()
 
-    scored = [(chunk, _score_chunk(chunk, keywords)) for chunk in all_chunks]
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return [chunk for chunk, score in scored[:max_chunks] if score > 0]
+    def consider_text(text: str) -> None:
+        for chunk in _iter_text_chunks(text):
+            score = _score_chunk(chunk, keywords)
+            if score <= 0:
+                continue
+            item = (score, next(seq), chunk)
+            if len(top) < max_chunks:
+                heapq.heappush(top, item)
+            elif score > top[0][0]:
+                heapq.heapreplace(top, item)
+
+    if doc_dir.exists():
+        for txt_file in sorted(doc_dir.glob("*.txt")):
+            try:
+                consider_text(txt_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+    else:
+        # Backward-compatible seam for tests and custom deployments that override
+        # load_document_texts(); production avoids this path when report files exist.
+        for text in load_document_texts(report_id):
+            consider_text(text)
+
+    return [chunk for score, _, chunk in sorted(top, key=lambda x: x[0], reverse=True)]
 
 
 # ── Text quality check ────────────────────────────────────────────────────────
@@ -203,6 +232,60 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         "[OCR] extract_text_from_pdf: all parsers failed or produced low-quality text "
         "— returning empty so caller triggers Vision OCR"
     )
+    return ""
+
+
+def extract_text_from_pdf_path(pdf_path: Path) -> str:
+    """Extract PDF text from a file path, avoiding an eager full-file bytes copy."""
+    pdf_kb = pdf_path.stat().st_size // 1024 if pdf_path.exists() else 0
+    logger.info("[OCR] extract_text_from_pdf_path: start path=%s bytes=%dKB", pdf_path, pdf_kb)
+
+    t0 = time.perf_counter()
+    try:
+        from pdfminer.high_level import extract_text
+
+        result = extract_text(str(pdf_path))
+        elapsed = (time.perf_counter() - t0) * 1000
+        stats = _quality_stats(result or "")
+        logger.info(
+            "[OCR] pdfminer(path): elapsed=%.0fms chars=%d meaningful=%d ratio=%.1f%% sample=%r",
+            elapsed, stats["chars"], stats["meaningful"], stats["ratio_pct"], stats["sample"],
+        )
+        if result and _text_quality_ok(result):
+            logger.info("[OCR] pdfminer(path): quality OK → using this text")
+            return result
+    except Exception as e:
+        logger.warning("[OCR] pdfminer(path): exception: %s", e)
+
+    t0 = time.perf_counter()
+    try:
+        import pypdf
+
+        reader = pypdf.PdfReader(str(pdf_path))
+        page_count = len(reader.pages)
+        parts: list[str] = []
+        non_empty_pages = 0
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                parts.append(page_text)
+                non_empty_pages += 1
+        result = "\n\n".join(parts)
+        elapsed = (time.perf_counter() - t0) * 1000
+        stats = _quality_stats(result)
+        logger.info(
+            "[OCR] pypdf(path): elapsed=%.0fms pages=%d non_empty_pages=%d chars=%d "
+            "meaningful=%d ratio=%.1f%% sample=%r",
+            elapsed, page_count, non_empty_pages,
+            stats["chars"], stats["meaningful"], stats["ratio_pct"], stats["sample"],
+        )
+        if result and _text_quality_ok(result):
+            logger.info("[OCR] pypdf(path): quality OK → using this text")
+            return result
+    except Exception as e:
+        logger.warning("[OCR] pypdf(path): exception: %s", e)
+
+    logger.warning("[OCR] extract_text_from_pdf_path: parsers failed or low quality")
     return ""
 
 
@@ -511,3 +594,26 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> tuple[str, str]:
             "ETL will receive no text and return no data", filename,
         )
     return text, fmt
+
+
+
+def extract_text_from_file_path(file_path: Path, filename: str) -> tuple[str, str]:
+    """Detect format and extract text from a persisted upload path.
+
+    PDF native-text extraction streams from the path to avoid keeping both the
+    request body and parser input bytes alive. OCR fallbacks and non-PDF formats
+    still read bytes only inside the detached extraction worker.
+    """
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext == "pdf":
+        text = extract_text_from_pdf_path(file_path)
+        if not text.strip():
+            logger.info(
+                "[OCR] PDF path extraction returned nothing — reading capped bytes for Vision OCR: %r",
+                filename,
+            )
+            with file_path.open("rb") as fh:
+                text = extract_text_from_scanned_pdf_vision(fh.read(20 * 1024 * 1024))
+        return text, "pdf"
+
+    return extract_text_from_file(file_path.read_bytes(), filename)
