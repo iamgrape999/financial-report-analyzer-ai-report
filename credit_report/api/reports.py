@@ -1291,5 +1291,6 @@ async def bulk_apply_suggestions(
         report_id=report_id,
         total_applied=total_applied,
         total_skipped=total_skipped,
+        total_facts_checked=len(active_facts),
         sections=section_results,
     )

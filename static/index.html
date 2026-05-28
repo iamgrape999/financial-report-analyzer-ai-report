@@ -5148,7 +5148,7 @@ async function umResetPw(userId, email){
 }
 
 // ── Bulk Apply Suggestions (Smart Import Fields) ──────────────────────────────
-function openBulkApplyModal(){
+async function openBulkApplyModal(){
   if(!currentRid){toast('No report loaded','warning');return;}
   // Reset modal state
   document.getElementById('bulkApplyBody').innerHTML='';
@@ -5157,6 +5157,21 @@ function openBulkApplyModal(){
   document.getElementById('bulkApplyBtn').disabled=false;
   document.getElementById('bulkApplySpin').classList.add('d-none');
   new bootstrap.Modal(document.getElementById('bulkApplyModal')).show();
+  // Pre-flight check: warn if no documents uploaded (CanonicalFact source).
+  // No facts → Smart Import will return 0 across every section.
+  try{
+    const r=await fetch(API+`/reports/${currentRid}/documents`,{headers:H()});
+    if(r.ok){
+      const docs=await r.json();
+      if(Array.isArray(docs)&&docs.length===0){
+        document.getElementById('bulkApplyBody').innerHTML=`
+          <div class="alert alert-warning mb-0">
+            <strong>⚠️ ${tl('No documents uploaded yet','尚未上傳任何文件')}</strong>
+            <div class="small mt-1">${tl('Smart Import needs CanonicalFacts extracted from documents. Without any uploads, every section will return 0 matches. Upload at least one annual report or financial statement first.','Smart Import 需要從文件萃取出的 CanonicalFacts。沒有上傳文件，每個 section 都會回傳 0 筆。請先上傳至少一份年報或財報。')}</div>
+          </div>`;
+      }
+    }
+  }catch(_){}
 }
 
 async function runBulkApply(){
@@ -5176,17 +5191,45 @@ async function runBulkApply(){
     const data=await resp.json();
     const res=document.getElementById('bulkApplyResult');
     res.classList.remove('d-none');
-    // Build result table
+    // Empty-state: no CanonicalFacts exist for this report
+    const factCount=(data.total_facts_checked||0);
+    if(factCount===0){
+      res.innerHTML=`
+        <div class="alert alert-warning mb-2">
+          <h6 class="mb-2">⚠️ ${tl('No facts to import yet','尚無可匯入的資料')}</h6>
+          <p class="small mb-2">
+            ${tl('Smart Import works by scanning <strong>CanonicalFacts</strong> that have already been extracted from uploaded documents. This report has <strong>0 facts</strong> in its database, so there is nothing to fill in.',
+                 '此功能會掃描已從文件中萃取出的 <strong>CanonicalFacts</strong> 並自動填入表單。此份報告目前資料庫中有 <strong>0 筆 facts</strong>，因此沒有可匯入的內容。')}
+          </p>
+          <p class="small mb-2"><strong>${tl('Next step','下一步')}:</strong></p>
+          <ol class="small mb-0">
+            <li>${tl('Close this dialog','關閉此對話框')}</li>
+            <li>${tl('Scroll up to the <strong>📎 Evidence Documents</strong> section','向上捲動至 <strong>📎 Evidence Documents</strong> 區塊')}</li>
+            <li>${tl("Upload the borrower's annual report or financial statements (PDF / DOCX / XLSX)",'上傳借戶的年報或財務報表（PDF / DOCX / XLSX）')}</li>
+            <li>${tl('Wait for ETL to extract facts (usually 30 – 90 seconds per document)','等待 ETL 萃取資料（每份約 30–90 秒）')}</li>
+            <li>${tl('Re-open Smart Import — matched fields will populate across §1 – §10','再次點開 Smart Import — 符合的欄位將自動填入 §1–§10')}</li>
+          </ol>
+        </div>`;
+      body.innerHTML='';
+      btn.disabled=false; spin.classList.add('d-none');
+      return;
+    }
+    // Build result table (facts exist; show per-section breakdown)
     const rows=data.sections.map(s=>{
       const bar=s.applied_count>0?'<span class="badge bg-success">'+s.applied_count+' applied</span>':'<span class="badge bg-secondary">0</span>';
       const skip=s.skipped_count>0?`<small class="text-muted"> (${s.skipped_count} skipped)</small>`:'';
       const conf2=s.conflict_count>0?`<small class="text-warning"> ⚠${s.conflict_count} conflict</small>`:'';
       return `<tr><td class="ps-2">§${s.section_no}</td><td>${bar}${skip}${conf2}</td><td class="text-muted small">${s.suggestions_found} found</td></tr>`;
     }).join('');
+    const alertClass=data.total_applied>0?'alert-success':'alert-info';
+    const headline=data.total_applied>0
+      ? `✅ <strong>${data.total_applied}</strong> ${tl('field(s) applied across','個欄位匯入到')} ${data.sections.filter(s=>s.applied_count>0).length} ${tl('section(s)','個 section')}.`
+      : `ℹ️ <strong>${factCount}</strong> ${tl('fact(s) in database, but no new matches at this confidence/mode.','筆 facts 已存在，但目前篩選下沒有新的可填欄位。')}`;
     res.innerHTML=`
-      <div class="alert alert-success py-2 mb-2">
-        ✅ <strong>${data.total_applied}</strong> field(s) applied across ${data.sections.filter(s=>s.applied_count>0).length} section(s).
-        ${data.total_skipped>0?`<span class="text-muted small">(${data.total_skipped} skipped — already filled)</span>`:''}
+      <div class="alert ${alertClass} py-2 mb-2">
+        ${headline}
+        ${data.total_skipped>0?`<div class="small text-muted mt-1">${data.total_skipped} ${tl('skipped — already filled (switch to Overwrite mode to replace)','已跳過，因為欄位已有資料（切換到 Overwrite 模式可覆寫）')}</div>`:''}
+        ${data.total_applied===0&&factCount>0?`<div class="small text-muted mt-1">${tl('Try lowering Confidence Threshold to MEDIUM or ALL.','可降低 Confidence Threshold 至 MEDIUM 或 ALL 再試一次。')}</div>`:''}
       </div>
       <table class="table table-sm mb-0"><thead><tr><th>Section</th><th>Result</th><th>Facts</th></tr></thead>
       <tbody>${rows}</tbody></table>`;

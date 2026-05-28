@@ -267,6 +267,7 @@ class BulkApplySuggestionsResponse(BaseModel):
     report_id: str
     total_applied: int
     total_skipped: int
+    total_facts_checked: int = 0   # 0 = no CanonicalFacts in DB; frontend should explain why
     sections: list[BulkApplySectionResult]
 
 
