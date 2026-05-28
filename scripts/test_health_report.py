@@ -47,6 +47,7 @@ _SLOW_TREND_MIN_RUNS = 20  # need at least this many runs to declare a trend
 _SLOW_BASELINE_WINDOW = 10
 _SLOW_RECENT_WINDOW = 10
 _MAX_HISTORY_PER_TEST = 100  # oldest records trimmed after this
+_STALE_THRESHOLD_S = 3 * 24 * 3600  # 3 days — tests not seen since the latest run + this window are skipped
 
 
 def _load_history() -> dict[str, list[dict]]:
@@ -81,16 +82,35 @@ def _ts_label(ts: int) -> str:
 
 
 def _analyse(history: dict[str, list[dict]]) -> tuple[list[dict], list[dict], list[dict]]:
-    """Return (broken, flaky, slow) — each item is an analysis dict."""
+    """Return (broken, flaky, slow) — each item is an analysis dict.
+
+    Tests that haven't run within _STALE_THRESHOLD_S of the most recent suite run
+    are treated as renamed/deleted and excluded from broken/flaky checks. Without
+    this filter, removed tests appear permanently "broken" forever because their
+    last 3 historical runs (before deletion) all failed.
+    """
     broken: list[dict] = []
     flaky: list[dict] = []
     slow: list[dict] = []
+
+    # Anchor staleness to the latest activity across the whole suite, not wall
+    # clock — otherwise a long CI gap would mark every test stale.
+    latest_seen_ts = 0
+    for recs in history.values():
+        for r in recs:
+            ts = r.get("ts", 0)
+            if ts > latest_seen_ts:
+                latest_seen_ts = ts
+    stale_cutoff = latest_seen_ts - _STALE_THRESHOLD_S if latest_seen_ts else 0
 
     for tid, recs in history.items():
         # Only examine real test calls (skip skipped / xfailed / rerun-intermediate)
         calls = [r for r in recs if r["status"] in ("passed", "failed", "error")]
         if len(calls) < 2:
             continue
+
+        if calls[-1].get("ts", 0) < stale_cutoff:
+            continue  # test renamed/deleted since the last suite run
 
         recent = calls[-_WINDOW_RECENT:]
         durations = [r.get("duration", 0.0) for r in calls if r.get("duration") is not None]
