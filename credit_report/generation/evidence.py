@@ -174,6 +174,7 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     Returns empty string if extraction fails or text quality is too low
     (e.g. CID-font Chinese PDFs where characters are unmapped).
     """
+    import gc
     pdf_kb = len(pdf_bytes) // 1024
     logger.info("[OCR] extract_text_from_pdf: start bytes=%dKB", pdf_kb)
 
@@ -186,6 +187,8 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         return plumber_text
     if plumber_text:
         logger.info("[OCR] pdfplumber: elapsed=%.0fms low quality, trying pdfminer", elapsed)
+    del plumber_text  # release pdfplumber allocations before next phase
+    gc.collect()
 
     # pdfminer — best for native-text PDFs without complex table layouts
     t0 = time.perf_counter()
@@ -246,6 +249,9 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     except Exception as e:
         logger.warning("[OCR] pypdf: exception: %s", e)
 
+    # Force GC before Vision OCR starts: pdfplumber and pypdf may hold PDF parse objects.
+    # On 512 MB Render instances this can prevent OOM when escalating to Vision OCR.
+    gc.collect()
     logger.warning(
         "[OCR] extract_text_from_pdf: all parsers failed or produced low-quality text "
         "— returning empty so caller triggers Vision OCR"
@@ -255,6 +261,10 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
 _PDF_SPARSE_PAGE_THRESHOLD = 50   # chars below which a page is considered "image-only"
 _PDF_MAX_IMAGE_PAGE_OCR = 5       # max Vision OCR calls per PDF for sparse pages
+# Limit per-phase page processing to prevent OOM on large annual reports.
+# 512 MB Render starter: pdfplumber layout analysis ~1-3 MB/page → cap at 100 to stay under limit.
+# Vision OCR is capped separately at extract_text_from_scanned_pdf_vision call-site.
+_PDF_MAX_PDFPLUMBER_PAGES = 100
 
 
 def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
@@ -263,6 +273,8 @@ def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
     Pages with embedded images but very little native text (image-only pages, e.g.
     financial tables rendered as pictures) are sent to Gemini Vision OCR so that
     embedded financial data is not silently lost.
+
+    Capped at _PDF_MAX_PDFPLUMBER_PAGES to avoid OOM on large annual reports.
     """
     try:
         import io
@@ -271,7 +283,15 @@ def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
         parts: list[str] = []
         image_ocr_count = 0
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            total_pages = len(pdf.pages)
+            if total_pages > _PDF_MAX_PDFPLUMBER_PAGES:
+                logger.warning(
+                    "[OCR] pdfplumber: large PDF %d pages — capping at %d to limit memory use",
+                    total_pages, _PDF_MAX_PDFPLUMBER_PAGES,
+                )
             for page_no, page in enumerate(pdf.pages, 1):
+                if page_no > _PDF_MAX_PDFPLUMBER_PAGES:
+                    break
                 page_text = page.extract_text() or ""
                 tables = page.extract_tables()
                 if tables:
@@ -592,7 +612,7 @@ _GEMINI_PDF_SIZE_LIMIT = 20 * 1024 * 1024  # 20 MB
 _PDF_PAGE_THRESHOLD = 30
 
 
-def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200) -> str:
+def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 100) -> str:
     """
     For scanned/image PDFs where text extraction yields nothing:
     send the PDF to Gemini Vision for OCR.
@@ -602,6 +622,9 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 200)
     - Large PDFs (> 20 MB) or those with many pages: split into single-page chunks,
       OCR each page separately, concatenate.  This prevents silent truncation and
       ensures every page is processed.
+
+    max_pages=100 (reduced from 200) to limit peak memory on 512 MB Render instances.
+    Each page blob + Gemini response can consume 5-20 MB; 100 pages ≈ 200 MB headroom.
     """
     pdf_kb = len(pdf_bytes) // 1024
     logger.info("[OCR] extract_text_from_scanned_pdf_vision: start pdf_kb=%d", pdf_kb)

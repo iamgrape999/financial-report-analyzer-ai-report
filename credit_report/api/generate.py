@@ -452,17 +452,28 @@ async def _auto_populate_section_inputs(
 
 # ── Document management ───────────────────────────────────────────────────────
 
-async def _extract_and_save_text_bg(report_id: str, doc_id: str, file_bytes: bytes, fname: str) -> None:
-    """Background task: extract text in thread pool then persist it.
+async def _extract_and_save_text_bg(report_id: str, doc_id: str) -> None:
+    """Background task: read binary from disk, extract text, persist.
 
-    Runs after 201 is already sent — the document is visible in the list immediately.
-    If extraction fails the binary (.bin) is still present; ETL will re-extract from it.
+    Reads from the already-saved .bin file so that file_bytes are NOT held in memory
+    from request time until this task runs (prevents OOM when extractions queue up).
+    If extraction fails, ETL recovers from the .bin on the next run.
     """
+    from credit_report.config import CREDIT_REPORTS_ROOT as _CR_ROOT
     loop = asyncio.get_running_loop()
     try:
+        bin_path = _CR_ROOT / report_id / f"{doc_id}.bin"
+        fname_path = _CR_ROOT / report_id / f"{doc_id}.fname"
+        if not bin_path.exists():
+            logger.error("upload bg: binary not found doc=%s report=%s — skipping extraction", doc_id, report_id)
+            return
+        file_bytes = bin_path.read_bytes()
+        fname = fname_path.read_text(encoding="utf-8") if fname_path.exists() else f"{doc_id}.bin"
+
         text, detected_fmt = await loop.run_in_executor(
             None, partial(extract_text_from_file, file_bytes, fname)
         )
+        del file_bytes  # free before writing text (save_document_text is fast)
         save_document_text(report_id, doc_id, text)
         logger.info(
             "upload_document bg: extraction done doc=%s fmt=%s chars=%d report=%s",
@@ -470,9 +481,9 @@ async def _extract_and_save_text_bg(report_id: str, doc_id: str, file_bytes: byt
         )
     except Exception as exc:
         logger.error(
-            "upload_document bg: extraction failed doc=%s file=%r report=%s: %s — "
+            "upload_document bg: extraction failed doc=%s report=%s: %s — "
             "ETL will re-extract from stored binary when triggered",
-            doc_id, fname, report_id, exc,
+            doc_id, report_id, exc,
         )
 
 
@@ -541,7 +552,7 @@ async def upload_document(
     # This eliminates the 95 %-progress stall for large/scanned PDFs that need
     # Gemini Vision OCR (60-180 s): the HTTP connection closes immediately.
     if background_tasks is not None:
-        background_tasks.add_task(_extract_and_save_text_bg, report_id, doc_id, file_bytes, fname)
+        background_tasks.add_task(_extract_and_save_text_bg, report_id, doc_id)
 
     return DocumentOut(
         id=doc.id,
