@@ -452,11 +452,36 @@ async def _auto_populate_section_inputs(
 
 # ── Document management ───────────────────────────────────────────────────────
 
+async def _extract_and_save_text_bg(report_id: str, doc_id: str, file_bytes: bytes, fname: str) -> None:
+    """Background task: extract text in thread pool then persist it.
+
+    Runs after 201 is already sent — the document is visible in the list immediately.
+    If extraction fails the binary (.bin) is still present; ETL will re-extract from it.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        text, detected_fmt = await loop.run_in_executor(
+            None, partial(extract_text_from_file, file_bytes, fname)
+        )
+        save_document_text(report_id, doc_id, text)
+        logger.info(
+            "upload_document bg: extraction done doc=%s fmt=%s chars=%d report=%s",
+            doc_id, detected_fmt, len(text.strip()), report_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "upload_document bg: extraction failed doc=%s file=%r report=%s: %s — "
+            "ETL will re-extract from stored binary when triggered",
+            doc_id, fname, report_id, exc,
+        )
+
+
 @router.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     report_id: str,
     file: UploadFile = File(...),
     document_type: str = Form(default="other"),
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
@@ -489,45 +514,10 @@ async def upload_document(
         )
 
     doc_id = str(uuid.uuid4())
-    logger.info("upload_document: extracting text file=%r type=%s bytes=%d doc=%s report=%s", fname, document_type, len(file_bytes), doc_id, report_id)
-    loop = asyncio.get_running_loop()
-    try:
-        text, detected_fmt = await asyncio.wait_for(
-            loop.run_in_executor(None, partial(extract_text_from_file, file_bytes, fname)),
-            timeout=180.0,
-        )
-    except asyncio.TimeoutError:
-        logger.error("upload_document: text extraction timed out file=%r bytes=%d doc=%s", fname, len(file_bytes), doc_id)
-        raise HTTPException(
-            status_code=408,
-            detail="Document text extraction timed out. Try compressing the PDF or uploading a smaller portion.",
-        )
-    save_document_text(report_id, doc_id, text)
+
+    # Save binary BEFORE returning — document is always recoverable even if
+    # text extraction is slow or fails (ETL re-extracts from .bin when .txt missing).
     save_document_binary(report_id, doc_id, file_bytes, fname)
-
-    text_chars = len(text.strip())
-    from credit_report.generation.evidence import _text_quality_ok
-    if text_chars == 0:
-        extraction_quality = "empty"
-        logger.warning(
-            "upload_document: EMPTY text after extraction file=%r doc=%s report=%s "
-            "— ETL will receive no data; try a different file format or re-scan",
-            fname, doc_id, report_id,
-        )
-    elif not _text_quality_ok(text):
-        extraction_quality = "low"
-        logger.warning(
-            "upload_document: LOW QUALITY text file=%r chars=%d doc=%s report=%s "
-            "— Vision OCR was attempted but content may be degraded",
-            fname, text_chars, doc_id, report_id,
-        )
-    else:
-        extraction_quality = "good"
-
-    logger.info(
-        "upload_document: saved doc=%s fmt=%s chars=%d quality=%s report=%s user=%s",
-        doc_id, detected_fmt, text_chars, extraction_quality, report_id, current_user.id,
-    )
 
     doc = SectionDocument(
         id=doc_id,
@@ -535,12 +525,24 @@ async def upload_document(
         original_filename=fname,
         file_size_bytes=len(file_bytes),
         document_type=document_type,
-        file_format=detected_fmt,
+        file_format=ext,  # refined to detected format once background task completes
         etl_status="pending",
         uploaded_by=current_user.id,
     )
     db.add(doc)
     await db.flush()
+
+    logger.info(
+        "upload_document: registered doc=%s file=%r bytes=%d report=%s user=%s — text extraction queued",
+        doc_id, fname, len(file_bytes), report_id, current_user.id,
+    )
+
+    # Kick off text extraction after the 201 response is sent.
+    # This eliminates the 95 %-progress stall for large/scanned PDFs that need
+    # Gemini Vision OCR (60-180 s): the HTTP connection closes immediately.
+    if background_tasks is not None:
+        background_tasks.add_task(_extract_and_save_text_bg, report_id, doc_id, file_bytes, fname)
+
     return DocumentOut(
         id=doc.id,
         original_filename=doc.original_filename,
@@ -548,8 +550,8 @@ async def upload_document(
         document_type=doc.document_type,
         file_format=doc.file_format,
         etl_status=doc.etl_status,
-        text_chars=text_chars,
-        extraction_quality=extraction_quality,
+        text_chars=None,
+        extraction_quality=None,
     )
 
 
@@ -1729,18 +1731,26 @@ async def auto_fetch_documents(
             continue
 
         doc_id = str(uuid.uuid4())
+        # Save binary first — document is always registered regardless of extraction outcome.
+        # ETL re-extracts from .bin when .txt is missing, so a failed extraction here is recoverable.
+        save_document_binary(report_id, doc_id, fdoc.data, fname)
+
         loop = asyncio.get_running_loop()
+        text_chars = 0
+        detected_fmt = ext
         try:
             text, detected_fmt = await asyncio.wait_for(
                 loop.run_in_executor(None, _partial(extract_text_from_file, fdoc.data, fname)),
                 timeout=180.0,
             )
+            save_document_text(report_id, doc_id, text)
+            text_chars = len(text.strip())
         except (asyncio.TimeoutError, Exception) as exc:
-            upload_errors.append({"filename": fname, "error": f"Text extraction failed: {exc}"})
-            continue
-
-        save_document_text(report_id, doc_id, text)
-        save_document_binary(report_id, doc_id, fdoc.data, fname)
+            logger.warning(
+                "auto_fetch: extraction failed for %r — binary saved, ETL will re-extract: %s",
+                fname, exc,
+            )
+            upload_errors.append({"filename": fname, "error": f"Text extraction deferred (ETL will retry): {exc}"})
 
         doc = SectionDocument(
             id=doc_id,
@@ -1764,7 +1774,7 @@ async def auto_fetch_documents(
             "source": fdoc.source,
             "document_type": fdoc.document_type,
             "file_size_bytes": len(fdoc.data),
-            "text_chars": len(text.strip()),
+            "text_chars": text_chars,
         })
 
     all_errors = [{"source": e.source, "message": e.message} for e in fetch_errors]

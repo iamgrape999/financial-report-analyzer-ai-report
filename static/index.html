@@ -3750,15 +3750,16 @@ async function uploadPDF(){
       xhr.send(form);
     });
     _uploadProgressUpdate(100,tl('Done','完成'));
+    // text_chars/extraction_quality are null when text extraction runs in background
     if(d.extraction_quality==='empty'){
       toast(tl(`⚠️ Uploaded ${file.name} — text extraction returned EMPTY. Try a higher-resolution scan or a text-based PDF.`,
                `⚠️ 已上傳 ${file.name} — 文字萃取結果為空。請改用高解析度或可選字的 PDF。`),'warning');
     }else if(d.extraction_quality==='low'){
-      toast(tl(`⚠️ Uploaded ${file.name} — low-quality text (${(d.text_chars||0).toLocaleString()} chars).`,
+      toast(tl(`⚠️ Uploaded ${file.name} — low-quality text (${(d.text_chars||0).toLocaleString()} chars). Run ETL when ready.`,
                `⚠️ 已上傳 ${file.name} — 文字品質偏低（${(d.text_chars||0).toLocaleString()} 字元）。`),'warning');
     }else{
-      toast(tl(`✓ Uploaded ${file.name} (${(d.text_chars||0).toLocaleString()} chars extracted)`,
-               `✓ 已上傳 ${file.name}（已萃取 ${(d.text_chars||0).toLocaleString()} 字元）`),'success');
+      toast(tl(`✓ Uploaded ${file.name} — text extraction in progress, run ETL when ready.`,
+               `✓ 已上傳 ${file.name} — 文字萃取中，稍後請執行 ETL。`),'success');
     }
     inp.value='';
     await loadReportDetail(currentRid);

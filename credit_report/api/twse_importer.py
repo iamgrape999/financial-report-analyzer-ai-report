@@ -102,6 +102,7 @@ class IncomeStatementFact:
     gross_profit_k_ntd: float = 0.0   # 毛利 (thousands NTD)
     op_profit_k_ntd: float = 0.0      # 營業利益 (thousands NTD)
     net_income_k_ntd: float = 0.0     # 本期淨利 (thousands NTD)
+    interest_expense_k_ntd: float = 0.0  # 利息費用 (thousands NTD; 0 = absent/unknown)
 
 
 @dataclass
@@ -125,6 +126,8 @@ class CashFlowFact:
     ocf_k_ntd: float = 0.0    # 營業活動現金流量 (thousands NTD)
     capex_k_ntd: float = 0.0  # 資本支出, stored as positive (thousands NTD)
     da_k_ntd: float = 0.0     # 折舊及攤銷調整項 (thousands NTD)
+    icf_k_ntd: float = 0.0    # 投資活動現金流量 (thousands NTD; may be negative)
+    cff_k_ntd: float = 0.0    # 籌資活動現金流量 (thousands NTD; may be negative)
 
 
 @dataclass
@@ -572,6 +575,11 @@ def _parse_is_rows(rows: list[dict], stock_code: str) -> list[IncomeStatementFac
                 # NOTE: 本期綜合損益總額 intentionally excluded — it is OCI-inclusive
                 # comprehensive income, not net income; using it would overstate earnings.
             ),
+            interest_expense_k_ntd = abs(_parse_num(
+                row,
+                "利息費用", "財務費用", "借款利息費用",
+                # Older TWSE columns use negative sign; abs() normalises to positive
+            )),
         ))
     facts.sort(key=lambda f: f.fiscal_year, reverse=True)
     return facts
@@ -638,6 +646,16 @@ def _parse_cf_rows(rows: list[dict], stock_code: str) -> list[CashFlowFact]:
             da_k_ntd    = _parse_num(
                 row,
                 "折舊費用", "不動產廠房及設備折舊費用", "攤銷費用", "折舊及攤銷",
+            ),
+            icf_k_ntd   = _parse_num(
+                row,
+                "投資活動之淨現金流入（流出）", "來自投資活動之現金流量",
+                "來自(用於)投資活動之淨現金流量", "投資活動現金流量",
+            ),
+            cff_k_ntd   = _parse_num(
+                row,
+                "籌資活動之淨現金流入（流出）", "來自籌資活動之現金流量",
+                "來自(用於)籌資活動之淨現金流量", "籌資活動現金流量",
             ),
         ))
     facts.sort(key=lambda f: f.fiscal_year, reverse=True)
@@ -951,6 +969,45 @@ def map_to_section4_event_risk(data: TWSECompanyData) -> dict[str, Any]:
 
 # ── P1 financial statement mappers ───────────────────────────────────────────
 
+def map_to_section4_summary_financials(data: TWSECompanyData) -> dict[str, Any]:
+    """§4E summary financials snapshot from P1 IS/BS/CF (most recent fiscal year).
+
+    Adds ebitda, ebitda_margin_pct, net_income, net_cash_debt, net_debt_ebitda to §4E.
+    Only called when P1 data is available; silently returns {} otherwise.
+    fiscal_year/currency/unit are already set by map_to_section4() from monthly revenue.
+    """
+    if not data.income_statements:
+        return {}
+    mapping: dict[str, Any] = {}
+    is_f = data.income_statements[0]  # newest first
+    cf_by_year = {f.fiscal_year: f for f in data.cash_flows}
+    bs_by_year = {f.fiscal_year: f for f in data.balance_sheets}
+    cf_f = cf_by_year.get(is_f.fiscal_year)
+    bs_f = bs_by_year.get(is_f.fiscal_year)
+
+    rev = is_f.revenue_k_ntd
+    da_available = cf_f is not None and cf_f.da_k_ntd != 0.0
+    da     = cf_f.da_k_ntd if da_available else 0.0
+    ebitda = is_f.op_profit_k_ntd + da
+
+    if is_f.net_income_k_ntd != 0.0:
+        mapping["4E_financials.net_income"] = round(is_f.net_income_k_ntd / 1000.0, 1)
+    if da_available and ebitda != 0.0:
+        mapping["4E_financials.ebitda"] = round(ebitda / 1000.0, 1)
+        if rev > 0:
+            mapping["4E_financials.ebitda_margin_pct"] = round(ebitda / rev * 100, 2)
+
+    if bs_f:
+        total_debt_k = bs_f.short_term_debt_k_ntd + bs_f.long_term_debt_k_ntd
+        net_debt_k   = total_debt_k - bs_f.cash_k_ntd
+        if total_debt_k != 0.0:
+            mapping["4E_financials.net_cash_debt"] = round(net_debt_k / 1000.0, 1)
+        if da_available and ebitda > 0 and total_debt_k > 0:
+            mapping["4E_financials.net_debt_ebitda"] = round(net_debt_k / ebitda, 2)
+
+    return mapping
+
+
 def map_to_section7_income_statement(data: TWSECompanyData) -> dict[str, Any]:
     """§7A income statement from P1 t163sb03_1 (NTD millions).
 
@@ -1034,6 +1091,10 @@ def map_to_section7_cash_flow(data: TWSECompanyData) -> dict[str, Any]:
             capex_m = round(cf.capex_k_ntd / 1000.0, 1)
             mapping[f"{base}.capex"] = capex_m
             mapping[f"{base}.fcf"]   = round(ocf_m - capex_m, 1)
+        if cf.icf_k_ntd != 0.0:
+            mapping[f"{base}.icf"] = round(cf.icf_k_ntd / 1000.0, 1)
+        if cf.cff_k_ntd != 0.0:
+            mapping[f"{base}.cff"] = round(cf.cff_k_ntd / 1000.0, 1)
 
     return mapping
 
@@ -1089,6 +1150,9 @@ def map_to_section7_ratios(data: TWSECompanyData) -> dict[str, Any]:
         if cur_liab > 0 and cur_assets > 0:
             mapping[f"{base}.current_ratio"] = round(cur_assets / cur_liab, 2)
 
+        if da_available and ebitda > 0 and is_f.interest_expense_k_ntd > 0:
+            mapping[f"{base}.ebitda_interest"] = round(ebitda / is_f.interest_expense_k_ntd, 2)
+
     return mapping
 
 
@@ -1130,6 +1194,10 @@ def map_to_section5_from_financials(data: TWSECompanyData) -> dict[str, Any]:
         rev    = is_f.revenue_k_ntd
         if da_available and ebitda > 0:
             mapping["5F_corporate_guarantee.ebitda_twd_bn"] = _k_to_bn(ebitda)
+            if is_f.interest_expense_k_ntd > 0:
+                mapping["5F_corporate_guarantee.interest_coverage"] = round(
+                    ebitda / is_f.interest_expense_k_ntd, 2
+                )
         if rev > 0:
             if is_f.net_income_k_ntd != 0.0:
                 mapping["5F_corporate_guarantee.net_margin_pct"] = round(
@@ -1150,7 +1218,7 @@ def map_to_section(section_no: int, data: TWSECompanyData) -> dict[str, Any]:
     dispatch = {
         1: map_to_section1,
         3: map_to_section3,
-        4: lambda d: {**map_to_section4(d), **map_to_section4_event_risk(d)},
+        4: lambda d: {**map_to_section4(d), **map_to_section4_event_risk(d), **map_to_section4_summary_financials(d)},
         5: lambda d: {**map_to_section5(d), **map_to_section5_from_financials(d)},
         7: lambda d: {
             **map_to_section7_metadata(d),
