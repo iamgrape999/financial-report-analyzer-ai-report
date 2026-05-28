@@ -1687,3 +1687,112 @@ def test_dividend_info_defaults():
     assert d.fiscal_year == 2024
     assert d.cash_dividend_per_share == 3.5
     assert d.stock_dividend_per_share == 0.0
+
+
+# ── Fix #4: ROC year range capped at 130 ─────────────────────────────────────
+
+def test_parse_roc_year_200_rejected():
+    """ROC 200 (→ 2111) was previously accepted; now rejected as out of range."""
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("200") == 0
+
+
+def test_parse_roc_year_130_accepted():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("130") == 2041
+
+
+def test_parse_roc_year_131_rejected():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("131") == 0
+
+
+def test_parse_roc_year_79_rejected():
+    from credit_report.api.twse_importer import _parse_roc_or_gregorian_year
+    assert _parse_roc_or_gregorian_year("79") == 0
+
+
+# ── Fix #1: Q4 filter accepts "04" / "Q4" / "Annual" ────────────────────────
+
+def test_parse_is_rows_accepts_zero_padded_quarter():
+    """TWSE sometimes returns '04' instead of '4' — must not be filtered out."""
+    from credit_report.api.twse_importer import _parse_is_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "04",
+         "營業收入": "500000000", "本期淨利（淨損）": "50000000"},
+        {"公司代號": "2603", "年度": "113", "季別": "03",
+         "營業收入": "350000000"},
+    ]
+    result = _parse_is_rows(rows, "2603")
+    assert len(result) == 1
+    assert result[0].fiscal_year == 2024
+    assert result[0].revenue_k_ntd == 500_000_000.0
+
+
+def test_parse_bs_rows_accepts_zero_padded_quarter():
+    from credit_report.api.twse_importer import _parse_bs_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "04",
+         "資產總計": "1000000000", "股東權益合計": "400000000"},
+        {"公司代號": "2603", "年度": "113", "季別": "02",
+         "資產總計": "900000000", "股東權益合計": "350000000"},
+    ]
+    result = _parse_bs_rows(rows, "2603")
+    assert len(result) == 1
+    assert result[0].fiscal_year == 2024
+
+
+def test_parse_cf_rows_accepts_q4_string():
+    from credit_report.api.twse_importer import _parse_cf_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "Q4",
+         "來自營運活動之現金流量": "70000000",
+         "取得不動產廠房及設備": "-20000000"},
+    ]
+    result = _parse_cf_rows(rows, "2603")
+    assert len(result) == 1
+    assert result[0].ocf_k_ntd == 70_000_000.0
+
+
+# ── Fix #2: map_to_section7_income_statement writes ebitda when DA available ──
+
+def test_section7_is_ebitda_written_when_cf_da_available():
+    """ebitda = op_profit + DA must be present in income_statement when CF data has DA."""
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    m = map_to_section7_income_statement(_sample_with_financials())
+    # ebitda = 60,000,000 (op_profit) + 10,000,000 (da) = 70,000,000 k_ntd → 70,000 NTD M
+    assert m["7A_borrower_financials.income_statement.FY2024.ebitda"] == pytest.approx(70_000.0)
+
+
+def test_section7_is_ebitda_absent_when_no_cf_data():
+    """ebitda must NOT be written when CF data is unavailable (would mislabel op_profit)."""
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    import dataclasses
+    data = dataclasses.replace(_SAMPLE_DATA, income_statements=[_SAMPLE_IS], cash_flows=[])
+    m = map_to_section7_income_statement(data)
+    assert "7A_borrower_financials.income_statement.FY2024.ebitda" not in m
+
+
+def test_section7_is_ebitda_absent_when_da_is_zero():
+    """ebitda must NOT be written when DA field is 0 (parser couldn't find the column)."""
+    from credit_report.api.twse_importer import map_to_section7_income_statement
+    import dataclasses
+    cf_no_da = dataclasses.replace(_SAMPLE_CF, da_k_ntd=0.0)
+    data = dataclasses.replace(_SAMPLE_DATA, income_statements=[_SAMPLE_IS], cash_flows=[cf_no_da])
+    m = map_to_section7_income_statement(data)
+    assert "7A_borrower_financials.income_statement.FY2024.ebitda" not in m
+
+
+# ── Fix #5: capex/fcf written even when ocf == 0 ─────────────────────────────
+
+def test_section7_cf_capex_written_when_ocf_zero():
+    """capex and fcf must be written even if OCF is zero (new/restructuring company)."""
+    from credit_report.api.twse_importer import map_to_section7_cash_flow
+    import dataclasses
+    cf_zero_ocf = dataclasses.replace(_SAMPLE_CF, ocf_k_ntd=0.0)
+    data = dataclasses.replace(_SAMPLE_DATA, cash_flows=[cf_zero_ocf])
+    m = map_to_section7_cash_flow(data)
+    assert "7A_borrower_financials.cash_flow.FY2024.ocf" not in m, "ocf=0 should not be written"
+    assert m["7A_borrower_financials.cash_flow.FY2024.capex"] == pytest.approx(20_000.0)
+    # fcf = 0 - 20,000 = -20,000
+    assert m["7A_borrower_financials.cash_flow.FY2024.fcf"] == pytest.approx(-20_000.0)

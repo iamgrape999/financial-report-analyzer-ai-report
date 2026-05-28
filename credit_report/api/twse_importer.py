@@ -493,13 +493,14 @@ def _parse_roc_or_gregorian_year(val: Any) -> int:
     """Parse TWSE financial statement year field.
 
     TWSE uses ROC years (e.g. "113" = Gregorian 2024) in IS/BS/CF endpoints.
-    Values >= 1900 are treated as Gregorian; values in 80-200 are treated as ROC.
+    Values >= 1900 are treated as Gregorian; values in 80-130 are treated as ROC
+    (capped at 130 to prevent stray large integers like "200" mapping to 2111).
     """
     try:
         y = int(str(val).strip())
         if 1900 <= y <= 2100:
             return y
-        if 80 <= y <= 200:
+        if 80 <= y <= 130:
             return y + 1911
     except (ValueError, TypeError):
         pass
@@ -529,12 +530,20 @@ def _parse_num(row: dict, *keys: str) -> float:
 
 # ── P1 row parsers ────────────────────────────────────────────────────────────
 
+_Q4_VALUES = frozenset({"4", "04", "Q4", "Annual", "annual"})
+
+
+def _is_annual_quarter(quarter: str) -> bool:
+    """Return True if quarter string indicates a full-year (Q4 / annual) filing."""
+    return not quarter or quarter.lstrip("0") in ("4", "Q4", "Annual", "annual")
+
+
 def _parse_is_rows(rows: list[dict], stock_code: str) -> list[IncomeStatementFact]:
     """Parse t163sb03_1 into IncomeStatementFact; annual (Q4) reports only, newest first."""
     facts: list[IncomeStatementFact] = []
     for row in _find_all(rows, stock_code):
         quarter = _col(row, "季別")
-        if quarter and quarter not in ("4",):
+        if not _is_annual_quarter(quarter):
             continue
         year = _parse_roc_or_gregorian_year(_col(row, "年度"))
         if year <= 0:
@@ -559,7 +568,7 @@ def _parse_bs_rows(rows: list[dict], stock_code: str) -> list[BalanceSheetFact]:
     facts: list[BalanceSheetFact] = []
     for row in _find_all(rows, stock_code):
         quarter = _col(row, "季別")
-        if quarter and quarter not in ("4",):
+        if not _is_annual_quarter(quarter):
             continue
         year = _parse_roc_or_gregorian_year(_col(row, "年度"))
         if year <= 0:
@@ -590,7 +599,7 @@ def _parse_cf_rows(rows: list[dict], stock_code: str) -> list[CashFlowFact]:
     facts: list[CashFlowFact] = []
     for row in _find_all(rows, stock_code):
         quarter = _col(row, "季別")
-        if quarter and quarter not in ("4",):
+        if not _is_annual_quarter(quarter):
             continue
         year = _parse_roc_or_gregorian_year(_col(row, "年度"))
         if year <= 0:
@@ -927,12 +936,14 @@ def map_to_section4_event_risk(data: TWSECompanyData) -> dict[str, Any]:
 def map_to_section7_income_statement(data: TWSECompanyData) -> dict[str, Any]:
     """§7A income statement from P1 t163sb03_1 (NTD millions).
 
-    Fields: gross_profit, op_profit, net_income (and revenue — overrides monthly sum
-    with audited annual figure when P1 data is available).
+    Fields: gross_profit, op_profit, net_income, ebitda (and revenue — overrides
+    monthly sum with audited annual figure when P1 data is available).
+    ebitda = op_profit + D&A; only written when D&A is found in the CF statement.
     """
     if not data.income_statements:
         return {}
     mapping: dict[str, Any] = {}
+    cf_by_year = {f.fiscal_year: f for f in data.cash_flows}
 
     for is_f in data.income_statements:
         fy = f"FY{is_f.fiscal_year}"
@@ -945,6 +956,12 @@ def map_to_section7_income_statement(data: TWSECompanyData) -> dict[str, Any]:
             mapping[f"{base}.op_profit"]    = round(is_f.op_profit_k_ntd / 1000.0, 1)
         if is_f.net_income_k_ntd != 0.0:
             mapping[f"{base}.net_income"]   = round(is_f.net_income_k_ntd / 1000.0, 1)
+        # ebitda: only when CF D&A is available so we don't mislabel op_profit as ebitda
+        cf_f = cf_by_year.get(is_f.fiscal_year)
+        if cf_f and cf_f.da_k_ntd != 0.0:
+            ebitda_k = is_f.op_profit_k_ntd + cf_f.da_k_ntd
+            if ebitda_k != 0.0:
+                mapping[f"{base}.ebitda"] = round(ebitda_k / 1000.0, 1)
 
     return mapping
 
@@ -991,13 +1008,14 @@ def map_to_section7_cash_flow(data: TWSECompanyData) -> dict[str, Any]:
     for cf in data.cash_flows:
         fy = f"FY{cf.fiscal_year}"
         base = f"7A_borrower_financials.cash_flow.{fy}"
+        ocf_m = 0.0
         if cf.ocf_k_ntd != 0.0:
             ocf_m = round(cf.ocf_k_ntd / 1000.0, 1)
             mapping[f"{base}.ocf"] = ocf_m
-            if cf.capex_k_ntd > 0:
-                capex_m = round(cf.capex_k_ntd / 1000.0, 1)
-                mapping[f"{base}.capex"] = capex_m
-                mapping[f"{base}.fcf"]   = round(ocf_m - capex_m, 1)
+        if cf.capex_k_ntd > 0:
+            capex_m = round(cf.capex_k_ntd / 1000.0, 1)
+            mapping[f"{base}.capex"] = capex_m
+            mapping[f"{base}.fcf"]   = round(ocf_m - capex_m, 1)
 
     return mapping
 
