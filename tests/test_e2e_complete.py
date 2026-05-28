@@ -440,6 +440,29 @@ class TestDocuments:
         assert doc["file_format"] == "txt"
         return doc
 
+
+    async def test_upload_7mb_pdf_metadata_visible_immediately(self, ac, admin_hdrs, report, monkeypatch):
+        def fake_extract(file_bytes, filename):
+            raise AssertionError("large-PDF extraction must be detached from upload response")
+
+        monkeypatch.setattr("credit_report.api.generate.extract_text_from_file", fake_extract)
+        content = b"%PDF-1.4\n" + (b"0" * (7 * 1024 * 1024))
+        r = await ac.post(
+            f"{REPORTS}/{report['id']}/documents",
+            files={"file": ("annual-7mb.pdf", content, "application/pdf")},
+            data={"document_type": "annual_report"},
+            headers=admin_hdrs,
+        )
+        assert r.status_code == 201, r.text
+        doc = r.json()
+        assert doc["original_filename"] == "annual-7mb.pdf"
+        assert doc["file_format"] == "pdf"
+        assert doc["file_size_bytes"] >= 7 * 1024 * 1024
+
+        listed = await ac.get(f"{REPORTS}/{report['id']}/documents", headers=admin_hdrs)
+        assert listed.status_code == 200
+        assert doc["id"] in [d["id"] for d in listed.json()]
+
     async def test_upload_unsupported_extension(self, ac, admin_hdrs, report):
         r = await ac.post(
             f"{REPORTS}/{report['id']}/documents",
@@ -627,6 +650,12 @@ class TestTWSEOpenAPIImport:
                 {"公司代號": "2603", "年度": "2024", "會計項目": "負債總計", "金額": "475,000,000"},
                 {"公司代號": "2603", "年度": "2024", "會計項目": "權益總計", "金額": "420,000,000"},
             ],
+            "cash_flow_general": [
+                {"公司代號": "2603", "年度": "2024", "會計項目": "營業活動之淨現金流入", "金額": "120,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "投資活動之淨現金流出", "金額": "(70,000,000)"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "取得不動產、廠房及設備", "金額": "65,000,000"},
+                {"公司代號": "2603", "年度": "2024", "會計項目": "支付之利息", "金額": "2,300,000"},
+            ],
             "monthly_revenue": [{"公司代號": "2603", "年度": "2024", "月份": "12", "營業收入": "32,000,000"}],
             "valuation_ratios": [{"證券代號": "2603", "本益比": "4.5", "股價淨值比": "1.1"}],
             "daily_trading": [{"證券代號": "2603", "收盤價": "180.5", "成交股數": "10,000,000"}],
@@ -652,8 +681,12 @@ class TestTWSEOpenAPIImport:
         assert data["7C_guarantor_financials"]["cash_fy2024"] == 195000000.0
         assert data["7C_guarantor_financials"]["income_statement"]["FY2024"]["net_income"] == 78500000.0
         assert data["7C_guarantor_financials"]["balance_sheet"]["FY2024"]["total_equity"] == 420000000.0
+        assert data["7C_guarantor_financials"]["cash_flow_statement"]["FY2024"]["operating_cash_flow"] == 120000000.0
+        assert data["7C_guarantor_financials"]["raw_income_statement_line_items"]["FY2024"]["營業收入"] == 385200000.0
         assert data["7B_key_ratios"]["fy2024_interest_coverage"] == 36.6
         assert data["twse_import"]["coverage_fields"]["balance_sheet_metrics"] >= 12
+        assert data["twse_import"]["coverage_fields"]["cash_flow_metrics"] >= 4
+        assert data["twse_import"]["coverage_fields"]["raw_income_statement_line_items"] >= 7
 
         saved = await ac.get(f"{REPORTS}/{report['id']}/inputs/7", headers=admin_hdrs)
         assert saved.status_code == 200
