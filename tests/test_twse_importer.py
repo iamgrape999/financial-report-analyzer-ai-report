@@ -567,8 +567,7 @@ def ac():
 async def _login(ac) -> dict:
     r = await ac.post(f"{BASE}/auth/login",
                       data={"username": "admin@example.com", "password": "admin123"})
-    if r.status_code != 200:
-        pytest.skip("admin login failed")
+    assert r.status_code == 200, f"admin login failed: {r.text}"
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
@@ -773,8 +772,7 @@ async def test_import_twse_approved_report_returns_409(ac):
     rid = cr.json()["id"]
     r_upd = await ac.patch(f"{BASE}/reports/{rid}/status",
                            json={"status": "approved"}, headers=hdrs)
-    if r_upd.status_code not in (200, 201):
-        pytest.skip("Cannot set approved status in test environment")
+    assert r_upd.status_code == 200, f"Failed to approve report: {r_upd.text}"
     with patch("credit_report.api.twse_importer.fetch_twse_company",
                new=AsyncMock(return_value=_SAMPLE_DATA)):
         r = await ac.post(f"{BASE}/reports/{rid}/import-twse",
@@ -1397,14 +1395,16 @@ def test_parse_bs_rows_basic():
     assert bs.long_term_debt_k_ntd == 250_000_000.0
 
 
-def test_parse_bs_rows_liabilities_derived_when_missing():
+def test_parse_bs_rows_liabilities_zero_when_column_absent():
+    """#3: liabilities must NOT be inferred from assets-equity (NCI causes overstatement).
+    When 負債總計 is absent, total_liabilities_k_ntd stays 0.0."""
     from credit_report.api.twse_importer import _parse_bs_rows
     rows = [
         {"公司代號": "2603", "年度": "113", "季別": "4",
          "資產總計": "1000000000", "股東權益合計": "400000000"},
     ]
     result = _parse_bs_rows(rows, "2603")
-    assert result[0].total_liabilities_k_ntd == pytest.approx(600_000_000.0)
+    assert result[0].total_liabilities_k_ntd == 0.0
 
 
 # ── _parse_cf_rows ────────────────────────────────────────────────────────────
@@ -1796,3 +1796,93 @@ def test_section7_cf_capex_written_when_ocf_zero():
     assert m["7A_borrower_financials.cash_flow.FY2024.capex"] == pytest.approx(20_000.0)
     # fcf = 0 - 20,000 = -20,000
     assert m["7A_borrower_financials.cash_flow.FY2024.fcf"] == pytest.approx(-20_000.0)
+
+
+# ── Fix #3: total_liabilities not derived from assets-equity (NCI issue) ─────
+
+def test_parse_bs_rows_liabilities_direct_field_used():
+    """When 負債總計 is present, it is used directly (not derived)."""
+    from credit_report.api.twse_importer import _parse_bs_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "資產總計": "1000000000", "股東權益合計": "400000000",
+         "負債總計": "580000000"},   # NCI of 20,000,000 accounts for the gap
+    ]
+    result = _parse_bs_rows(rows, "2603")
+    assert result[0].total_liabilities_k_ntd == pytest.approx(580_000_000.0)
+
+
+# ── Fix #8: ebitda_margin / debt_ebitda absent when D&A not available ────────
+
+def test_section7_ratios_ebitda_margin_absent_without_cf():
+    """ebitda_margin_pct must NOT be written when CF data is missing (would be op_margin mislabelled)."""
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    import dataclasses
+    data = dataclasses.replace(_SAMPLE_DATA,
+                               income_statements=[_SAMPLE_IS],
+                               balance_sheets=[_SAMPLE_BS],
+                               cash_flows=[])
+    m = map_to_section7_ratios(data)
+    assert "7B_key_ratios.FY2024.ebitda_margin_pct" not in m
+    assert "7B_key_ratios.FY2024.debt_ebitda" not in m
+    # but gross_margin and ni_margin should still be present
+    assert "7B_key_ratios.FY2024.gross_margin_pct" in m
+    assert "7B_key_ratios.FY2024.ni_margin_pct" in m
+
+
+def test_section7_ratios_ebitda_margin_absent_when_da_zero():
+    """ebitda_margin_pct absent when CF row present but DA column missing (da_k_ntd==0)."""
+    from credit_report.api.twse_importer import map_to_section7_ratios
+    import dataclasses
+    cf_no_da = dataclasses.replace(_SAMPLE_CF, da_k_ntd=0.0)
+    data = dataclasses.replace(_SAMPLE_DATA,
+                               income_statements=[_SAMPLE_IS],
+                               balance_sheets=[_SAMPLE_BS],
+                               cash_flows=[cf_no_da])
+    m = map_to_section7_ratios(data)
+    assert "7B_key_ratios.FY2024.ebitda_margin_pct" not in m
+    assert "7B_key_ratios.FY2024.debt_ebitda" not in m
+
+
+def test_section5_ebitda_absent_without_da():
+    """5F ebitda_twd_bn must not appear when CF D&A is unavailable."""
+    from credit_report.api.twse_importer import map_to_section5_from_financials
+    import dataclasses
+    data = dataclasses.replace(_SAMPLE_DATA,
+                               income_statements=[_SAMPLE_IS],
+                               balance_sheets=[_SAMPLE_BS],
+                               cash_flows=[])
+    m = map_to_section5_from_financials(data)
+    assert "5F_corporate_guarantee.ebitda_twd_bn" not in m
+    # net_worth and debt should still be present
+    assert "5F_corporate_guarantee.net_worth_twd_bn" in m
+
+
+# ── Fix #9: IFRS net income alias / comprehensive income removed ──────────────
+
+def test_parse_is_rows_uses_parent_attributable_net_income():
+    """歸屬於母公司業主之淨利（淨損） (IFRS standard) is prioritised for net_income."""
+    from credit_report.api.twse_importer import _parse_is_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "營業收入": "500000000",
+         # Both present: IFRS parent-attributable takes priority
+         "歸屬於母公司業主之淨利（淨損）": "45000000",
+         "本期淨利（淨損）": "50000000"},   # includes NCI portion
+    ]
+    result = _parse_is_rows(rows, "2603")
+    assert result[0].net_income_k_ntd == pytest.approx(45_000_000.0)
+
+
+def test_parse_is_rows_comprehensive_income_not_used_as_net_income():
+    """本期綜合損益總額 (OCI-inclusive) must NOT be picked up as net income."""
+    from credit_report.api.twse_importer import _parse_is_rows
+    rows = [
+        {"公司代號": "2603", "年度": "113", "季別": "4",
+         "營業收入": "500000000",
+         # Only comprehensive income present (no net income columns)
+         "本期綜合損益總額": "999000000"},
+    ]
+    result = _parse_is_rows(rows, "2603")
+    # net_income_k_ntd should be 0.0 (field not found), not 999,000,000
+    assert result[0].net_income_k_ntd == 0.0

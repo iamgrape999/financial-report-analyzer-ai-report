@@ -428,8 +428,7 @@ async def _login(ac) -> dict:
     email = os.environ.get("ADMIN_EMAIL", "admin@example.com")
     password = os.environ.get("ADMIN_PASSWORD", "admin123")
     r = await ac.post(f"{BASE}/auth/login", data={"username": email, "password": password})
-    if r.status_code != 200:
-        pytest.skip(f"admin login failed (status {r.status_code})")
+    assert r.status_code == 200, f"admin login failed (status {r.status_code}): {r.text}"
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 

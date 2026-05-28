@@ -555,8 +555,12 @@ def _parse_is_rows(rows: list[dict], stock_code: str) -> list[IncomeStatementFac
             op_profit_k_ntd  = _parse_num(row, "營業利益（損失）", "營業利益", "營業損益"),
             net_income_k_ntd = _parse_num(
                 row,
+                # IFRS consolidated standard column (most common in TWSE annual feed)
+                "歸屬於母公司業主之淨利（淨損）",
+                # Full-period net income (individual or older consolidated reports)
                 "本期淨利（淨損）", "稅後淨利", "本期稅後純益（純損）",
-                "本期綜合損益總額",
+                # NOTE: 本期綜合損益總額 intentionally excluded — it is OCI-inclusive
+                # comprehensive income, not net income; using it would overstate earnings.
             ),
         ))
     facts.sort(key=lambda f: f.fiscal_year, reverse=True)
@@ -576,11 +580,15 @@ def _parse_bs_rows(rows: list[dict], stock_code: str) -> list[BalanceSheetFact]:
         total_assets = _parse_num(row, "資產總計", "資產總額", "資產合計")
         total_equity = _parse_num(row, "股東權益合計", "股東權益總額", "權益合計")
         total_liab   = _parse_num(row, "負債總計", "負債總額", "負債合計")
+        # Do NOT derive liabilities from assets-equity: the TWSE equity line is
+        # parent-only (歸屬母公司業主之權益) and excludes NCI, so
+        # assets - equity overstates liabilities by the NCI amount.
+        # Leave as 0.0 when the field is absent rather than guessing wrong.
         facts.append(BalanceSheetFact(
             fiscal_year             = year,
             total_assets_k_ntd      = total_assets,
             total_equity_k_ntd      = total_equity,
-            total_liabilities_k_ntd = total_liab if total_liab > 0 else max(total_assets - total_equity, 0.0),
+            total_liabilities_k_ntd = total_liab,
             current_assets_k_ntd    = _parse_num(row, "流動資產"),
             current_liabilities_k_ntd = _parse_num(row, "流動負債"),
             cash_k_ntd              = _parse_num(row, "現金及約當現金"),
@@ -1045,15 +1053,18 @@ def map_to_section7_ratios(data: TWSECompanyData) -> dict[str, Any]:
         total_debt = bs_f.short_term_debt_k_ntd + bs_f.long_term_debt_k_ntd
         cur_assets = bs_f.current_assets_k_ntd
         cur_liab   = bs_f.current_liabilities_k_ntd
-        da         = cf_f.da_k_ntd if cf_f else 0.0
-        ebitda     = is_f.op_profit_k_ntd + da
+        # da_available tracks whether the D&A column was actually found in CF data.
+        # Without it ebitda = op_profit — mislabelling op_margin as ebitda_margin.
+        da_available = cf_f is not None and cf_f.da_k_ntd != 0.0
+        da     = cf_f.da_k_ntd if da_available else 0.0
+        ebitda = is_f.op_profit_k_ntd + da
 
         if rev > 0:
             if is_f.gross_profit_k_ntd != 0.0:
                 mapping[f"{base}.gross_margin_pct"]  = round(is_f.gross_profit_k_ntd / rev * 100, 2)
             if is_f.net_income_k_ntd != 0.0:
                 mapping[f"{base}.ni_margin_pct"]     = round(is_f.net_income_k_ntd / rev * 100, 2)
-            if ebitda != 0.0:
+            if da_available and ebitda != 0.0:
                 mapping[f"{base}.ebitda_margin_pct"] = round(ebitda / rev * 100, 2)
 
         if eq > 0:
@@ -1062,7 +1073,7 @@ def map_to_section7_ratios(data: TWSECompanyData) -> dict[str, Any]:
             if total_debt > 0:
                 mapping[f"{base}.debt_equity"] = round(total_debt / eq, 2)
 
-        if ebitda > 0 and total_debt > 0:
+        if da_available and ebitda > 0 and total_debt > 0:
             mapping[f"{base}.debt_ebitda"] = round(total_debt / ebitda, 2)
 
         if cur_liab > 0 and cur_assets > 0:
@@ -1103,10 +1114,11 @@ def map_to_section5_from_financials(data: TWSECompanyData) -> dict[str, Any]:
     cf_f = cf_by_year.get(bs.fiscal_year)
 
     if is_f:
-        da     = cf_f.da_k_ntd if cf_f else 0.0
+        da_available = cf_f is not None and cf_f.da_k_ntd != 0.0
+        da     = cf_f.da_k_ntd if da_available else 0.0
         ebitda = is_f.op_profit_k_ntd + da
         rev    = is_f.revenue_k_ntd
-        if ebitda > 0:
+        if da_available and ebitda > 0:
             mapping["5F_corporate_guarantee.ebitda_twd_bn"] = _k_to_bn(ebitda)
         if rev > 0:
             if is_f.net_income_k_ntd != 0.0:
