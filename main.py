@@ -285,7 +285,9 @@ async def ui():
     return FileResponse(
         "static/index.html",
         headers={
-            "Cache-Control": "public, max-age=3600",
+            # no-cache forces the browser to revalidate every load (the SPA is a single
+            # file with no asset hashing, so a stale cache pins the user to old buggy JS).
+            "Cache-Control": "no-cache, must-revalidate",
             # Restrict resource loading to same origin + CDN allowlist.
             # 'unsafe-inline' is required for the single-file SPA's inline scripts/styles.
             "Content-Security-Policy": (
