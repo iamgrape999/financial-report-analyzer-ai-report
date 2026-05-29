@@ -169,17 +169,20 @@ class TestBruteForce:
 
     async def test_brute_force_429_after_repeated_failures(self, ac):
         """After ≥10 wrong-password attempts from one IP the server returns 429."""
+        import credit_report.api.auth as _auth_mod
         from credit_report.api.auth import _failed, _MAX_FAILURES
 
         ip = "10.0.0.99"  # Use a fake IP that won't conflict with real test traffic
 
-        # Directly seed the failure counter to just below the limit
         import time
         now = time.time()
         _failed[ip] = [now] * (_MAX_FAILURES + 1)
 
+        # Enable XFF trust for this test so the fake IP is picked up from the header.
+        # In production, TRUSTED_PROXY_IPS guards this; here we simulate a proxied env.
+        _orig = _auth_mod._TRUSTED_PROXY_IPS
+        _auth_mod._TRUSTED_PROXY_IPS = "pytest-trusted"
         try:
-            # Simulate the X-Forwarded-For header so the endpoint sees our fake IP
             r = await ac.post(
                 f"{AUTH}/login",
                 data={"username": "admin@example.com", "password": "wrongpw"},
@@ -188,16 +191,20 @@ class TestBruteForce:
             assert r.status_code == 429
             assert "too many" in r.json()["detail"].lower()
         finally:
+            _auth_mod._TRUSTED_PROXY_IPS = _orig
             _failed.pop(ip, None)
 
     async def test_successful_login_clears_failure_counter(self, ac):
         """A successful login clears the failure counter for that IP."""
+        import credit_report.api.auth as _auth_mod
         from credit_report.api.auth import _failed
 
         ip = "10.0.0.100"
         import time
         _failed[ip] = [time.time()] * 3  # some failures, but below threshold
 
+        _orig = _auth_mod._TRUSTED_PROXY_IPS
+        _auth_mod._TRUSTED_PROXY_IPS = "pytest-trusted"
         try:
             r = await ac.post(
                 f"{AUTH}/login",
@@ -207,6 +214,7 @@ class TestBruteForce:
             assert r.status_code == 200
             assert ip not in _failed
         finally:
+            _auth_mod._TRUSTED_PROXY_IPS = _orig
             _failed.pop(ip, None)
 
 
