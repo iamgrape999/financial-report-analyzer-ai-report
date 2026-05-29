@@ -248,6 +248,14 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         )
         if result and _text_quality_ok(result):
             logger.info("[OCR] pypdf: quality OK → using this text")
+            if page_count > _PDF_MAX_PYPDF_PAGES:
+                truncation_note = (
+                    f"[EXTRACTION NOTE: Large PDF ({page_count} pages). "
+                    f"Only pages 1–{_PDF_MAX_PYPDF_PAGES} were extracted. "
+                    f"Pages {_PDF_MAX_PYPDF_PAGES + 1}–{page_count} were NOT processed — "
+                    f"consider splitting the PDF if financial data appears after page {_PDF_MAX_PYPDF_PAGES}.]\n\n"
+                )
+                result = truncation_note + result
             return result
         if result and result.strip():
             logger.warning(
@@ -344,6 +352,16 @@ def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
                         logger.warning("[OCR] pdfplumber: page %d Vision OCR failed: %s", page_no, page_ocr_e)
 
         result = "\n".join(parts)
+        if total_pages > _PDF_MAX_PDFPLUMBER_PAGES:
+            # Prepend a visible truncation banner so ETL/analysts know data was cut.
+            # This surfaces in the document text view and in any AI-generated summaries.
+            truncation_note = (
+                f"[EXTRACTION NOTE: Large PDF ({total_pages} pages). "
+                f"Only pages 1–{_PDF_MAX_PDFPLUMBER_PAGES} were extracted due to memory limits. "
+                f"Pages {_PDF_MAX_PDFPLUMBER_PAGES + 1}–{total_pages} were NOT processed. "
+                f"Financial data from later pages may be missing — consider splitting the PDF.]\n\n"
+            )
+            result = truncation_note + result
         logger.info("[OCR] pdfplumber: extracted %d chars from PDF (image_pages_ocr=%d)", len(result), image_ocr_count)
         return result
     except ImportError:
@@ -875,7 +893,7 @@ async def extract_text_from_scanned_pdf_vision_async(
 
     result = "\n\n".join(t for t in page_texts if t.strip())
     elapsed = (time.perf_counter() - t0) * 1000
-    logger.info("[OCR-ASYNC] done: pages=%d elapsed=%.0fms chars=%d", len(capped), elapsed, len(result))
+    logger.info("[OCR-ASYNC] done: pages=%d elapsed=%.0fms chars=%d", pages_to_process, elapsed, len(result))
     if n_pages > max_pages:
         logger.warning("[OCR-ASYNC] PDF has %d pages, only first %d processed", n_pages, max_pages)
     return result

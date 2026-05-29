@@ -3938,6 +3938,26 @@ async function fetchFromUrl(){
   }
 }
 
+async function showTwseDiagnosticsModal(){
+  new bootstrap.Modal(document.getElementById('twseDiagModal')).show();
+  const body=document.getElementById('twseDiagBody');
+  try{
+    const r=await fetch(API+'/diagnostics/twse',{headers:H()});
+    if(!r.ok){body.innerHTML=`<div class="alert alert-danger">HTTP ${r.status} — ${esc((await r.json().catch(()=>({detail:'unknown'}))).detail||'error')}</div>`;return;}
+    const eps=await r.json();
+    const rows=eps.map(ep=>{
+      const tier=ep.tier==='P0'?'<span class="badge bg-success">P0</span>':ep.tier==='P1'?'<span class="badge bg-warning text-dark">P1</span>':'<span class="badge bg-secondary">P2</span>';
+      const status=ep.usable
+        ?`<span class="text-success">✓ ${ep.status_code} (${ep.latency_ms}ms, ${ep.row_count} rows)</span>`
+        :`<span class="text-danger">✗ ${ep.error_type||ep.status_code||'blocked'}</span>`;
+      return`<tr><td>${tier}</td><td><small>${esc(ep.name)}</small></td><td>${status}</td></tr>`;
+    }).join('');
+    const blocked=eps.filter(e=>!e.usable).length;
+    body.innerHTML=`<p class="small text-muted">${eps.length} endpoints probed · ${blocked} blocked / unreachable. P1 endpoints (financial statements) are typically blocked from non-Taiwan IPs.</p>
+      <table class="table table-sm"><thead><tr><th>Tier</th><th>Endpoint</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }catch(e){body.innerHTML=`<div class="alert alert-danger">${esc(e.message)}</div>`;}
+}
+
 async function importFromTWSE(){
   const inp=document.getElementById('twseStockCode');
   const code=(inp.value||'').trim();
@@ -3984,7 +4004,7 @@ async function importFromTWSE(){
         tl('⚠️ Financial statement data (IS/BS/CF) not available — TWSE P1 endpoints blocked (HTTP 403) from this server. §7A financials and §7B ratios cannot be auto-filled.',
            '⚠️ 財務報表資料未取得 — TWSE P1 端點被封鎖（HTTP 403）。§7A 財務數據與 §7B 比率無法自動匯入。'),
         tl('Run Diagnostics','執行診斷'),
-        ()=>window.open('/api/credit-report/diagnostics/twse','_blank'),
+        ()=>showTwseDiagnosticsModal(),
         'warning',8000
       );
     }
@@ -5675,5 +5695,24 @@ async function runBulkApply(){
 .cg-field-ok{color:#198754;font-size:12px;line-height:1.7;}
 .cg-field-missing{color:#dc3545;font-size:12px;line-height:1.7;}
 </style>
+
+<!-- TWSE endpoint diagnostics modal -->
+<div class="modal fade" id="twseDiagModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">🔍 TWSE Endpoint Diagnostics</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="twseDiagBody">
+        <div class="text-center py-4"><div class="spinner-border text-warning"></div><div class="mt-2">Probing 12 TWSE endpoints…</div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
