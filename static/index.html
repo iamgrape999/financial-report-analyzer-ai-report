@@ -2725,12 +2725,16 @@ function _getToken(){return token||'';}
 
 async function _getSseUrl(basePath){
   // Obtain a one-time ticket so the JWT never appears in server logs via query string.
-  try{
-    const r=await fetch(API+'/auth/sse-ticket',{method:'POST',headers:H()});
-    if(r.ok){const {ticket}=await r.json();return basePath+'?ticket='+encodeURIComponent(ticket);}
-  }catch(_){}
-  // Fallback: legacy token param (deprecated — ticket endpoint unavailable)
-  return basePath+'?token='+encodeURIComponent(_getToken());
+  // Retry once on transient failure, then FAIL CLOSED — we never fall back to putting
+  // the raw bearer JWT in the URL query string (it would leak into access/proxy logs).
+  for(let attempt=0; attempt<2; attempt++){
+    try{
+      const r=await fetch(API+'/auth/sse-ticket',{method:'POST',headers:H()});
+      if(r.ok){const {ticket}=await r.json();return basePath+'?ticket='+encodeURIComponent(ticket);}
+      if(r.status===401){logout();throw new Error('Session expired');}
+    }catch(e){ if(attempt===1) throw new Error('Could not obtain a streaming ticket — please retry'); }
+  }
+  throw new Error('Could not obtain a streaming ticket — please retry');
 }
 
 function loginClearErr(field){
@@ -2859,7 +2863,7 @@ async function loadReports(){
       <td>${esc(r.report_type||'—')}</td><td>${esc(r.booking_branch||'—')}</td>
       <td>${sbadge(r.status)}</td><td class="text-muted small">${fd(r.created_at)}</td>
       <td class="text-end pe-2" onclick="event.stopPropagation()">
-        <button class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size:11px" onclick="deleteReport('${r.id}','${esc(r.borrower_name||r.id)}')">🗑</button>
+        <button class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size:11px" onclick="deleteReport('${r.id}','${escJs(r.borrower_name||r.id)}')">🗑</button>
       </td>
     </tr>`).join('');
   }catch(e){tb.innerHTML=`<tr><td colspan="6" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;}
@@ -2972,7 +2976,7 @@ function renderDocList(fetchFailed){
       </div>
       <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
       <div class="d-flex gap-1 mt-1">
-        <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>
+        <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${escJs(d.original_filename)}')">🔍 ETL</button>
         <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:10px" onclick="deleteDocument('${d.id}')">🗑 Delete</button>
       </div>
     </div>`;
@@ -4764,6 +4768,11 @@ function sbadge(s){
 function fd(iso){if(!iso)return'—';const s=/[Z+\-]\d{2}:?\d{2}$/.test(iso)?iso:iso+'Z';return new Date(s).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
 function fb(n){if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(1)+' MB';}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// Escape a value placed inside a single-quoted JS string literal within an inline
+// HTML handler (e.g. an onclick that calls a function with interpolated args).
+// esc() alone does NOT neutralise the single-quote / backslash that would break
+// out of the JS string literal, enabling DOM XSS — this helper adds that layer.
+function escJs(s){return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));}
 function safeParse(md){return DOMPurify.sanitize(marked.parse(md||''));}
 function toast(msg,type='info'){
   const el=document.createElement('div');
@@ -5437,7 +5446,7 @@ async function umLoadUsers(){
             ${['analyst','reviewer','approver','admin'].map(r=>`<option${r===u.role?' selected':''}>${r}</option>`).join('')}
           </select>
           <button class="btn btn-outline-primary btn-sm me-1" onclick="umChangeRole('${u.id}',this.closest('td').querySelector('.um-role-sel').value)">變更</button>
-          <button class="btn btn-outline-warning btn-sm" onclick="umResetPw('${u.id}','${esc(u.email)}')">重設密碼</button>
+          <button class="btn btn-outline-warning btn-sm" onclick="umResetPw('${u.id}','${escJs(u.email)}')">重設密碼</button>
         </td>
       </tr>`).join('')}</tbody>
     </table>`;

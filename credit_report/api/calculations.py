@@ -208,6 +208,7 @@ async def _run_recalculate_core(db: AsyncSession, report_id: str) -> tuple[int, 
     from credit_report.fact_store.repository import get_facts_for_report
     from credit_report.calculation_engine.financial_ratios import (
         debt_to_ebitda,
+        net_debt_to_ebitda,
         interest_coverage,
         net_debt,
         ebitda_margin,
@@ -240,7 +241,15 @@ async def _run_recalculate_core(db: AsyncSession, report_id: str) -> tuple[int, 
         cfo_f = g("cash_flow_from_operations")
 
         if debt_f and ebitda_f:
-            val, formula, fids = debt_to_ebitda(debt_f.value, ebitda_f.value, debt_f.id, ebitda_f.id)
+            # Net-debt leverage: subtract cash when available (credit standard),
+            # else fall back to gross debt/EBITDA so the metric still surfaces.
+            if cash_f:
+                val, formula, fids = net_debt_to_ebitda(
+                    debt_f.value, cash_f.value, ebitda_f.value,
+                    debt_f.id, cash_f.id, ebitda_f.id,
+                )
+            else:
+                val, formula, fids = debt_to_ebitda(debt_f.value, ebitda_f.value, debt_f.id, ebitda_f.id)
             calcs.append(("net_debt_ebitda", val, formula, fids))
         if ebitda_f and rev_f:
             val, formula, fids = ebitda_margin(ebitda_f.value, rev_f.value, ebitda_f.id, rev_f.id)

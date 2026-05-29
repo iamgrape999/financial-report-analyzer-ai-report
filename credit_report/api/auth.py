@@ -226,7 +226,10 @@ async def register(
     if payload.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {VALID_ROLES}")
 
-    result = await db.execute(select(User).where(User.email == payload.email))
+    normalized_email = payload.email.strip().lower()
+    # Case-insensitive duplicate check so Alice@x.com and alice@x.com can't coexist
+    # (login uses case-insensitive matching; distinct-case rows would break it).
+    result = await db.execute(select(User).where(func.lower(User.email) == normalized_email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
@@ -235,7 +238,7 @@ async def register(
 
     new_user = User(
         id=str(uuid.uuid4()),
-        email=payload.email,
+        email=normalized_email,
         hashed_password=hash_password(payload.password),
         role=payload.role,
         is_active=True,

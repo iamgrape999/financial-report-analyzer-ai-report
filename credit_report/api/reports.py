@@ -172,6 +172,14 @@ async def update_status(
     if payload.status != "approved":
         _assert_owner_or_admin(report, current_user)
 
+    # Approved reports are immutable: leaving "approved" must go through the
+    # recall workflow, not this generic status PATCH. Only admins may override.
+    if report.status == "approved" and payload.status != "approved" and current_user.role != "admin":
+        raise HTTPException(
+            status_code=409,
+            detail="Approved reports are immutable — use the recall workflow to reopen, or contact an admin.",
+        )
+
     old_status = report.status
     report.status = payload.status
     logger.info("update_status: report=%s %r → %r user=%s", report_id, old_status, payload.status, current_user.id)

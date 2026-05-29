@@ -9,20 +9,28 @@ from typing import Optional
 
 from credit_report.config import CREDIT_REPORTS_ROOT, CR_MAX_CHUNKS_PER_SECTION, SECTION_RETRIEVAL_KEYWORDS
 
+# Captured at import so _safe_report_dir can tell whether the module-level
+# CREDIT_REPORTS_ROOT was monkeypatched by a test (vs. config being patched).
+_DEFAULT_REPORTS_ROOT = CREDIT_REPORTS_ROOT
+
 logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
 def _safe_report_dir(report_id: str) -> Path:
-    """Resolve and validate report directory to prevent path traversal attacks.
+    """Resolve and validate a report directory, preventing path-traversal attacks.
 
-    Uses a function-level import so that test patches of credit_report.config.CREDIT_REPORTS_ROOT
-    are honoured (module-level binding would be frozen at import time).
+    Honours either monkeypatch site: a test may patch
+    ``credit_report.config.CREDIT_REPORTS_ROOT`` (load/retrieve paths) or
+    ``credit_report.generation.evidence.CREDIT_REPORTS_ROOT`` (save paths).
+    If the module-level global was patched away from its import-time default we
+    use it; otherwise we fall back to the (possibly config-patched) config value.
     """
-    from credit_report.config import CREDIT_REPORTS_ROOT as _root
-    root = _root.resolve()
-    candidate = (_root / report_id).resolve()
+    from credit_report.config import CREDIT_REPORTS_ROOT as _cfg_root
+    base = CREDIT_REPORTS_ROOT if CREDIT_REPORTS_ROOT != _DEFAULT_REPORTS_ROOT else _cfg_root
+    root = base.resolve()
+    candidate = (base / report_id).resolve()
     if not str(candidate).startswith(str(root) + "/") and candidate != root:
         raise ValueError("Invalid report_id: path traversal attempt detected")
     return candidate
@@ -63,14 +71,14 @@ def _score_chunk(chunk: str, keywords: list[str]) -> int:
 
 def save_document_text(report_id: str, doc_id: str, text: str) -> None:
     """Persist extracted document text to CREDIT_REPORTS_ROOT/{report_id}/{doc_id}.txt."""
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     doc_dir.mkdir(parents=True, exist_ok=True)
     (doc_dir / f"{doc_id}.txt").write_text(text, encoding="utf-8")
 
 
 def save_document_binary(report_id: str, doc_id: str, file_bytes: bytes, filename: str) -> None:
     """Persist the original uploaded file bytes so ETL can be re-run without re-uploading."""
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     doc_dir.mkdir(parents=True, exist_ok=True)
     (doc_dir / f"{doc_id}.bin").write_bytes(file_bytes)
     (doc_dir / f"{doc_id}.fname").write_text(filename, encoding="utf-8")
@@ -78,7 +86,7 @@ def save_document_binary(report_id: str, doc_id: str, file_bytes: bytes, filenam
 
 def load_document_texts(report_id: str) -> list[str]:
     """Load all extracted document texts for a report from the filesystem."""
-    doc_dir = CREDIT_REPORTS_ROOT / report_id
+    doc_dir = _safe_report_dir(report_id)
     if not doc_dir.exists():
         return []
     texts: list[str] = []

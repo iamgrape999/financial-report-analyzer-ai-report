@@ -630,7 +630,7 @@ async def etl_document_endpoint(
     from pathlib import Path
 
     report = await _require_report(db, report_id)
-    _assert_can_view(report, current_user)
+    _assert_owner_or_admin(report, current_user)
     rate_limit_check(f"etl:{current_user.id}", max_requests=5, window_seconds=1800)
 
     result = await db.execute(
@@ -778,7 +778,7 @@ async def etl_document_stream(
     from pathlib import Path
 
     report = await _require_report(db, report_id)
-    _assert_can_view(report, current_user)
+    _assert_owner_or_admin(report, current_user)
     rate_limit_check(f"etl:{current_user.id}", max_requests=5, window_seconds=1800)
 
     result = await db.execute(
@@ -1390,6 +1390,9 @@ async def generate_full_report(
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports are immutable — recall before regenerating")
+
     # Preflight data check — collect which sections have structured input (informational only)
     sections_with_data: list[int] = []
     for sec_no in range(1, 11):
@@ -1593,7 +1596,7 @@ async def gap_fill_report(
         )
 
     report = await _require_report(db, report_id)
-    _assert_can_view(report, current_user)
+    _assert_owner_or_admin(report, current_user)
 
     if report.status == "approved":
         raise HTTPException(status_code=409, detail="Approved reports cannot be modified")

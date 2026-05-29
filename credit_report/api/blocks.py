@@ -160,6 +160,7 @@ async def get_block(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    await _get_report_or_403(db, report_id, current_user)
     block = await block_repo.get_block(db, block_id)
     if not block or block.report_id != report_id:
         raise HTTPException(status_code=404, detail="Block not found")
@@ -209,6 +210,7 @@ async def block_history(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    await _get_report_or_403(db, report_id, current_user)
     block = await block_repo.get_block(db, block_id)
     if not block or block.report_id != report_id:
         raise HTTPException(status_code=404, detail="Block not found")
@@ -222,6 +224,7 @@ async def list_cells(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    await _get_report_or_403(db, report_id, current_user)
     block = await block_repo.get_block(db, block_id)
     if not block or block.report_id != report_id:
         raise HTTPException(status_code=404, detail="Block not found")

@@ -33,6 +33,28 @@ def debt_to_ebitda(
     return val, formula, fact_ids
 
 
+def net_debt_to_ebitda(
+    total_debt: float,
+    cash: float,
+    ebitda: float,
+    debt_fact_id: Optional[str] = None,
+    cash_fact_id: Optional[str] = None,
+    ebitda_fact_id: Optional[str] = None,
+) -> tuple[Optional[float], str, list[str]]:
+    """Net leverage = (Total Debt − Cash) / EBITDA.
+
+    This is the credit-standard net-debt leverage metric (cash nets down debt),
+    consistent with the TWSE importer's net_debt_ebitda computation.
+    """
+    nd = total_debt - cash
+    val = safe_divide(nd, ebitda)
+    formula = f"(Total Debt - Cash) / EBITDA = ({total_debt:,.1f} - {cash:,.1f}) / {ebitda:,.1f}"
+    if val is not None:
+        formula += f" = {val:.2f}x"
+    fact_ids = [fid for fid in [debt_fact_id, cash_fact_id, ebitda_fact_id] if fid]
+    return val, formula, fact_ids
+
+
 def interest_coverage(
     ebitda: float,
     interest_expense: float,
