@@ -199,6 +199,20 @@ class _TaskStore:
 _generation_tasks = _TaskStore()
 _url_import_tasks = _TaskStore(ttl=3600, maxsize=500)  # longer TTL for background downloads
 
+# Limit concurrent PDF/DOCX text extractions to 1 so that a spike of simultaneous
+# large annual-report uploads never pushes Render's 512 MB instance into OOM territory.
+# Each pdfplumber extraction can peak at 100–300 MB; serialising them is far cheaper
+# than getting OOM-killed and bouncing the whole service.
+_EXTRACT_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _get_extract_semaphore() -> asyncio.Semaphore:
+    """Return the per-event-loop extraction semaphore, creating it on first call."""
+    global _EXTRACT_SEMAPHORE
+    if _EXTRACT_SEMAPHORE is None:
+        _EXTRACT_SEMAPHORE = asyncio.Semaphore(1)
+    return _EXTRACT_SEMAPHORE
+
 # Per-(report_id, section_no) lock — prevents duplicate concurrent generation of
 # the same section.  Entries are added just before the BackgroundTask is queued
 # and removed when the background task finishes (success or error).
@@ -459,6 +473,8 @@ async def _extract_and_save_text_bg(report_id: str, doc_id: str) -> None:
 
     Reads from the already-saved .bin file so that file_bytes are NOT held in memory
     from request time until this task runs (prevents OOM when extractions queue up).
+    Serialised via _EXTRACT_SEMAPHORE so at most one large PDF is processed at a time
+    (each pdfplumber pass can peak at 100-300 MB on Render's 512 MB instance).
     If extraction fails, ETL recovers from the .bin on the next run.
     """
     from credit_report.config import CREDIT_REPORTS_ROOT as _CR_ROOT
@@ -472,9 +488,11 @@ async def _extract_and_save_text_bg(report_id: str, doc_id: str) -> None:
         file_bytes = bin_path.read_bytes()
         fname = fname_path.read_text(encoding="utf-8") if fname_path.exists() else f"{doc_id}.bin"
 
-        text, detected_fmt = await loop.run_in_executor(
-            None, partial(extract_text_from_file, file_bytes, fname)
-        )
+        sem = _get_extract_semaphore()
+        async with sem:
+            text, detected_fmt = await loop.run_in_executor(
+                None, partial(extract_text_from_file, file_bytes, fname)
+            )
         del file_bytes  # free before writing text (save_document_text is fast)
         save_document_text(report_id, doc_id, text)
         logger.info(
@@ -1841,17 +1859,20 @@ async def _url_import_bg(task_id: str, report_id: str, url: str, filename: Optio
         return
 
     doc_id = str(uuid.uuid4())
+    file_size = len(fdoc.data)
+    doc_type = fdoc.document_type
     _url_import_tasks.update(task_id, {"status": "BINARY_SAVED", "document_id": doc_id, "filename": fname})
 
     save_document_binary(report_id, doc_id, fdoc.data, fname)
+    del fdoc  # free download buffer BEFORE DB write + extraction — binary is safe on disk
 
     async with AsyncSessionLocal() as db:
         doc = SectionDocument(
             id=doc_id,
             report_id=report_id,
             original_filename=fname,
-            file_size_bytes=len(fdoc.data),
-            document_type=fdoc.document_type,
+            file_size_bytes=file_size,
+            document_type=doc_type,
             file_format=ext,
             etl_status="pending",
             uploaded_by=user_id,
@@ -1859,19 +1880,25 @@ async def _url_import_bg(task_id: str, report_id: str, url: str, filename: Optio
         db.add(doc)
         await db.commit()
 
+    # Re-read from disk so the download buffer (already freed) is not double-counted
+    # in memory during extraction. Serialise via semaphore to prevent concurrent OOM.
     _url_import_tasks.update(task_id, {"status": "TEXT_EXTRACTING"})
     loop = asyncio.get_running_loop()
+    from credit_report.config import CREDIT_REPORTS_ROOT as _CR_ROOT
+    bin_path = _CR_ROOT / report_id / f"{doc_id}.bin"
     try:
-        text, _ = await asyncio.wait_for(
-            loop.run_in_executor(None, _partial(extract_text_from_file, fdoc.data, fname)),
-            timeout=300.0,
-        )
-        del fdoc
+        file_bytes_for_extract = bin_path.read_bytes()
+        sem = _get_extract_semaphore()
+        async with sem:
+            text, _ = await asyncio.wait_for(
+                loop.run_in_executor(None, _partial(extract_text_from_file, file_bytes_for_extract, fname)),
+                timeout=300.0,
+            )
+        del file_bytes_for_extract
         save_document_text(report_id, doc_id, text)
         _url_import_tasks.update(task_id, {"status": "READY", "text_chars": len(text.strip())})
         logger.info("url_import_bg: done task=%s doc=%s chars=%d", task_id, doc_id, len(text.strip()))
     except Exception as exc:
-        del fdoc
         logger.warning("url_import_bg: extraction failed task=%s doc=%s: %s — binary saved", task_id, doc_id, exc)
         _url_import_tasks.update(task_id, {
             "status": "EXTRACT_FAILED",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import heapq
 import logging
 import time
@@ -174,7 +175,6 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     Returns empty string if extraction fails or text quality is too low
     (e.g. CID-font Chinese PDFs where characters are unmapped).
     """
-    import gc
     pdf_kb = len(pdf_bytes) // 1024
     logger.info("[OCR] extract_text_from_pdf: start bytes=%dKB", pdf_kb)
 
@@ -214,6 +214,8 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
             )
         else:
             logger.info("[OCR] pdfminer: returned empty text")
+        del result  # free before next phase
+        gc.collect()
     except Exception as e:
         logger.warning("[OCR] pdfminer: exception: %s", e)
 
@@ -225,15 +227,23 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
         reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
         page_count = len(reader.pages)
-        pages = [page.extract_text() or "" for page in reader.pages]
+        capped_pages = min(page_count, _PDF_MAX_PYPDF_PAGES)
+        if page_count > _PDF_MAX_PYPDF_PAGES:
+            logger.warning(
+                "[OCR] pypdf: large PDF %d pages — capping at %d to limit memory use",
+                page_count, _PDF_MAX_PYPDF_PAGES,
+            )
+        pages = [reader.pages[i].extract_text() or "" for i in range(capped_pages)]
         non_empty_pages = sum(1 for p in pages if p.strip())
         result = "\n\n".join(p for p in pages if p.strip())
+        del reader, pages  # release page objects before quality check
+        gc.collect()
         elapsed = (time.perf_counter() - t0) * 1000
         stats = _quality_stats(result)
         logger.info(
-            "[OCR] pypdf: elapsed=%.0fms pages=%d non_empty_pages=%d chars=%d "
+            "[OCR] pypdf: elapsed=%.0fms pages=%d/%d non_empty_pages=%d chars=%d "
             "meaningful=%d ratio=%.1f%% sample=%r",
-            elapsed, page_count, non_empty_pages,
+            elapsed, capped_pages, page_count, non_empty_pages,
             stats["chars"], stats["meaningful"], stats["ratio_pct"], stats["sample"],
         )
         if result and _text_quality_ok(result):
@@ -261,10 +271,13 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
 _PDF_SPARSE_PAGE_THRESHOLD = 50   # chars below which a page is considered "image-only"
 _PDF_MAX_IMAGE_PAGE_OCR = 5       # max Vision OCR calls per PDF for sparse pages
-# Limit per-phase page processing to prevent OOM on large annual reports.
-# 512 MB Render starter: pdfplumber layout analysis ~1-3 MB/page → cap at 100 to stay under limit.
-# Vision OCR is capped separately at extract_text_from_scanned_pdf_vision call-site.
-_PDF_MAX_PDFPLUMBER_PAGES = 100
+# Page caps to prevent OOM on Render's 512 MB instance.
+# pdfplumber layout analysis peaks at ~1-3 MB/page of internal objects; 50 pages = ≤150 MB.
+# Financial annual reports rarely put key data past page 50 (directors' report + financials
+# fit well within 50 pages in most TWD/USD issuers' reports).
+# pypdf is lighter but still allocates per-page text lists — cap at the same limit.
+_PDF_MAX_PDFPLUMBER_PAGES = 50
+_PDF_MAX_PYPDF_PAGES = 50
 
 
 def _extract_tables_pdfplumber(pdf_bytes: bytes) -> str:
