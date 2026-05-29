@@ -3779,38 +3779,70 @@ async function fetchFromUrl(){
   if(!/^https?:\/\//i.test(url)){toast(tl('URL must start with http:// or https://','URL 須以 http:// 或 https:// 開頭'),'warning');return;}
   const btn=document.getElementById('btnUrlFetch');
   btn.disabled=true;
-  _uploadProgressShow(tl('Server is fetching the file from the URL — this may take 30–120 seconds…',
-                         '伺服器正從 URL 抓取檔案 — 預計 30–120 秒…'));
-  _uploadProgressUpdate(20,tl('Downloading on server…','伺服器下載中…'));
+  _uploadProgressShow(tl('Submitting URL import job…','提交 URL 匯入任務中…'));
+  _uploadProgressUpdate(5,tl('Creating background job…','建立背景任務…'));
   try{
-    const res=await fetch(API+'/reports/'+currentRid+'/fetch-documents',{
+    const res=await fetch(API+'/reports/'+currentRid+'/url-imports',{
       method:'POST',headers:HJ(),
-      body:JSON.stringify({sources:['direct'],direct_urls:[url]})
+      body:JSON.stringify({url})
     });
     const d=await res.json();
     if(!res.ok)throw new Error(d.detail||`HTTP ${res.status}`);
-    _uploadProgressUpdate(100,tl('Done','完成'));
-    const okCount=(d.documents||[]).length;
-    const errs=(d.errors||[]);
-    if(okCount>0){
-      const names=(d.documents||[]).map(r=>r.filename||'(file)').join(', ');
-      toast(tl(`✓ Fetched ${okCount} document(s): ${names}`,`✓ 已抓取 ${okCount} 份文件：${names}`),'success');
-    }
-    if(errs.length>0){
-      const err=errs.map(e=>e.error||e.message||JSON.stringify(e)).join('; ');
-      toast(tl(`⚠️ Fetch error: ${err}`,`⚠️ 抓取錯誤：${err}`),'warning');
-    }
-    if(okCount===0&&errs.length===0){
-      toast(tl('No documents were fetched. The URL may be inaccessible from the server — try uploading directly.','未抓取到任何文件。伺服器可能無法存取此 URL，請改用直接上傳。'),'warning');
-    }
+    const taskId=d.task_id;
     inp.value='';
-    await loadReportDetail(currentRid);
+    // Poll until terminal state
+    const _STATUS_PROGRESS={QUEUED:10,FETCHING_URL:30,BINARY_SAVED:60,TEXT_EXTRACTING:80,READY:100,FETCH_FAILED:100,EXTRACT_FAILED:100,EMBEDDING_FAILED:100};
+    const _STATUS_LABEL={
+      QUEUED:tl('Queued…','已排隊…'),
+      FETCHING_URL:tl('Downloading from URL…','從 URL 下載中…'),
+      BINARY_SAVED:tl('File saved — extracting text…','檔案已儲存，正在萃取文字…'),
+      TEXT_EXTRACTING:tl('Extracting text (may take 1–3 min for large PDFs)…','文字萃取中（大型 PDF 可能需 1–3 分鐘）…'),
+      READY:tl('Done','完成'),
+      FETCH_FAILED:tl('Download failed','下載失敗'),
+      EXTRACT_FAILED:tl('Text extraction failed (file saved)','文字萃取失敗（檔案已儲存）'),
+    };
+    const TERMINAL=new Set(['READY','FETCH_FAILED','EXTRACT_FAILED','EMBEDDING_FAILED']);
+    let attempts=0;
+    const maxAttempts=120; // 4 minutes at 2s intervals
+    await new Promise((resolve)=>{
+      const poll=async()=>{
+        attempts++;
+        try{
+          const sr=await fetch(API+'/reports/'+currentRid+'/url-imports/'+taskId,{headers:H()});
+          if(!sr.ok){resolve();return;}
+          const s=await sr.json();
+          const pct=_STATUS_PROGRESS[s.status]||10;
+          const lbl=_STATUS_LABEL[s.status]||s.status;
+          _uploadProgressUpdate(pct,lbl);
+          if(TERMINAL.has(s.status)||attempts>=maxAttempts){
+            if(s.status==='READY'){
+              toast(tl(`✓ URL import complete: ${s.filename||'document'} (${(s.text_chars||0).toLocaleString()} chars extracted)`,
+                       `✓ URL 匯入完成：${s.filename||'文件'}（已萃取 ${(s.text_chars||0).toLocaleString()} 字元）`),'success');
+              await loadReportDetail(currentRid);
+            }else if(s.status==='EXTRACT_FAILED'){
+              toast(tl(`⚠️ Text extraction failed — file saved as ${s.filename||'document'} (run ETL to retry): ${s.error||''}`,
+                       `⚠️ 文字萃取失敗 — 檔案已儲存為 ${s.filename||'文件'}（執行 ETL 可重試）：${s.error||''}`),'warning');
+              await loadReportDetail(currentRid);
+            }else if(s.status==='FETCH_FAILED'){
+              toast(tl(`✗ URL fetch failed: ${s.error||'unknown error'}`,`✗ URL 抓取失敗：${s.error||'未知錯誤'}`),'danger');
+            }else{
+              toast(tl('URL import timed out — check document list for status','URL 匯入逾時，請查看文件清單確認狀態'),'warning');
+              await loadReportDetail(currentRid);
+            }
+            resolve();
+          }else{
+            setTimeout(poll,2000);
+          }
+        }catch(_){setTimeout(poll,3000);}
+      };
+      setTimeout(poll,1000);
+    });
   }catch(e){
     console.error('fetchFromUrl failed:',e);
     toast(tl(`URL fetch failed: ${e.message}`,`URL 抓取失敗：${e.message}`),'danger');
   }finally{
     btn.disabled=false;
-    setTimeout(_uploadProgressHide,2000);
+    setTimeout(_uploadProgressHide,3000);
   }
 }
 
@@ -3843,6 +3875,15 @@ async function importFromTWSE(){
     const secList=(d.sections_updated||[]).map(s=>'§'+s).join(', ')||'none';
     toast(tl(`✓ TWSE Import: ${d.company_name||code} — ${d.fields_written} field(s) written into ${secList} (${d.fields_skipped} skipped — already filled)`,
              `✓ 證交所匯入：${d.company_name||code} — 已寫入 ${d.fields_written} 個欄位至 ${secList}（跳過 ${d.fields_skipped} 個已填欄位）`),'success');
+    if(d.p1_available===false){
+      toastWithAction(
+        tl('⚠️ Financial statement data (IS/BS/CF) not available — TWSE P1 endpoints blocked (HTTP 403) from this server. §7A financials and §7B ratios cannot be auto-filled.',
+           '⚠️ 財務報表資料未取得 — TWSE P1 端點被封鎖（HTTP 403）。§7A 財務數據與 §7B 比率無法自動匯入。'),
+        tl('Run Diagnostics','執行診斷'),
+        ()=>window.open('/api/credit-report/diagnostics/twse','_blank'),
+        'warning',8000
+      );
+    }
     inp.value='';
     await loadReportDetail(currentRid);
     // Refresh open section panel if it's one of the updated sections

@@ -38,6 +38,7 @@ from credit_report.security.rate_limit import rate_limit_check
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports/{report_id}", tags=["generation"])
+diagnostics_router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
 
 _MAX_UPLOAD_BYTES = CREDIT_REPORT_MAX_UPLOAD_MB * 1024 * 1024
 
@@ -196,6 +197,7 @@ class _TaskStore:
 
 
 _generation_tasks = _TaskStore()
+_url_import_tasks = _TaskStore(ttl=3600, maxsize=500)  # longer TTL for background downloads
 
 # Per-(report_id, section_no) lock — prevents duplicate concurrent generation of
 # the same section.  Entries are added just before the BackgroundTask is queued
@@ -1798,6 +1800,144 @@ async def auto_fetch_documents(
     }
 
 
+# ── URL Import background job ─────────────────────────────────────────────────
+
+class UrlImportRequest(BaseModel):
+    url: str
+    filename: Optional[str] = None  # override inferred filename
+
+
+async def _url_import_bg(task_id: str, report_id: str, url: str, filename: Optional[str], user_id: str) -> None:
+    """Background task: download URL → save binary → extract text → register document."""
+    from credit_report.api.doc_fetcher import FetchError, check_ssrf_safe, fetch_direct_url
+    from credit_report.database import AsyncSessionLocal
+    from functools import partial as _partial
+
+    _url_import_tasks.update(task_id, {"status": "FETCHING_URL"})
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(follow_redirects=True, max_redirects=5) as client:
+            fdoc, err = await fetch_direct_url(client, url, filename=filename)
+    except Exception as exc:
+        logger.warning("url_import_bg: download error task=%s: %s", task_id, exc)
+        _url_import_tasks.update(task_id, {"status": "FETCH_FAILED", "error": str(exc)[:300]})
+        return
+
+    if err or not fdoc:
+        msg = err.message if err else "No data returned"
+        _url_import_tasks.update(task_id, {"status": "FETCH_FAILED", "error": msg})
+        return
+
+    fname = fdoc.filename
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        _url_import_tasks.update(task_id, {"status": "FETCH_FAILED", "error": f"Unsupported file type .{ext}"})
+        return
+    if len(fdoc.data) > _MAX_UPLOAD_BYTES:
+        _url_import_tasks.update(task_id, {"status": "FETCH_FAILED", "error": "File exceeds 50 MB limit"})
+        return
+    if not _check_magic(fdoc.data, ext):
+        _url_import_tasks.update(task_id, {"status": "FETCH_FAILED", "error": "File content does not match its extension"})
+        return
+
+    doc_id = str(uuid.uuid4())
+    _url_import_tasks.update(task_id, {"status": "BINARY_SAVED", "document_id": doc_id, "filename": fname})
+
+    save_document_binary(report_id, doc_id, fdoc.data, fname)
+
+    async with AsyncSessionLocal() as db:
+        doc = SectionDocument(
+            id=doc_id,
+            report_id=report_id,
+            original_filename=fname,
+            file_size_bytes=len(fdoc.data),
+            document_type=fdoc.document_type,
+            file_format=ext,
+            etl_status="pending",
+            uploaded_by=user_id,
+        )
+        db.add(doc)
+        await db.commit()
+
+    _url_import_tasks.update(task_id, {"status": "TEXT_EXTRACTING"})
+    loop = asyncio.get_running_loop()
+    try:
+        text, _ = await asyncio.wait_for(
+            loop.run_in_executor(None, _partial(extract_text_from_file, fdoc.data, fname)),
+            timeout=300.0,
+        )
+        del fdoc
+        save_document_text(report_id, doc_id, text)
+        _url_import_tasks.update(task_id, {"status": "READY", "text_chars": len(text.strip())})
+        logger.info("url_import_bg: done task=%s doc=%s chars=%d", task_id, doc_id, len(text.strip()))
+    except Exception as exc:
+        del fdoc
+        logger.warning("url_import_bg: extraction failed task=%s doc=%s: %s — binary saved", task_id, doc_id, exc)
+        _url_import_tasks.update(task_id, {
+            "status": "EXTRACT_FAILED",
+            "error": f"Text extraction failed (binary saved — run ETL to retry): {str(exc)[:200]}",
+        })
+
+
+@router.post("/url-imports", status_code=202)
+async def create_url_import(
+    report_id: str,
+    payload: UrlImportRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Submit a URL for background download and document registration.
+
+    Returns immediately with a task_id. Poll GET /url-imports/{task_id} for status.
+    Status progression: QUEUED → FETCHING_URL → BINARY_SAVED → TEXT_EXTRACTING → READY
+    On failure: FETCH_FAILED | EXTRACT_FAILED
+    """
+    from credit_report.api.doc_fetcher import check_ssrf_safe
+
+    if not payload.url.strip():
+        raise HTTPException(status_code=422, detail="url is required")
+    ssrf_err = check_ssrf_safe(payload.url)
+    if ssrf_err:
+        raise HTTPException(status_code=422, detail=f"URL blocked for security: {ssrf_err}")
+
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    if report.status == "approved":
+        raise HTTPException(status_code=409, detail="Approved reports cannot be modified")
+
+    task_id = str(uuid.uuid4())
+    _url_import_tasks.set(task_id, {
+        "task_id": task_id,
+        "report_id": report_id,
+        "url": payload.url,
+        "status": "QUEUED",
+        "document_id": None,
+        "filename": None,
+        "text_chars": None,
+        "error": None,
+    })
+    background_tasks.add_task(
+        _url_import_bg, task_id, report_id, payload.url, payload.filename, current_user.id
+    )
+    return {"task_id": task_id, "status": "QUEUED", "document_id": None}
+
+
+@router.get("/url-imports/{task_id}")
+async def get_url_import_status(
+    report_id: str,
+    task_id: str,
+    current_user: User = Depends(require_analyst),
+):
+    """Poll the status of a URL import background job."""
+    task = _url_import_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found or expired (TTL=1h)")
+    if task.get("report_id") != report_id:
+        raise HTTPException(status_code=403, detail="Task does not belong to this report")
+    return task
+
+
 # ── TWSE import ───────────────────────────────────────────────────────────────
 
 class TWSEImportRequest(BaseModel):
@@ -1813,6 +1953,7 @@ class TWSEImportResult(BaseModel):
     fields_written: int
     fields_skipped: int
     not_found: bool = False
+    p1_available: Optional[bool] = None  # True=financial stmts fetched; False=blocked/403; None=not checked
 
 
 @router.post("/import-twse", response_model=TWSEImportResult)
@@ -1866,6 +2007,12 @@ async def import_twse_data(
             fields_skipped=0,
             not_found=True,
         )
+
+    # Determine if P1 financial statement data was actually returned
+    _p1_available: Optional[bool] = (
+        bool(twse_data.income_statements or twse_data.balance_sheets or twse_data.cash_flows)
+        if twse_data is not None else None
+    )
 
     section_maps: dict[int, dict] = {
         sec_no: map_to_section(sec_no, twse_data)
@@ -1930,7 +2077,73 @@ async def import_twse_data(
         sections_updated=updated_sections,
         fields_written=total_written,
         fields_skipped=total_skipped,
+        p1_available=_p1_available,
     )
+
+
+# ── TWSE runtime diagnostics ──────────────────────────────────────────────────
+
+@diagnostics_router.get("/twse")
+async def get_twse_diagnostics(
+    current_user: User = Depends(require_analyst),
+):
+    """
+    Probe all TWSE OpenAPI endpoints and return per-endpoint runtime status.
+    P0 endpoints should always succeed; P1 returns 403 from non-Taiwan IPs.
+    Use this to determine why financial statement fields are empty after TWSE import.
+    """
+    from credit_report.api.twse_importer import EndpointProbeResult, probe_twse_endpoints
+
+    results: list[EndpointProbeResult] = await probe_twse_endpoints()
+
+    p0_ok    = all(r.usable for r in results if r.tier == "P0")
+    is_ok    = any(r.usable for r in results if r.name == "t163sb03_1")
+    bs_ok    = any(r.usable for r in results if r.name == "t163sb04_1")
+    cf_ok    = any(r.usable for r in results if r.name == "t163sb05_1")
+    div_ok   = any(r.usable for r in results if r.name == "t187ap14_L")
+    p1_ok    = is_ok and bs_ok and cf_ok
+
+    if p0_ok and p1_ok:
+        diagnosis = "All endpoints available — TWSE import should populate §1/§3/§4/§5/§7/§9 including financial statements."
+    elif p0_ok and not p1_ok:
+        blocked = [r.name for r in results if r.tier == "P1" and not r.usable]
+        diagnosis = (
+            f"P0 endpoints OK (company profile, news, revenue). "
+            f"P1 financial statement endpoints blocked: {blocked}. "
+            f"Financial data (§7A IS/BS/CF, §7B ratios) cannot be imported from this network. "
+            f"Deploy to Taiwan-based server or use production Render to access P1."
+        )
+    else:
+        failed = [r.name for r in results if r.tier == "P0" and not r.usable]
+        diagnosis = f"P0 endpoints failing: {failed}. Check network connectivity to openapi.twse.com.tw."
+
+    return {
+        "probed_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "summary": {
+            "company_profile_available": p0_ok,
+            "income_statement_available": is_ok,
+            "balance_sheet_available": bs_ok,
+            "cash_flow_available": cf_ok,
+            "dividend_available": div_ok,
+            "p1_financial_stmts_available": p1_ok,
+            "diagnosis": diagnosis,
+        },
+        "endpoints": [
+            {
+                "name": r.name,
+                "url": r.url,
+                "tier": r.tier,
+                "desc": r.desc,
+                "status_code": r.status_code,
+                "latency_ms": r.latency_ms,
+                "row_count": r.row_count,
+                "sample_keys": r.sample_keys,
+                "error_type": r.error_type,
+                "usable": r.usable,
+            }
+            for r in results
+        ],
+    }
 
 
 @router.get("/generate/stream/{task_id}")

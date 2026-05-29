@@ -27,15 +27,17 @@ P1/P2 endpoints degrade gracefully to [] on 403 or network error.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 _FETCH_TIMEOUT = 20.0
+_PROBE_TIMEOUT = 15.0
 
 # ── TWSE endpoint constants ───────────────────────────────────────────────────
 
@@ -68,6 +70,86 @@ _HEADERS = {
     ),
     "Accept": "application/json, */*",
 }
+
+# ── Diagnostics registry ───────────────────────────────────────────────────────
+
+_ENDPOINT_REGISTRY: list[dict] = [
+    {"name": "t187ap03_L", "url": _TWSE_COMPANY_L_URL,         "tier": "P0", "desc": "Listed companies (profile)"},
+    {"name": "t187ap03_P", "url": _TWSE_COMPANY_P_URL,         "tier": "P0", "desc": "OTC companies (profile)"},
+    {"name": "t187ap02_L", "url": _TWSE_SHAREHOLDERS_URL,      "tier": "P0", "desc": "Major shareholders (>10%)"},
+    {"name": "t187ap11_L", "url": _TWSE_BOARD_URL,             "tier": "P0", "desc": "Board / supervisor shareholding"},
+    {"name": "t187ap04_L", "url": _TWSE_MATERIAL_NEWS_URL,     "tier": "P0", "desc": "Material news (§4G)"},
+    {"name": "t21sc03_1",  "url": _TWSE_MONTHLY_REVENUE_L_URL, "tier": "P0", "desc": "Monthly revenue listed (§7)"},
+    {"name": "t21sc03_2",  "url": _TWSE_MONTHLY_REVENUE_P_URL, "tier": "P0", "desc": "Monthly revenue OTC fallback"},
+    {"name": "t163sb03_1", "url": _TWSE_IS_GENERAL_URL,        "tier": "P1", "desc": "Income statement general industry"},
+    {"name": "t163sb04_1", "url": _TWSE_BS_GENERAL_URL,        "tier": "P1", "desc": "Balance sheet general industry"},
+    {"name": "t163sb05_1", "url": _TWSE_CF_GENERAL_URL,        "tier": "P1", "desc": "Cash flow general industry"},
+    {"name": "t187ap14_L", "url": _TWSE_DIVIDEND_URL,          "tier": "P1", "desc": "Dividend distribution (§4D)"},
+    {"name": "t22sr01_1",  "url": _TWSE_DAILY_TRADE_URL,       "tier": "P2", "desc": "Daily trade / market cap (§4E)"},
+]
+
+
+@dataclass
+class EndpointProbeResult:
+    name: str
+    url: str
+    tier: str
+    desc: str
+    status_code: Optional[int]
+    latency_ms: float
+    row_count: int
+    sample_keys: list[str]
+    error_type: Optional[str]
+    usable: bool
+
+
+async def _probe_one(client: httpx.AsyncClient, ep: dict) -> EndpointProbeResult:
+    t0 = time.monotonic()
+    status_code: Optional[int] = None
+    row_count = 0
+    sample_keys: list[str] = []
+    error_type: Optional[str] = None
+    usable = False
+    try:
+        r = await client.get(ep["url"], headers=_HEADERS, timeout=_PROBE_TIMEOUT, follow_redirects=True)
+        latency_ms = round((time.monotonic() - t0) * 1000, 1)
+        status_code = r.status_code
+        if r.status_code == 200:
+            try:
+                data = r.json()
+                rows = data if isinstance(data, list) else []
+                row_count = len(rows)
+                sample_keys = list(rows[0].keys())[:8] if rows else []
+                usable = True
+            except Exception as exc:
+                error_type = f"json_parse_error: {exc}"
+        else:
+            error_type = f"http_{r.status_code}"
+    except httpx.TimeoutException:
+        latency_ms = round((time.monotonic() - t0) * 1000, 1)
+        error_type = "timeout"
+    except Exception as exc:
+        latency_ms = round((time.monotonic() - t0) * 1000, 1)
+        error_type = str(exc)[:120]
+    return EndpointProbeResult(
+        name=ep["name"],
+        url=ep["url"],
+        tier=ep["tier"],
+        desc=ep["desc"],
+        status_code=status_code,
+        latency_ms=latency_ms,
+        row_count=row_count,
+        sample_keys=sample_keys,
+        error_type=error_type,
+        usable=usable,
+    )
+
+
+async def probe_twse_endpoints() -> list[EndpointProbeResult]:
+    """Probe all registered TWSE endpoints and return per-endpoint diagnostics."""
+    import asyncio
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        return list(await asyncio.gather(*[_probe_one(client, ep) for ep in _ENDPOINT_REGISTRY]))
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
