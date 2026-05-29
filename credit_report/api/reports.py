@@ -1294,3 +1294,187 @@ async def bulk_apply_suggestions(
         total_facts_checked=len(active_facts),
         sections=section_results,
     )
+
+
+# ── Coverage endpoint ──────────────────────────────────────────────────────────
+# Mirrors the REQUIRED_FIELDS constant in static/index.html for programmatic checks.
+# Note: stored input_json may be in "finalized" format for some sections (§2 bullets,
+# §3 ratings). This endpoint reads raw stored values — the frontend gate (preflight())
+# runs expandPayload() normalization and is authoritative for the 90% block.
+
+_REQUIRED_FIELD_PATHS: dict[int, list[tuple[str, str]]] = {
+    1: [
+        ("report_type",                                   "Report Type"),
+        ("facility_summary.rows",                         "Facility Rows Table (1A)"),
+        ("regulatory_compliance.compliance_status",       "Regulatory Compliance Status (1B)"),
+        ("purpose_and_recommendation.recommendation",     "Recommendation — APPROVE/DECLINE (1C)"),
+        ("terms_and_conditions.borrower",                 "Borrower Name (1D)"),
+        ("account_strategy.wallet.bank_market",           "Account Strategy — Wallet NII (1F)"),
+    ],
+    2: [
+        ("2A_credit_overview.bullets",                    "Credit Overview Bullets (T1)"),
+        ("2B_solvency.primary_repayment_source_verbatim","Primary Repayment Source (T2)"),
+        ("2C_guarantor.guarantor_name_abbrev",            "Guarantor Name Abbreviation (T3)"),
+        ("2D_collateral.pre_delivery.issuer_full_name",   "Pre-Delivery RG Issuer (T4)"),
+        ("2E_risk_and_mitigants.risk_1_title",            "Risk 1 Title (2E)"),
+    ],
+    3: [
+        ("3C_mas_612.grade",                              "MAS 612 Loan Grade (3C)"),
+        ("3C_mas_612.para_1_msr_mapping_verbatim",        "MAS 612 Para 1 — MSR Mapping (3C)"),
+        ("3B_internal_ratings.borrower_entity_full_name", "Borrower Name in MSR Table (3B)"),
+        ("3B_internal_ratings.borrower_fy2024",           "Borrower Current MSR Rating (3B)"),
+    ],
+    4: [
+        ("4A_borrower.company_name_en",                   "Company Name English (4A)"),
+        ("4B_ownership.shareholders",                     "Shareholders (4B)"),
+        ("4C_management.ceo_name",                        "CEO Name (4C)"),
+        ("4D_business.primary_business",                  "Primary Business (4D)"),
+        ("4E_financials.revenue",                         "Revenue Latest FY (4E)"),
+        ("4F_fleet.owned_vessel_count",                   "Owned Fleet Count (4F)"),
+        ("4J_peer_comparison",                            "Peer Comparison (4J)"),
+    ],
+    5: [
+        ("5A_security_overview.is_secured",               "Facility Secured? (5A)"),
+        ("5C_vessel_mortgage.loan_amount_usd_m",          "Vessel Mortgage Loan Amount (5C)"),
+        ("5E_value_maintenance_clause.acr_covenant_pct",  "ACR Covenant Level (5E)"),
+    ],
+    6: [
+        ("6A_project.hull_number",                        "Hull Number (6A)"),
+        ("6B_builder.name",                               "Builder Name (6B)"),
+        ("6C_contract.contract_date",                     "Contract Date (6C)"),
+        ("6D_milestones.m1_name",                         "Milestone 1 Name (6D)"),
+        ("6E_rg_mechanism.issuer_full_name",              "RG Issuer Full Name (6E)"),
+        ("6A_project.delivery_date",                      "Expected Delivery Date (6A)"),
+    ],
+    7: [
+        ("entities_to_analyze.borrower_name",             "Borrower Legal Name (Entities)"),
+        ("7A_borrower_financials.reporting_entity",       "Reporting Entity (7A)"),
+        ("7B_key_ratios.fy2024_dscr",                     "DSCR FY2024 (7B)"),
+    ],
+    8: [
+        ("8A_acra_banking_charges.acra_data_available",   "ACRA Data Available (8A)"),
+        ("8A_acra_banking_charges.entity_name",           "Entity Name — ACRA (8A)"),
+        ("8A_acra_banking_charges.search_date",           "ACRA Search Date (8A)"),
+    ],
+    9: [
+        ("9A_checklist.items",                            "23-Item Checklist (9A)"),
+        ("9A_checklist.kyc_aml_cleared",                  "KYC / AML Cleared (9A)"),
+        ("9C_recommendation.decision",                    "Decision — APPROVE/DECLINE (9C)"),
+        ("9D_signoff.prepared_by",                        "Prepared By (9D)"),
+    ],
+    10: [
+        ("10A_group_exposure.entity_group",               "Entity Group Name (10A)"),
+        ("10A_group_exposure.approved_group_limit_usd_m", "Approved Group Limit (10A)"),
+        ("10C_projections.entity_name",                   "Entity Name (10C)"),
+        ("10C_projections.dscr_commentary",               "DSCR Commentary (10C)"),
+    ],
+}
+
+_PLACEHOLDER_VALUES = {"APPROVE/DECLINE"}
+_PLACEHOLDER_PREFIXES = ("To be generated from",)
+
+
+def _path_value(data: dict, path: str) -> Any:
+    parts = path.split(".")
+    cur: Any = data
+    for p in parts:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(p)
+        if cur is None:
+            return None
+    return cur
+
+
+def _is_filled(data: dict, path: str) -> bool:
+    v = _path_value(data, path)
+    if v is None:
+        return False
+    if isinstance(v, str):
+        t = v.strip()
+        if not t or t in _PLACEHOLDER_VALUES:
+            return False
+        return not any(t.startswith(pfx) for pfx in _PLACEHOLDER_PREFIXES)
+    if isinstance(v, (list, dict)):
+        return len(v) > 0
+    return True
+
+
+@router.get("/{report_id}/coverage")
+async def get_report_coverage(
+    report_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(get_current_user),
+):
+    """Return per-section field coverage for programmatic inspection and testing.
+
+    Each section lists required fields and whether they are filled.
+    overall_pct is the aggregate across all sections with defined required fields.
+    The 90% threshold applied by the frontend generation gate uses expandPayload()
+    normalization; this endpoint reads raw stored values and may differ by ±5%.
+    """
+    result = await db.execute(select(Report).where(Report.id == report_id, Report.is_deleted == False))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _assert_can_view_report(report, current_user)
+
+    # Load all section inputs in one query
+    si_result = await db.execute(
+        select(SectionInput)
+        .where(SectionInput.report_id == report_id)
+        .order_by(SectionInput.section_no, SectionInput.id.desc())
+    )
+    all_si = si_result.scalars().all()
+    latest_by_sec: dict[int, dict] = {}
+    for si in all_si:
+        if si.section_no not in latest_by_sec and si.input_json:
+            try:
+                latest_by_sec[si.section_no] = json.loads(si.input_json)
+            except (ValueError, TypeError):
+                latest_by_sec[si.section_no] = {}
+
+    total_filled_all = 0
+    total_required_all = 0
+    sections_out = []
+
+    for sec_no in range(1, 11):
+        required = _REQUIRED_FIELD_PATHS.get(sec_no, [])
+        data = latest_by_sec.get(sec_no, {})
+        has_input = sec_no in latest_by_sec
+        checked = []
+        missing = []
+        for path, label in required:
+            if _is_filled(data, path):
+                checked.append({"path": path, "label": label})
+                total_filled_all += 1
+            else:
+                missing.append({"path": path, "label": label, "note": "資料源缺漏，待補"})
+            total_required_all += 1
+
+        total = len(required)
+        filled = len(checked)
+        pct = round(filled / total * 100) if total else 100
+        sections_out.append({
+            "section_no": sec_no,
+            "has_input": has_input,
+            "total_required": total,
+            "filled": filled,
+            "missing_count": len(missing),
+            "coverage_pct": pct,
+            "checked": checked,
+            "missing": missing,
+        })
+
+    overall_pct = round(total_filled_all / total_required_all * 100) if total_required_all else 100
+    gate_passed = overall_pct >= 90
+
+    return {
+        "report_id": report_id,
+        "overall_pct": overall_pct,
+        "total_filled": total_filled_all,
+        "total_required": total_required_all,
+        "gate_passed": gate_passed,
+        "gate_threshold_pct": 90,
+        "sections": sections_out,
+    }

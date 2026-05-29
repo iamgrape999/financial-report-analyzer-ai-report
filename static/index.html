@@ -322,7 +322,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <button class="btn btn-outline-secondary btn-sm" onclick="syncFormToJson()" data-i18n="sp.sync_json">↔ Sync to JSON</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="toggleJsonPreview()" id="splitViewBtn" title="Show JSON preview alongside form">⟷ JSON Preview</button>
         <button class="btn btn-outline-success btn-sm" id="btnSuggestFacts" onclick="openFactSuggestModal()" title="Find CanonicalFact-backed suggestions for empty or mismatched fields">💡 Suggest from Facts</button>
-        <small class="text-muted" data-i18n="sp.form_hint">Fill in each field below and click Save. ✗ fields contribute to completeness (50% target for draft generation).</small>
+        <small class="text-muted" data-i18n="sp.form_hint">Fill in each field below and click Save. ✗ <span class="text-danger fw-semibold">*</span> fields are required — overall average ≥ 90% is needed to generate the full report.</small>
       </div>
       <div id="formSplitWrap" class="form-split-wrap">
         <div id="formFields" class="row g-2"></div>
@@ -1296,12 +1296,12 @@ function renderCompleteness(secNo,data){
   const norm=expandPayload(secNo,data);
   const{filled,total,pct,missing}=getCompleteness(secNo,norm);
   const allFields=getRequiredFields(secNo);if(!allFields.length){panel.style.display='none';return;}
-  const barColor=pct>=50?'#00703C':pct>=30?'#f59e0b':'#dc2626';
-  const badgeCls=pct>=50?'bg-success':pct>=30?'bg-warning text-dark':'bg-secondary';
+  const barColor=pct>=90?'#00703C':pct>=50?'#f59e0b':'#dc2626';
+  const badgeCls=pct>=90?'bg-success':pct>=50?'bg-warning text-dark':'bg-danger';
   panel.style.display='block';
   panel.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-1">
     <strong style="font-size:12px">${lang==='zh'?'欄位完整度':'Field Completeness'}: ${filled}/${total} (${pct}%)</strong>
-    <span class="badge ${badgeCls}">${pct>=50?(lang==='zh'?'✓ 可以生成':'✓ Ready'):(pct+(lang==='zh'?'% 已填寫（ETL欄位不計入）':'% filled'))}</span>
+    <span class="badge ${badgeCls}">${pct>=90?(lang==='zh'?'✓ 達標（≥90%）':'✓ Ready (≥90%)'):(lang==='zh'?`${pct}% 已填寫（低於90%生成門檻）`:`${pct}% filled (below 90% gate)`)}</span>
   </div>
   <div class="completeness-bar"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:4px;transition:width .3s;"></div></div>
   <div class="field-check-list">${allFields.map(f=>{const ok=isFieldFilled(norm,f.p);const fl=lang==='zh'?(f.lz||f.l):f.l;
@@ -2135,7 +2135,7 @@ function renderFieldForm(secNo){
     else if(f.t==='select')inp=`<select id="${id}" class="form-select form-select-sm"><option value="">${lang==='zh'?'— 請選擇 —':'— Select —'}</option>${(f.opts||[]).map(o=>`<option value="${esc(o)}">${esc(lang==='zh'?(OPTS_ZH[o]||o):o)}</option>`).join('')}</select>`;
     const req=getRequiredFields(secNo).some(r=>r.p===f.p);
     const lbl=lang==='zh'?(f.lz||f.l):f.l;
-    return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${lbl}${req?'<span class="text-danger ms-1" title="Required for 50%">*</span>':''}</label>${inp}</div>`;
+    return`<div class="col-md-6 mb-2"><label class="form-label fw-semibold small mb-1" for="${id}">${lbl}${req?'<span class="text-danger ms-1" title="Required for 90% generation gate">*</span>':''}</label>${inp}</div>`;
   }).join('');
 }
 
@@ -3192,22 +3192,33 @@ async function _runGenerate(sec){
 
 // ── Generate All ──────────────────────────────────────────────────────────────
 async function preflight(){
-  const missingData=[];
+  // ── 90% coverage gate ─────────────────────────────────────────────────────
+  // Fetch missing section data then compute per-section coverage.
+  const sectionResults=[];
   for(let n=1;n<=10;n++){
-    if(!sectionInputMap[n]?.has_data)missingData.push(n);
+    let data=sectionInputDataMap[n];
+    if(!data&&sectionInputMap[n]?.has_data){
+      try{
+        const r=await fetch(API+'/reports/'+currentRid+'/inputs/'+n,{headers:H()});
+        if(r.ok){const d=await r.json();data=d.input_json||{};sectionInputDataMap[n]=data;}
+      }catch(_){}
+    }
+    const fields=getRequiredFields(n);
+    if(!fields.length){sectionResults.push({n,has_data:!!data,filled:0,total:0,pct:100,missing:[]});continue;}
+    const norm=data?expandPayload(n,data):{};
+    const {filled,total,pct,missing}=getCompleteness(n,norm);
+    sectionResults.push({n,has_data:!!data,filled,total,pct,missing});
   }
+
+  const allWithFields=sectionResults.filter(r=>r.total>0);
+  const totalFilled=allWithFields.reduce((s,r)=>s+r.filled,0);
+  const totalRequired=allWithFields.reduce((s,r)=>s+r.total,0);
+  const overallPct=totalRequired>0?Math.round(totalFilled/totalRequired*100):100;
+
+  // ── Legacy preflight alert (sections without any input) ───────────────────
+  const missingData=sectionResults.filter(r=>!r.has_data).map(r=>r.n);
   const al=document.getElementById('preflightAlert');
-  if(missingData.length===10){
-    // No section input data detected — could be a race condition (sectionInputMap not yet loaded)
-    // or genuinely no data. Show warning and proceed; backend will generate from uploaded evidence.
-    toast(tl('No saved section input data found — generating from uploaded evidence only.','未找到已儲存的段落輸入資料 — 將僅從上傳的佐證文件生成。'),'warning');
-    document.getElementById('preflightMsg').innerHTML=
-      tl('<strong>Note:</strong> No section input data detected. Generating from uploaded evidence only. If you have filled in section data, wait for the page to finish loading and try again.',
-         '<strong>注意：</strong>未偵測到段落輸入資料。將僅從上傳的佐證文件生成。若已填寫段落資料，請等待頁面載入完成後重試。');
-    al.classList.remove('d-none');al.scrollIntoView({behavior:'smooth',block:'nearest'});
-  }
   if(missingData.length>0){
-    // Partial data — warn but proceed
     const readyCount=10-missingData.length;
     document.getElementById('preflightMsg').innerHTML=
       tl(`<strong>Note:</strong> §${missingData.join(', §')} have no input data and will be skipped. Generating <strong>${readyCount} section${readyCount!==1?'s':''}</strong> with available data.`,
@@ -3216,6 +3227,54 @@ async function preflight(){
   } else {
     al.classList.add('d-none');
   }
+
+  if(overallPct<90){
+    showCoverageGate(sectionResults,overallPct,totalFilled,totalRequired);
+    return;
+  }
+  await generateAll();
+}
+
+function showCoverageGate(sectionResults,overallPct,totalFilled,totalRequired){
+  document.getElementById('cgOverallPct').textContent=overallPct+'%';
+  document.getElementById('cgFilled').textContent=totalFilled+'/'+totalRequired;
+  const bar=document.getElementById('cgBar');
+  bar.style.width=overallPct+'%';
+  bar.className='progress-bar '+(overallPct>=90?'bg-success':overallPct>=50?'bg-warning':'bg-danger');
+
+  const rows=sectionResults.map(r=>{
+    const secName=lang==='zh'?(SNAMES_ZH[r.n]||SNAMES[r.n]):SNAMES[r.n];
+    if(!r.total){
+      return`<div class="cg-sec-row"><div class="d-flex justify-content-between"><span class="fw-semibold">§${r.n} ${esc(secName)}</span><span class="badge bg-secondary">${tl('N/A','不適用')}</span></div></div>`;
+    }
+    const secPct=r.pct;
+    const secColor=secPct>=90?'bg-success':secPct>=50?'bg-warning':'bg-danger';
+    const missingHtml=r.missing.map(f=>{
+      const fl=lang==='zh'?(f.lz||f.l):f.l;
+      return`<div class="cg-field-missing">✗ ${esc(fl)} <span class="text-muted fst-italic small"> — ${lang==='zh'?'資料源缺漏，待補':'Data source missing'}</span></div>`;
+    }).join('');
+    const checkedHtml=(() => {
+      const allF=getRequiredFields(r.n);
+      const norm=sectionInputDataMap[r.n]?expandPayload(r.n,sectionInputDataMap[r.n]):{};
+      return allF.filter(f=>isFieldFilled(norm,f.p)).map(f=>{
+        const fl=lang==='zh'?(f.lz||f.l):f.l;
+        return`<div class="cg-field-ok">✓ ${esc(fl)}</div>`;
+      }).join('');
+    })();
+    return`<details class="cg-sec-row" ${secPct<90?'open':''}>
+      <summary class="d-flex justify-content-between align-items-center" style="cursor:pointer">
+        <span class="fw-semibold">§${r.n} ${esc(secName)}</span>
+        <span class="badge ${secColor} ms-2">${r.filled}/${r.total} (${secPct}%)</span>
+      </summary>
+      <div class="mt-1 ps-2 small">${checkedHtml}${missingHtml}</div>
+    </details>`;
+  }).join('');
+  document.getElementById('cgBody').innerHTML=rows;
+  new bootstrap.Modal(document.getElementById('coverageGateModal')).show();
+}
+
+async function _forceGenerateAll(){
+  bootstrap.Modal.getInstance(document.getElementById('coverageGateModal'))?.hide();
   await generateAll();
 }
 async function generateAll(){
@@ -5529,5 +5588,47 @@ async function runBulkApply(){
     </div>
   </div>
 </div>
+
+<!-- ── Coverage Gate Modal ────────────────────────────────────────────────── -->
+<div class="modal fade" id="coverageGateModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title">⛔ <span data-i18n="cg.title">Field Coverage Below 90% — Generation Blocked</span></h5>
+        <span class="ms-2 small opacity-75" data-i18n="cg.subtitle">完整度低於90%，生成已阻擋</span>
+      </div>
+      <div class="modal-body p-3">
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <div class="flex-grow-1">
+            <div class="d-flex justify-content-between mb-1">
+              <strong data-i18n="cg.overall">Overall Coverage</strong>
+              <span><span id="cgFilled" class="fw-bold"></span> fields &nbsp;|&nbsp; <span id="cgOverallPct" class="fw-bold text-danger"></span></span>
+            </div>
+            <div class="progress" style="height:10px;">
+              <div id="cgBar" class="progress-bar" style="width:0%;transition:width .4s;"></div>
+            </div>
+            <small class="text-muted" data-i18n="cg.hint">Fill ✗ fields marked <em>資料源缺漏，待補</em> in each section, then retry generation.</small>
+          </div>
+        </div>
+        <div id="cgBody" class="cg-section-list"></div>
+      </div>
+      <div class="modal-footer">
+        <small class="text-muted me-auto" data-i18n="cg.footer">Sections with no input data (no uploaded documents) are not counted.</small>
+        <button class="btn btn-outline-danger btn-sm" onclick="_forceGenerateAll()">
+          ⚠ <span data-i18n="cg.force">Force Draft (ignore coverage)</span>
+        </button>
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal" data-i18n="g.close">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+.cg-section-list{display:flex;flex-direction:column;gap:6px;}
+.cg-sec-row{border:1px solid #dee2e6;border-radius:6px;padding:8px 10px;background:#fafafa;}
+.cg-sec-row>summary{list-style:none;outline:none;}
+.cg-sec-row>summary::-webkit-details-marker{display:none;}
+.cg-field-ok{color:#198754;font-size:12px;line-height:1.7;}
+.cg-field-missing{color:#dc3545;font-size:12px;line-height:1.7;}
+</style>
 </body>
 </html>
