@@ -317,8 +317,8 @@ class TestChineseTranslations:
         )
 
     def test_ready_to_generate_chinese(self):
-        assert "✓ 可以生成" in HTML, (
-            "Ready-to-generate badge must be in Chinese"
+        assert "✓ 達標（≥90%）" in HTML, (
+            "Ready-to-generate badge must be in Chinese and reference the 90% gate"
         )
 
     def test_etl_fields_not_counted_chinese(self):

@@ -6,7 +6,7 @@ Covers:
   2. Per-section completeness percentages at 0 / ~30 / ~50 / ~60 / 100 fields filled
   3. Tier thresholds: green >=50%, yellow >=30%, grey/red <30%
   4. Review-panel severity: <50% is 'warning', not 'danger'
-  5. HTML source assertions: no 90% threshold strings remain (tooltip fixed to 50%)
+  5. HTML source assertions: generation gate uses the 90% threshold (bar still has a 50% yellow tier)
   6. Backend generate endpoints do NOT block at any completeness level
      (0%, 30%, 49%, 50%, 100% all proceed without 400/422)
   7. save_section_input succeeds with data that has 0 REQUIRED_FIELDS keys (ETL-style keys)
@@ -357,10 +357,10 @@ def _load_html() -> str:
     return HTML_PATH.read_text(encoding="utf-8")
 
 
-def test_html_no_pct_gte_90_threshold():
-    """No JS expression pct>=90 should remain after the 50% threshold migration."""
+def test_html_uses_pct_gte_90_gate():
+    """The generation gate uses pct>=90 as the green/ready threshold."""
     html = _load_html()
-    assert "pct>=90" not in html, "Found 'pct>=90' — threshold should be 50"
+    assert "pct>=90" in html, "Expected 'pct>=90' as the 90% generation gate threshold"
 
 
 def test_html_no_pct_lt_90_threshold():
@@ -369,13 +369,12 @@ def test_html_no_pct_lt_90_threshold():
     assert "pct<90" not in html, "Found 'pct<90' — threshold should be 50"
 
 
-def test_html_tooltip_says_50_not_90():
-    """The required-field tooltip should say '50%' not '90%'."""
+def test_html_tooltip_says_90_gate():
+    """The required-field tooltip should reference the 90% generation gate."""
     html = _load_html()
-    assert 'title="Required for 90%"' not in html, (
-        "Found tooltip with 90% — should have been updated to 50%"
+    assert 'title="Required for 90% generation gate"' in html, (
+        "Expected tooltip referencing the 90% generation gate"
     )
-    assert 'title="Required for 50%"' in html, "Expected tooltip 'Required for 50%'"
 
 
 def test_html_50_percent_target_in_form_help():

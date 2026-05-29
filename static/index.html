@@ -2887,7 +2887,10 @@ async function createReport(){
 
 // ── Report detail ─────────────────────────────────────────────────────────────
 async function loadReportDetail(rid){
-  currentRid=rid;window.__CUB_RID=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];uploadedDocs=[];_etlExtractedData={};closePanel();
+  // Keep the cached doc list when reloading the SAME report so an optimistically-added
+  // upload survives if the documents fetch fails this round. Clear it when switching reports.
+  const _switchingReport=(rid!==currentRid);
+  currentRid=rid;window.__CUB_RID=rid;sectionInputMap={};sectionInputDataMap={};sectionOutputMap={};sectionBlocksMap={};allOutputs=[];if(_switchingReport)uploadedDocs=[];_etlExtractedData={};closePanel();
   showView('viewReport');
   document.getElementById('rptMeta').innerHTML=`<span class="text-muted">${tl('Loading…','載入中…')}</span>`;
   document.getElementById('secTable').innerHTML=`<tr><td colspan="7" class="text-center py-3 text-muted">${tl('Loading…','載入中…')}</td></tr>`;
@@ -2909,11 +2912,18 @@ async function loadReportDetail(rid){
     const rpt=await rRes.json();
     currentIndustry=(rpt.industry||'marine').toLowerCase();
     const outputs=outRes.ok?await outRes.json():[];
-    const docs=docRes.ok?await docRes.json():[];
     const inputs=inpRes.ok?await inpRes.json():[];
+    // Documents: if this single fetch fails (e.g. server under memory pressure right
+    // after a large upload kicks off background OCR), do NOT blank the list — keep
+    // whatever we already have so a freshly-uploaded doc never silently "disappears".
+    let docFetchFailed=false;
+    if(docRes.ok){
+      uploadedDocs=await docRes.json();
+    }else{
+      docFetchFailed=true;
+    }
 
     allOutputs=outputs;
-    uploadedDocs=docs;
     outputs.forEach(o=>sectionOutputMap[o.section_no]=o);
     inputs.forEach(i=>sectionInputMap[i.section_no]={has_data:true,saved_at:i.saved_at});
     loadConflicts();
@@ -2928,30 +2938,45 @@ async function loadReportDetail(rid){
       <div class="col-6"><small class="text-muted">${t('dash.col_created')}</small><div class="small text-muted">${fd(rpt.created_at)}</div></div>
     </div>`;
 
-    const dl=document.getElementById('docList');
-    dl.innerHTML=docs.length?docs.map(d=>{
-      const fmt=(d.file_format||'').toUpperCase()||'?';
-      const fmtColor={PDF:'danger',DOCX:'primary',PPTX:'warning',TXT:'secondary',JPG:'success',PNG:'success',IMG:'success'}[fmt]||'secondary';
-      const typeLabel=DOC_TYPE_LABELS[d.document_type]||d.document_type||'Other';
-      const etlBadge=d.etl_status==='done'?'<span class="badge bg-success ms-1" style="font-size:9px">ETL✓</span>':d.etl_status==='error'?'<span class="badge bg-danger ms-1" style="font-size:9px">ETL!</span>':'';
-      const qBadge=d.extraction_quality==='empty'?'<span class="badge bg-danger ms-1" style="font-size:9px" title="No text extracted — Vision OCR failed">OCR✗</span>':d.extraction_quality==='low'?'<span class="badge bg-warning text-dark ms-1" style="font-size:9px" title="Low-quality text extracted">OCR⚠</span>':'';
-      return`<div class="border rounded p-1 mb-1" style="font-size:11px;">
-        <div class="d-flex align-items-center gap-1 flex-wrap">
-          <span class="badge bg-${fmtColor}" style="font-size:9px">${esc(fmt)}</span>
-          <span class="fw-semibold text-truncate" style="max-width:140px" title="${esc(d.original_filename)}">${esc(d.original_filename)}</span>
-          <span class="text-muted">${fb(d.file_size_bytes)}</span>${etlBadge}${qBadge}
-        </div>
-        <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
-        <div class="d-flex gap-1 mt-1">
-          <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>
-          <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:10px" onclick="deleteDocument('${d.id}')">🗑 Delete</button>
-        </div>
-      </div>`;
-    }).join('')
-      :'<span class="text-muted">No documents uploaded yet.</span>';
+    renderDocList(docFetchFailed);
 
     renderSectionsTable();
   }catch(e){toast(e.message,'danger');}
+}
+
+// Render the uploaded-document list from the `uploadedDocs` global.
+// `fetchFailed` = the GET /documents call failed this round; if we still have
+// docs cached, show them (never blank a just-uploaded doc) plus a soft warning.
+function renderDocList(fetchFailed){
+  const dl=document.getElementById('docList');
+  if(!dl)return;
+  const docs=uploadedDocs||[];
+  const warn=fetchFailed
+    ?`<div class="alert alert-warning py-1 px-2 mb-1" style="font-size:11px">${tl('⚠️ Could not refresh the document list (server busy). Showing last known state — reload to retry.','⚠️ 無法刷新文件清單（伺服器忙碌中）。顯示先前狀態 — 請重新整理重試。')}</div>`
+    :'';
+  if(!docs.length){
+    dl.innerHTML=warn||`<span class="text-muted">${tl('No documents uploaded yet.','尚未上傳任何文件。')}</span>`;
+    return;
+  }
+  dl.innerHTML=warn+docs.map(d=>{
+    const fmt=(d.file_format||'').toUpperCase()||'?';
+    const fmtColor={PDF:'danger',DOCX:'primary',PPTX:'warning',TXT:'secondary',JPG:'success',PNG:'success',IMG:'success'}[fmt]||'secondary';
+    const typeLabel=DOC_TYPE_LABELS[d.document_type]||d.document_type||'Other';
+    const etlBadge=d.etl_status==='done'?'<span class="badge bg-success ms-1" style="font-size:9px">ETL✓</span>':d.etl_status==='error'?'<span class="badge bg-danger ms-1" style="font-size:9px">ETL!</span>':'';
+    const qBadge=d.extraction_quality==='empty'?'<span class="badge bg-danger ms-1" style="font-size:9px" title="No text extracted — Vision OCR failed">OCR✗</span>':d.extraction_quality==='low'?'<span class="badge bg-warning text-dark ms-1" style="font-size:9px" title="Low-quality text extracted">OCR⚠</span>':'';
+    return`<div class="border rounded p-1 mb-1" style="font-size:11px;">
+      <div class="d-flex align-items-center gap-1 flex-wrap">
+        <span class="badge bg-${fmtColor}" style="font-size:9px">${esc(fmt)}</span>
+        <span class="fw-semibold text-truncate" style="max-width:140px" title="${esc(d.original_filename)}">${esc(d.original_filename)}</span>
+        <span class="text-muted">${fb(d.file_size_bytes)}</span>${etlBadge}${qBadge}
+      </div>
+      <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
+      <div class="d-flex gap-1 mt-1">
+        <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>
+        <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:10px" onclick="deleteDocument('${d.id}')">🗑 Delete</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderSectionsTable(){
@@ -3821,6 +3846,14 @@ async function uploadPDF(){
                `✓ 已上傳 ${file.name} — 文字萃取中，稍後請執行 ETL。`),'success');
     }
     inp.value='';
+    // Optimistically show the just-uploaded doc immediately. The 201 response means
+    // it is already committed server-side; this guarantees it appears even if the
+    // subsequent full reload fails (e.g. server busy with background extraction).
+    if(d&&d.id){
+      uploadedDocs=(uploadedDocs||[]).filter(x=>x.id!==d.id);
+      uploadedDocs.unshift(d);
+      renderDocList(false);
+    }
     await loadReportDetail(currentRid);
   }catch(e){
     console.error('uploadPDF failed:',e);
@@ -3931,9 +3964,21 @@ async function importFromTWSE(){
                `⚠️ 證交所查無 ${code} — 請確認為上市/上櫃代號`),'warning');
       return;
     }
-    const secList=(d.sections_updated||[]).map(s=>'§'+s).join(', ')||'none';
-    toast(tl(`✓ TWSE Import: ${d.company_name||code} — ${d.fields_written} field(s) written into ${secList} (${d.fields_skipped} skipped — already filled)`,
-             `✓ 證交所匯入：${d.company_name||code} — 已寫入 ${d.fields_written} 個欄位至 ${secList}（跳過 ${d.fields_skipped} 個已填欄位）`),'success');
+    const secList=(d.sections_updated||[]).map(s=>'§'+s).join(', ');
+    const co=d.company_name||code;
+    const written=d.fields_written||0, skipped=d.fields_skipped||0;
+    if(written>0){
+      toast(tl(`✓ TWSE Import: ${co} — ${written} field(s) written into ${secList||'sections'} (${skipped} skipped — already filled)`,
+               `✓ 證交所匯入：${co} — 已寫入 ${written} 個欄位至 ${secList||'相關段落'}（跳過 ${skipped} 個已填欄位）`),'success');
+    }else if(skipped>0){
+      // Data WAS fetched, but every matched field was already populated (apply_mode=only_empty).
+      toast(tl(`ℹ️ TWSE Import: ${co} — fetched OK, but all ${skipped} matching field(s) were already filled, so nothing was overwritten (mode: only-empty).`,
+               `ℹ️ 證交所匯入：${co} — 已成功取得資料，但比對到的 ${skipped} 個欄位皆已填寫，依「僅填空白」模式未覆寫任何欄位。`),'info');
+    }else{
+      // No usable fields matched — surface as "source not obtained / needs manual check", never "no data".
+      toast(tl(`⚠️ TWSE Import: ${co} — no fields could be auto-filled. The data source returned no usable values for the targeted sections; please verify manually or run Diagnostics.`,
+               `⚠️ 證交所匯入：${co} — 無法自動填入任何欄位。資料來源未成功提供目標段落可用數值，請人工確認或執行診斷。`),'warning');
+    }
     if(d.p1_available===false){
       toastWithAction(
         tl('⚠️ Financial statement data (IS/BS/CF) not available — TWSE P1 endpoints blocked (HTTP 403) from this server. §7A financials and §7B ratios cannot be auto-filled.',
