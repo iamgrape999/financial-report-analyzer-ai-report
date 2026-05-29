@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from collections import defaultdict
@@ -41,10 +42,18 @@ _MAX_FAILURES = 10    # max failures before block
 _WINDOW_SECS = 300    # 5-minute sliding window for counting failures
 _BLOCK_SECS = 900     # 15-minute block after threshold exceeded
 
+# Only trust X-Forwarded-For when the request came through a known reverse proxy.
+# Matches the same pattern used in main.py to prevent header spoofing that would
+# let attackers bypass per-IP brute-force protection.
+_TRUSTED_PROXY_IPS = os.getenv("TRUSTED_PROXY_IPS", "")
+
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    return forwarded.split(",")[0].strip() if forwarded else (request.client.host or "unknown")
+    if _TRUSTED_PROXY_IPS:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def _check_brute_force(ip: str) -> None:

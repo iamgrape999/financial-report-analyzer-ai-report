@@ -332,6 +332,18 @@ def _register_etl_task(task_id: str, report_id: str) -> None:
         _ETL_TASK_REPORT.popitem(last=False)
 
 
+# Maps generation task_id → report_id so generation_stream_events can enforce ownership.
+_GENERATION_TASK_REPORT: "OrderedDict[str, str]" = OrderedDict()
+_GENERATION_TASK_REPORT_MAX = 10_000
+
+
+def _register_generation_task(task_id: str, report_id: str) -> None:
+    _GENERATION_TASK_REPORT[task_id] = report_id
+    _GENERATION_TASK_REPORT.move_to_end(task_id)
+    if len(_GENERATION_TASK_REPORT) > _GENERATION_TASK_REPORT_MAX:
+        _GENERATION_TASK_REPORT.popitem(last=False)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
@@ -1152,7 +1164,7 @@ async def import_section_json(
     merged (JSON-merged, file wins on conflict).
     """
     report = await _require_report(db, report_id)
-    _assert_can_view(report, current_user)
+    _assert_owner_or_admin(report, current_user)
 
     if section_no < 1 or section_no > 11:
         raise HTTPException(status_code=400, detail="section_no must be 1-11")
@@ -1296,6 +1308,7 @@ async def generate_section(
 
     task_id = str(uuid.uuid4())
     _generation_tasks.set(task_id, {"status": "running", "section_no": section_no, "report_id": report_id})
+    _register_generation_task(task_id, report_id)
     user_id, user_role = current_user.id, current_user.role
     output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
@@ -1400,6 +1413,7 @@ async def generate_full_report(
     task_id = str(uuid.uuid4())
     _generation_tasks.set(task_id, {"status": "running", "report_id": report_id})
     _progress_bus.create(task_id)
+    _register_generation_task(task_id, report_id)
     user_id, user_role = current_user.id, current_user.role
     full_output_lang = gen_language if gen_language in ("en", "zh") else "en"
 
@@ -1834,7 +1848,7 @@ async def _url_import_bg(task_id: str, report_id: str, url: str, filename: Optio
     _url_import_tasks.update(task_id, {"status": "FETCHING_URL"})
     try:
         import httpx as _httpx
-        async with _httpx.AsyncClient(follow_redirects=True, max_redirects=5) as client:
+        async with _httpx.AsyncClient(follow_redirects=False) as client:
             fdoc, err = await fetch_direct_url(client, url, filename=filename)
     except Exception as exc:
         logger.warning("url_import_bg: download error task=%s: %s", task_id, exc)
@@ -2183,7 +2197,13 @@ async def generation_stream_events(
     db: AsyncSession = Depends(get_db),
 ):
     """SSE endpoint — stream section generation progress (EventSource-compatible)."""
-    await _sse_user(request, token=token, ticket=ticket, db=db)
+    user = await _sse_user(request, token=token, ticket=ticket, db=db)
+    # IDOR guard: verify this task was issued for the report in the URL path.
+    mapped_report_id = _GENERATION_TASK_REPORT.get(task_id)
+    if mapped_report_id and mapped_report_id != report_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    report = await _require_report(db, report_id)
+    _assert_can_view(report, user)
     return StreamingResponse(
         _progress_bus.stream(task_id),
         media_type="text/event-stream",

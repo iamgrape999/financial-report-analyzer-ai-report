@@ -403,7 +403,7 @@ async def fetch_direct_url(
         return None, FetchError("direct", f"URL blocked for security: {ssrf_err}")
 
     try:
-        r = await client.get(url, headers=_HEADERS, timeout=120.0, follow_redirects=True)
+        r = await client.get(url, headers=_HEADERS, timeout=120.0, follow_redirects=False)
         r.raise_for_status()
         data = r.content
     except httpx.HTTPStatusError as exc:
@@ -459,7 +459,7 @@ async def run_auto_fetch(
     all_docs: list[FetchedDoc] = []
     all_errors: list[FetchError] = []
 
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    async with httpx.AsyncClient(follow_redirects=False) as client:
         if "mops" in sources:
             if stock_code:
                 d, e = await fetch_mops_annual_reports(client, stock_code)
