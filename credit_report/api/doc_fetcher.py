@@ -10,10 +10,12 @@ partial results rather than a hard failure.
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date
+from urllib.parse import urlparse
 
 import httpx
 
@@ -30,6 +32,66 @@ _HEADERS = {
     ),
     "Accept": "text/html,application/pdf,application/json,*/*;q=0.8",
 }
+
+# ── SSRF Protection ───────────────────────────────────────────────────────────
+# Block requests to private/internal networks to prevent Server-Side Request Forgery.
+
+_SSRF_PRIVATE_NETS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),   # link-local / AWS metadata service
+    ipaddress.ip_network("100.64.0.0/10"),    # carrier-grade NAT
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),          # unique local IPv6
+]
+_SSRF_BLOCK_HOSTS = frozenset({
+    "localhost", "ip6-localhost", "ip6-loopback",
+})
+_SSRF_BLOCK_SUFFIXES = (".local", ".internal", ".localhost", ".corp")
+
+
+def check_ssrf_safe(url: str) -> str | None:
+    """Return an error string if the URL targets a private/internal address, else None.
+
+    Blocks:
+    - Non-http/https schemes (file://, gopher://, etc.)
+    - Loopback hostnames and IPs (127.x, ::1)
+    - RFC-1918 private ranges (10/8, 172.16/12, 192.168/16)
+    - Link-local / AWS IMDS (169.254.0.0/16)
+    - Internal domain suffixes (.local, .internal, .localhost)
+    - Redirect chains are checked at the URL level; the httpx client should NOT
+      follow_redirects to avoid post-validation bypass.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:
+        return f"URL parse error: {exc}"
+
+    if parsed.scheme not in ("http", "https"):
+        return f"Only http/https URLs are allowed (got scheme={parsed.scheme!r})"
+
+    host = (parsed.hostname or "").lower().strip()
+    if not host:
+        return "URL has no hostname"
+
+    if host in _SSRF_BLOCK_HOSTS:
+        return f"URL host {host!r} is blocked (loopback)"
+
+    for suffix in _SSRF_BLOCK_SUFFIXES:
+        if host == suffix.lstrip(".") or host.endswith(suffix):
+            return f"URL host {host!r} is not allowed (internal domain)"
+
+    try:
+        ip = ipaddress.ip_address(host)
+        for net in _SSRF_PRIVATE_NETS:
+            if ip in net:
+                return f"URL targets a private/internal IP ({host}) — blocked for security"
+    except ValueError:
+        pass  # hostname, not an IP literal — DNS resolution happens at request time
+
+    return None
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -330,7 +392,16 @@ async def fetch_direct_url(
     *,
     filename: str | None = None,
 ) -> tuple[FetchedDoc | None, FetchError | None]:
-    """Download a single document from a direct URL."""
+    """Download a single document from a direct URL.
+
+    SSRF protection: private/internal IPs and loopback hosts are rejected
+    before any network connection is made.
+    """
+    ssrf_err = check_ssrf_safe(url)
+    if ssrf_err:
+        logger.warning("doc_fetcher: SSRF blocked url=%r reason=%s", url, ssrf_err)
+        return None, FetchError("direct", f"URL blocked for security: {ssrf_err}")
+
     try:
         r = await client.get(url, headers=_HEADERS, timeout=120.0, follow_redirects=True)
         r.raise_for_status()
