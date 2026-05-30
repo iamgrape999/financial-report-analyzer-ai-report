@@ -14,3 +14,5 @@ data/_generation_tasks.json
 data/generation_tasks.json
 *.log
 .DS_Store
+!.env.e2e.example
+test-results/
