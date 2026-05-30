@@ -88,12 +88,22 @@ async def test_section_11_page_selection_uses_keywords_and_falls_back_to_documen
         def scalars(self) -> FakeScalarResult:
             return FakeScalarResult(self._pages)
 
+    class FakeDocResult:
+        """Fake result for the SectionDocument profile lookup (returns None profile)."""
+        def scalar_one_or_none(self):
+            return None
+
     class FakeDB:
         def __init__(self, pages: list[DocumentPage]):
             self._pages = pages
+            self._call_count = 0
 
         async def execute(self, _query):
-            return FakeResult(self._pages)
+            self._call_count += 1
+            # First call: DocumentPage query; subsequent: SectionDocument profile lookup
+            if self._call_count == 1:
+                return FakeResult(self._pages)
+            return FakeDocResult()
 
     pages = [
         DocumentPage(id="p1", document_id="doc", report_id="r", pdf_page_no=1, merged_text="cover page"),
