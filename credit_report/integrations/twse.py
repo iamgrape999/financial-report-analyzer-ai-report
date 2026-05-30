@@ -376,7 +376,7 @@ class TWSEOpenAPIClient:
         return bundle
 
 
-def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]], role: str = "guarantor") -> dict[str, Any]:
+def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]], role: str = "guarantor", exchange_name: str = "TWSE") -> dict[str, Any]:
     profile_rows = _rows_for_code(bundle.get("company_profile", []), stock_code)
     profile_row = profile_rows[0] if profile_rows else {}
     profile = {name: _get(profile_row, aliases) for name, aliases in PROFILE_FIELD_ALIASES.items() if _get(profile_row, aliases) not in (None, "")}
@@ -409,8 +409,9 @@ def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]
 
     source_summary = {
         "stock_code": stock_code,
-        "source": "TWSE OpenAPI",
-        "endpoints_used": ENDPOINTS,
+        "source": f"{exchange_name} OpenAPI",
+        "exchange": exchange_name,
+        "endpoints_used": ENDPOINTS if exchange_name == "TWSE" else None,
         "row_counts": {k: len(_rows_for_code(v, stock_code)) for k, v in bundle.items()},
         "coverage_fields": {
             "profile": len(profile),

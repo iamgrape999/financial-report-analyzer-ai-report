@@ -84,7 +84,7 @@ GOLDEN_DATASET_ROOT: Path = Path(os.getenv("GOLDEN_DATASET_ROOT", "./data/golden
 MODULE_ROOT: Path = Path(__file__).parent
 
 # ── Generation ordering ────────────────────────────────────────────────────────────────────────────────────────────
-GENERATION_ORDER: list[int] = [4, 7, 1, 3, 2, 5, 6, 8, 9, 10]
+GENERATION_ORDER: list[int] = [4, 7, 1, 3, 2, 5, 6, 8, 9, 10, 11]
 
 SECTION_HARD_DEPENDENCIES: dict[int, list[int]] = {
     2: [7],
@@ -93,6 +93,9 @@ SECTION_HARD_DEPENDENCIES: dict[int, list[int]] = {
     6: [1, 5],
     9: [1, 2, 3, 4, 5, 6, 7, 8],
     10: [7, 1],
+    # §11 synthesises external analyst research — generated last but has no hard
+    # dependencies on other credit report sections (it summarises uploaded reports,
+    # not the AI-generated sections).
 }
 
 SECTION_SOFT_DEPENDENCIES: dict[int, list[int]] = {

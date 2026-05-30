@@ -52,14 +52,15 @@ def create_market_data_provider(
         return TWSEOpenAPIClient()
 
     # Auto-detect heuristic:
-    # TWSE main-board codes: 1xxx–4xxx (manufacturing, finance, services)
-    # TPEx OTC codes: 5xxx–9xxx, 3xxx (many tech/biotech/small caps)
-    # Ambiguous: 4xxx range is split. When ambiguous, default to TWSE which
-    # has broader MOPS financial statement coverage for most companies.
+    # TWSE main-board codes: primarily 1xxx–2xxx, many 4xxx
+    # TPEx OTC codes: 3xxx (many tech/IC design/biotech), 5xxx–9xxx
+    # When ambiguous, default to TWSE which has broader MOPS coverage.
+    # Note: a few 3xxx codes (e.g. 3008 Largan) are TWSE-listed — override with
+    # exchange="twse" in those rare cases.
     code = stock_code.strip()
     if len(code) == 4 and code.isdigit():
         first = code[0]
-        if first in ("5", "6", "7", "8", "9"):
+        if first in ("3", "5", "6", "7", "8", "9"):
             logger.info("create_market_data_provider: auto-detected TPEx for code=%s", code)
             return TPExOpenAPIClient()
     return TWSEOpenAPIClient()

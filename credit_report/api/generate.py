@@ -62,6 +62,31 @@ _background_tasks: set[asyncio.Task] = set()
 _TASKS_FILE = runtime_config.CREDIT_REPORTS_ROOT.parent / "generation_tasks.json"
 
 
+# Map Report.industry values to prompt_builder industry keys.
+_REPORT_INDUSTRY_MAP: dict[str, str] = {
+    "marine": "tw_shipping",
+    "shipping": "tw_shipping",
+    "tw_shipping": "tw_shipping",
+    "container_shipping": "tw_shipping",
+    "semiconductor": "tw_semiconductor",
+    "ic_design": "tw_semiconductor",
+    "tw_semiconductor": "tw_semiconductor",
+    "banking": "tw_banking",
+    "financial_holding": "tw_banking",
+    "tw_banking": "tw_banking",
+    "real_estate": "tw_real_estate",
+    "construction": "tw_real_estate",
+    "tw_real_estate": "tw_real_estate",
+    "insurance": "tw_insurance",
+    "tw_insurance": "tw_insurance",
+}
+
+
+def _map_report_industry(report_industry: Optional[str]) -> str:
+    """Map Report.industry to a prompt_builder industry key (falls back to 'generic')."""
+    return _REPORT_INDUSTRY_MAP.get((report_industry or "").lower(), "generic")
+
+
 async def _infer_output_language(
     db: AsyncSession,
     report_id: str,
@@ -80,10 +105,9 @@ async def _infer_output_language(
         return explicit_lang
     # Auto-detect: scan document profiles stored during ETL.
     try:
-        from credit_report.generation.models import SectionDocument as _SD
         result = await db.execute(
-            select(_SD.document_profile)
-            .where(_SD.report_id == report_id, _SD.document_profile.isnot(None))
+            select(SectionDocument.document_profile)
+            .where(SectionDocument.report_id == report_id, SectionDocument.document_profile.isnot(None))
             .limit(5)
         )
         for (profile_dict,) in result:
@@ -691,7 +715,7 @@ async def import_twse_openapi_data(
 
     provider = create_market_data_provider(stock_code, exchange=payload.exchange)
     bundle = await provider.fetch_company_bundle(stock_code)
-    imported = build_section7_input(stock_code, bundle, role=payload.role)
+    imported = build_section7_input(stock_code, bundle, role=payload.role, exchange_name=provider.exchange_name)
     if not imported.get("twse_import", {}).get("row_counts") or not any(imported["twse_import"]["row_counts"].values()):
         raise HTTPException(
             status_code=404,
@@ -1319,6 +1343,7 @@ async def generate_section(
     task_id = _create_generation_task({"status": "running", "section_no": section_no})
     user_id, user_role = current_user.id, current_user.role
     output_lang = await _infer_output_language(db, report_id, gen_language)
+    report_industry = _map_report_industry(report.industry)
 
     async def _bg_generate_section():
         from credit_report.database import AsyncSessionLocal
@@ -1326,7 +1351,7 @@ async def generate_section(
             try:
                 # Reload preceding outputs in background context for freshest data
                 preceding: dict[int, str] = {}
-                for n in range(1, 11):
+                for n in range(1, 12):
                     if n == section_no:
                         continue
                     ctx = await get_section_output(bg_db, report_id, n)
@@ -1334,8 +1359,8 @@ async def generate_section(
                         preceding[n] = ctx.markdown
 
                 logger.info(
-                    "generate_section[bg]: starting section=%d report=%s user=%s preceding=%s lang=%s",
-                    section_no, report_id, user_id, list(preceding.keys()), output_lang,
+                    "generate_section[bg]: starting section=%d report=%s user=%s preceding=%s lang=%s industry=%s",
+                    section_no, report_id, user_id, list(preceding.keys()), output_lang, report_industry,
                 )
                 output = await run_section_generation(
                     db=bg_db,
@@ -1345,6 +1370,7 @@ async def generate_section(
                     actor_role=user_role,
                     preceding_outputs=preceding or None,
                     output_language=output_lang,
+                    industry=report_industry,
                 )
                 await bg_db.commit()
                 _update_generation_task(task_id, {
@@ -1396,7 +1422,7 @@ async def generate_full_report(
 
     # Preflight data check — collect which sections have structured input (informational only)
     sections_with_data: list[int] = []
-    for sec_no in range(1, 11):
+    for sec_no in range(1, 12):
         data = await _load_section_input(db, report_id, sec_no)
         if data:
             sections_with_data.append(sec_no)
@@ -1417,14 +1443,15 @@ async def generate_full_report(
     task_id = _create_generation_task({"status": "running"})
     user_id, user_role = current_user.id, current_user.role
     full_output_lang = await _infer_output_language(db, report_id, gen_language)
+    full_report_industry = _map_report_industry(report.industry)
 
     async def _bg_generate_full_report():
         from credit_report.database import AsyncSessionLocal
         async with AsyncSessionLocal() as bg_db:
             try:
                 logger.info(
-                    "generate_full_report[bg]: starting report=%s user=%s task=%s lang=%s",
-                    report_id, user_id, task_id, full_output_lang,
+                    "generate_full_report[bg]: starting report=%s user=%s task=%s lang=%s industry=%s",
+                    report_id, user_id, task_id, full_output_lang, full_report_industry,
                 )
                 results = await run_full_report_generation(
                     db=bg_db,
@@ -1432,6 +1459,7 @@ async def generate_full_report(
                     actor_user_id=user_id,
                     actor_role=user_role,
                     output_language=full_output_lang,
+                    industry=full_report_industry,
                 )
                 await bg_db.commit()
                 done = sum(1 for v in results.values() if v == "done")
