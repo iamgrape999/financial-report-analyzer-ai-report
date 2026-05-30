@@ -38,7 +38,7 @@ async def _safe_add_columns(conn) -> None:
     new_cols = [
         ("section_documents", "document_type", "VARCHAR(50) DEFAULT 'other'"),
         ("section_documents", "file_format",   "VARCHAR(10)"),
-        ("section_documents", "etl_status",    "VARCHAR(20) DEFAULT 'pending'"),
+        ("section_documents", "etl_status",    "VARCHAR(30) DEFAULT 'uploaded'"),
     ]
     for table, col, col_def in new_cols:
         try:
@@ -46,6 +46,15 @@ async def _safe_add_columns(conn) -> None:
             logger.info("_safe_add_columns: added %s.%s", table, col)
         except Exception:
             pass  # Column already exists — expected on subsequent startups
+
+    for stmt in (
+        "ALTER TABLE section_documents ALTER COLUMN etl_status TYPE VARCHAR(30)",
+        "ALTER TABLE section_documents ALTER COLUMN etl_status SET DEFAULT 'uploaded'",
+    ):
+        try:
+            await conn.execute(text(stmt))
+        except Exception:
+            pass
 
     # Widen varchar-limited columns to TEXT on PostgreSQL.
     # create_all never alters existing columns, so older production DBs retain

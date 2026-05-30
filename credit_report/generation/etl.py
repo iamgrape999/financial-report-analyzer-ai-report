@@ -13,13 +13,12 @@ import logging
 import time
 from typing import Optional
 
-from credit_report.config import CR_ETL_MAX_TEXT_CHARS
 
 logger = logging.getLogger(__name__)
 
 # Which sections are relevant for each document type
 DOCUMENT_SECTION_MAP: dict[str, list[int]] = {
-    "annual_report":         [4, 7, 3, 2, 10],      # no §1 — credit facility not in annual reports
+    "annual_report":         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  # page-planned annual-report Smart Import sections
     "financial_statement":   [7, 4, 2, 10],          # no §1/§5 — collateral not in financial statements
     "analyst_presentation":  [4, 7, 3, 10],          # company IR — no §1/§2 (bank-internal sections)
     "interim_report":        [7, 4, 2, 3],
@@ -1195,17 +1194,44 @@ SECTION_EXTRACTION_SCHEMA: dict[int, str] = {
 }
 
 
+def _section_specific_guidance(section_nos: list[int]) -> str:
+    """Return targeted instructions for section-level, evidence-bound extraction."""
+    guidance: list[str] = [
+        "Use ONLY the provided page-bound document text.",
+        "Every extracted value should include source_page and raw_text/raw_cell when the schema allows it.",
+        "Do not infer unsupported bank facility terms, collateral packages, internal ratings, or legal-document status from an annual report.",
+    ]
+    if 7 in section_nos:
+        guidance.append(
+            "Section 7 financial analysis: extract 財務狀況分析, 財務績效分析, and 現金流量 rows separately; "
+            "preserve period, currency, unit, source_page, and raw_text. Required concepts include revenue, gross profit, "
+            "operating income, net income, total assets, total liabilities, total equity, operating/investing/financing cash flow, "
+            "EPS, gross margin, operating margin, and net margin."
+        )
+    if 5 in section_nos:
+        guidance.append(
+            "Section 5 collateral: if the annual report does not contain bank collateral, return not_supported_by_annual_report and required external documents; never fabricate collateral/LTV/guarantee terms."
+        )
+    if 1 in section_nos:
+        guidance.append(
+            "Section 1: annual reports may support borrower identity, tickers, auditor, bonds, and capital structure only; mark loan amount, tenor, margin, covenant, guarantor, and CUB exposure as missing external documents."
+        )
+    return "\n".join(f"- {item}" for item in guidance)
+
+
 def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> tuple[str, str]:
     """Return (system_prompt, user_prompt) for Gemini ETL extraction."""
     schema_parts = "\n\n".join(
         SECTION_EXTRACTION_SCHEMA[n] for n in section_nos if n in SECTION_EXTRACTION_SCHEMA
     )
     doc_type_label = document_type.replace("_", " ").title()
-    text_snippet = text[:CR_ETL_MAX_TEXT_CHARS]
+    section_guidance = _section_specific_guidance(section_nos)
+    text_snippet = text
     user_prompt = (
         f"Document type: {doc_type_label}\n\n"
         f"Target sections to extract: {section_nos}\n\n"
         f"Required JSON schema (extract these fields if present):\n{schema_parts}\n\n"
+        f"Section-specific extraction instructions:\n{section_guidance}\n\n"
         f"---DOCUMENT TEXT START---\n{text_snippet}\n---DOCUMENT TEXT END---\n\n"
         "Return ONLY valid JSON with section numbers (as strings) as keys. "
         "Example: {\"4\": {\"4A_borrower\": {\"company_name_zh\": \"...\", ...}, ...}, "
@@ -1215,10 +1241,10 @@ def _build_etl_prompt(document_type: str, text: str, section_nos: list[int]) -> 
     logger.info(
         "[ETL] _build_etl_prompt: doc_type=%s sections=%s "
         "system_prompt_chars=%d schema_chars=%d text_chars=%d "
-        "(text_total=%d truncated=%s) user_prompt_chars=%d",
+        "(page_bound_no_leading_slice=true) user_prompt_chars=%d",
         document_type, section_nos,
         len(ETL_SYSTEM_PROMPT), len(schema_parts), len(text_snippet),
-        len(text), len(text_snippet) < len(text), len(user_prompt),
+        len(user_prompt),
     )
     return ETL_SYSTEM_PROMPT, user_prompt
 

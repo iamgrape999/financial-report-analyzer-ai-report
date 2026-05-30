@@ -2192,7 +2192,15 @@ async function loadReportDetail(rid){
       const fmt=(d.file_format||'').toUpperCase()||'?';
       const fmtColor={PDF:'danger',DOCX:'primary',PPTX:'warning',TXT:'secondary',JPG:'success',PNG:'success',IMG:'success'}[fmt]||'secondary';
       const typeLabel=DOC_TYPE_LABELS[d.document_type]||d.document_type||'Other';
-      const etlBadge=d.etl_status==='done'?'<span class="badge bg-success ms-1" style="font-size:9px">ETL✓</span>':d.etl_status==='error'?'<span class="badge bg-danger ms-1" style="font-size:9px">ETL!</span>':'';
+      const etlStatus=d.etl_status||'uploaded';
+      const etlBadgeMap={
+        uploaded:['secondary','Uploaded'],page_scanning:['info','Scanning'],page_scan_done:['primary','Pages✓'],
+        etl_planned:['primary','Planned'],extracting:['warning','ETL…'],partial_ready:['warning','Partial'],
+        ready_for_review:['success','Review✓'],committed:['success','Committed'],low_coverage_failed:['danger','Low coverage'],
+        error:['danger','ETL!'],done:['success','ETL✓'],pending:['secondary','Pending']
+      };
+      const [etlColor,etlText]=etlBadgeMap[etlStatus]||['secondary',etlStatus];
+      const etlBadge=`<span class="badge bg-${etlColor} ms-1" style="font-size:9px">${esc(etlText)}</span>`;
       return`<div class="border rounded p-1 mb-1" style="font-size:11px;">
         <div class="d-flex align-items-center gap-1 flex-wrap">
           <span class="badge bg-${fmtColor}" style="font-size:9px">${esc(fmt)}</span>
