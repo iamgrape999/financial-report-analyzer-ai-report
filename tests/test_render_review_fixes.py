@@ -97,7 +97,13 @@ async def test_section_11_page_selection_uses_keywords_and_falls_back_to_documen
 
     pages = [
         DocumentPage(id="p1", document_id="doc", report_id="r", pdf_page_no=1, merged_text="cover page"),
-        DocumentPage(id="p2", document_id="doc", report_id="r", pdf_page_no=2, merged_text="rating buy 目標價 EPS forecast"),
+        DocumentPage(
+            id="p2",
+            document_id="doc",
+            report_id="r",
+            pdf_page_no=2,
+            merged_text="Rating: BUY 目標價 EPS forecast",
+        ),
         DocumentPage(id="p3", document_id="doc", report_id="r", pdf_page_no=3, merged_text="appendix"),
     ]
 
@@ -110,3 +116,56 @@ async def test_section_11_page_selection_uses_keywords_and_falls_back_to_documen
     ]
     selected_fallback_pages = await select_pages_for_section(FakeDB(fallback_pages), "doc", 11)
     assert [page.pdf_page_no for page in selected_fallback_pages] == [1, 2]
+
+    false_positive_pages = [
+        DocumentPage(
+            id="h1",
+            document_id="doc",
+            report_id="r",
+            pdf_page_no=1,
+            merged_text="shareholders and holding company",
+        ),
+        DocumentPage(
+            id="h2",
+            document_id="doc",
+            report_id="r",
+            pdf_page_no=2,
+            merged_text="ordinary appendix",
+        ),
+        DocumentPage(
+            id="h3",
+            document_id="doc",
+            report_id="r",
+            pdf_page_no=3,
+            merged_text="Analyst Report Rating: HOLD Target Price",
+        ),
+    ]
+    selected_false_positive_pages = await select_pages_for_section(
+        FakeDB(false_positive_pages),
+        "doc",
+        11,
+    )
+    assert [page.pdf_page_no for page in selected_false_positive_pages] == [3]
+
+    fallback_with_generic_words = [
+        DocumentPage(
+            id="g1",
+            document_id="doc",
+            report_id="r",
+            pdf_page_no=1,
+            merged_text="shareholders and holding company",
+        ),
+        DocumentPage(
+            id="g2",
+            document_id="doc",
+            report_id="r",
+            pdf_page_no=2,
+            merged_text="ordinary appendix",
+        ),
+    ]
+    selected_generic_fallback_pages = await select_pages_for_section(
+        FakeDB(fallback_with_generic_words),
+        "doc",
+        11,
+    )
+    assert [page.pdf_page_no for page in selected_generic_fallback_pages] == [1, 2]

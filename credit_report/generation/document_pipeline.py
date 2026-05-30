@@ -85,6 +85,13 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
     ),
 }
 
+# Section 11 can include short English analyst ratings.  Match them as tokens
+# instead of substrings so ordinary words such as "shareholder" or "holding"
+# do not suppress the fallback page window with false positives.
+SECTION_WORD_BOUNDARY_KEYWORDS: dict[int, tuple[str, ...]] = {
+    11: ("rating", "buy", "hold", "sell", "neutral"),
+}
+
 ANNUAL_SECTION_PLAN = {
     1: {"status": "partial", "guard": "do_not_generate_facility_terms_from_annual_report"},
     2: {"status": "supported"},
@@ -189,7 +196,7 @@ def _printed_page(text: str) -> tuple[str | None, str | None]:
 
 def _section_hint(text: str) -> str | None:
     for section_no, keywords in SECTION_KEYWORDS.items():
-        if any(k in text for k in keywords):
+        if _matches_any_section_keyword(text, keywords, section_no):
             return str(section_no)
     return None
 
@@ -211,6 +218,28 @@ def _periods(text: str) -> list[str]:
     for year in re.findall(r"\b(20\d{2})\b", text):
         values.append(f"FY{year}")
     return sorted(set(values))
+
+
+def _matches_section_keyword(text: str, keyword: str, section_no: int) -> bool:
+    """Return whether text contains a section keyword using safe matching.
+
+    Page text extracted from PDFs often varies casing (for example "Rating",
+    "BUY", or "Target Price"), so comparisons are normalized to lower case.
+    Short §11 English ratings are matched with word boundaries to avoid broad
+    substring hits on unrelated annual-report text such as "holding company".
+    """
+    if not text or not keyword:
+        return False
+
+    normalized_text = re.sub(r"\s+", " ", text).lower()
+    normalized_keyword = re.sub(r"\s+", " ", keyword).lower()
+    if normalized_keyword in SECTION_WORD_BOUNDARY_KEYWORDS.get(section_no, ()):
+        return re.search(rf"(?<!\w){re.escape(normalized_keyword)}(?!\w)", normalized_text) is not None
+    return normalized_keyword in normalized_text
+
+
+def _matches_any_section_keyword(text: str, keywords: tuple[str, ...], section_no: int) -> bool:
+    return any(_matches_section_keyword(text, keyword, section_no) for keyword in keywords)
 
 
 def extract_pdf_pages(file_path: Path) -> list[dict]:
@@ -363,7 +392,10 @@ async def select_pages_for_section(db: AsyncSession, doc_id: str, section_no: in
     if not pages:
         return []
     keywords = SECTION_KEYWORDS.get(section_no, ())
-    selected = [p for p in pages if any(k in (p.merged_text or "") for k in keywords)]
+    selected = [
+        p for p in pages
+        if _matches_any_section_keyword(p.merged_text or "", keywords, section_no)
+    ]
     if section_no == 10:
         selected = pages[: min(5, len(pages))] + selected
     if not selected and section_no in {4, 7, 11}:
