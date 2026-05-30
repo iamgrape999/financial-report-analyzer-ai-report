@@ -11,5 +11,6 @@ data/*.db
 data/credit_reports/
 data/logs/
 data/_generation_tasks.json
+data/generation_tasks.json
 *.log
 .DS_Store

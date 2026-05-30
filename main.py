@@ -38,7 +38,7 @@ async def _safe_add_columns(conn) -> None:
     new_cols = [
         ("section_documents", "document_type", "VARCHAR(50) DEFAULT 'other'"),
         ("section_documents", "file_format",   "VARCHAR(10)"),
-        ("section_documents", "etl_status",    "VARCHAR(20) DEFAULT 'pending'"),
+        ("section_documents", "etl_status",    "VARCHAR(30) DEFAULT 'uploaded'"),
     ]
     for table, col, col_def in new_cols:
         try:
@@ -46,6 +46,15 @@ async def _safe_add_columns(conn) -> None:
             logger.info("_safe_add_columns: added %s.%s", table, col)
         except Exception:
             pass  # Column already exists — expected on subsequent startups
+
+    for stmt in (
+        "ALTER TABLE section_documents ALTER COLUMN etl_status TYPE VARCHAR(30)",
+        "ALTER TABLE section_documents ALTER COLUMN etl_status SET DEFAULT 'uploaded'",
+    ):
+        try:
+            await conn.execute(text(stmt))
+        except Exception:
+            pass
 
     # Widen varchar-limited columns to TEXT on PostgreSQL.
     # create_all never alters existing columns, so older production DBs retain
@@ -108,16 +117,21 @@ async def _seed_admin() -> None:
                             user.email, email)
 
         if user:
-            # Only rehash when the env var password differs from the stored hash.
-            # This avoids the expensive pbkdf2_sha256 hash on every startup when
-            # ADMIN_PASSWORD hasn't changed, and makes deliberate rotation explicit.
-            if not verify_password(password, user.hashed_password):
+            # ADMIN_PASSWORD remains the source of truth, but avoid the expensive
+            # PBKDF2 rehash on every startup when the configured password already
+            # matches. Corrupt or legacy hashes are treated as mismatches so startup
+            # can repair the admin credential instead of aborting the lifespan.
+            try:
+                password_matches = verify_password(password, user.hashed_password)
+            except Exception as exc:
+                logger.warning("_seed_admin: stored admin hash could not be verified; rehashing: %s", exc)
+                password_matches = False
+            if not password_matches:
                 user.hashed_password = hash_password(password)
-                logger.info("_seed_admin: ADMIN_PASSWORD changed — hash updated for admin=%s", user.email)
             user.is_active = True
             user.role = "admin"
             await session.commit()
-            logger.info("_seed_admin: synced role/status for admin=%s", user.email)
+            logger.info("_seed_admin: synced admin=%s from ADMIN_PASSWORD env var", user.email)
         else:
             session.add(User(
                 id=str(uuid.uuid4()),

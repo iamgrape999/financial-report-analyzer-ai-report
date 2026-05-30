@@ -491,23 +491,20 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
         import openpyxl
         from io import BytesIO
 
-        wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=False, data_only=True)
         parts: list[str] = []
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
-            # Expand merged cells so non-anchor cells carry the anchor's value.
-            # Non-anchor cells are read-only MergedCell objects while the range
-            # is merged, so we must unmerge first, then write the anchor value
-            # into every cell of the (former) range.
-            for merged_range in list(ws.merged_cells.ranges):
-                min_row, min_col = merged_range.min_row, merged_range.min_col
-                max_row, max_col = merged_range.max_row, merged_range.max_col
-                anchor_value = ws.cell(min_row, min_col).value
-                ws.unmerge_cells(str(merged_range))
-                for r in range(min_row, max_row + 1):
-                    for c in range(min_col, max_col + 1):
-                        ws.cell(r, c).value = anchor_value
-            rows = list(ws.iter_rows(values_only=True))
+            merged_values: dict[tuple[int, int], object] = {}
+            for merged_range in ws.merged_cells.ranges:
+                anchor_value = ws.cell(merged_range.min_row, merged_range.min_col).value
+                for row_idx in range(merged_range.min_row, merged_range.max_row + 1):
+                    for col_idx in range(merged_range.min_col, merged_range.max_col + 1):
+                        merged_values[(row_idx, col_idx)] = anchor_value
+
+            rows: list[list[object]] = []
+            for row in ws.iter_rows(max_row=min(ws.max_row, 50)):
+                rows.append([merged_values.get((cell.row, cell.column), cell.value) for cell in row])
             if not rows:
                 continue
             parts.append(f"\n## Sheet: {sheet_name}\n")

@@ -126,7 +126,7 @@ class TestDocumentTypeSectionRouting:
         assert not missing, f"Document types missing from DOCUMENT_SECTION_MAP: {missing}"
 
     @pytest.mark.parametrize("doc_type,expected_sections", [
-        ("annual_report",        [4, 7, 3, 2, 10]),
+        ("annual_report",        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
         ("financial_statement",  [7, 4, 2, 10]),
         ("analyst_presentation", [4, 7, 3, 10]),
         ("interim_report",       [7, 4, 2, 3]),
@@ -722,8 +722,8 @@ class TestETLEndpointFileFallback:
 
         doc = SectionDocument(
             id=doc_id, report_id=rid, original_filename="report.pdf",
-            file_size_bytes=1000, document_type="annual_report",
-            file_format="pdf", etl_status="pending", uploaded_by=user.id,
+            file_size_bytes=1000, document_type="financial_statement",
+            file_format="pdf", etl_status="uploaded", uploaded_by=user.id,
         )
         db.add(doc)
         await db.flush()
@@ -981,7 +981,8 @@ class TestPermissionGuards:
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize("doc_type,primary_section", [
-    ("annual_report",        4),
+    # annual_report excluded: PR #15 requires page-first scan-pages before
+    # the legacy /etl endpoint; it returns 409 without prior scan.
     ("financial_statement",  7),
     ("analyst_presentation", 4),
     ("external_report",      11),

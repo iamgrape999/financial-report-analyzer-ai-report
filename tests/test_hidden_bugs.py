@@ -130,8 +130,16 @@ class TestCrossDeployStateBugs:
         )
 
         # 3. FIX confirmed: hash overwrite is conditional, not unconditional.
-        assert "if not verify_password(" in src, (
-            "Hash update must be inside a 'if not verify_password(...)' guard"
+        # Codex's implementation assigns a bool first and checks it:
+        #   password_matches = verify_password(...)
+        #   if not password_matches: user.hashed_password = ...
+        # so we check for either pattern.
+        guard_present = (
+            "if not verify_password(" in src
+            or "if not password_matches" in src
+        )
+        assert guard_present, (
+            "Hash update must be conditional on verify_password result"
         )
 
     # ── Bug #3 (FIXED) ────────────────────────────────────────────────────
@@ -185,9 +193,16 @@ class TestCrossDeployStateBugs:
         service = data["services"][0]
         start_cmd = service.get("startCommand", "")
 
-        # Fix confirmed: alembic upgrade head runs before the app server.
-        assert "alembic upgrade head" in start_cmd, (
-            f"startCommand must include 'alembic upgrade head', got: {start_cmd!r}"
+        # Fix confirmed: migrations run before the app server — either via
+        # 'alembic upgrade head' directly or via prepare_database.py which
+        # calls alembic.command.upgrade internally.
+        migration_step = (
+            "alembic upgrade head" in start_cmd
+            or "prepare_database.py" in start_cmd
+        )
+        assert migration_step, (
+            f"startCommand must run migrations (alembic upgrade head or prepare_database.py), "
+            f"got: {start_cmd!r}"
         )
         assert "uvicorn" in start_cmd, "uvicorn must still be in startCommand"
 
@@ -528,42 +543,41 @@ class TestDocumentFormatBugs:
 
     # ── Bug #12 (FIXED) ────────────────────────────────────────────────────
     def test_etl_prompt_truncates_text_at_120k_chars(self):
-        """FIX: CR_ETL_MAX_TEXT_CHARS raised from 120 000 to 500 000 (default).
+        """FIX: annual-report ETL no longer uses an arbitrary leading-slice truncation.
 
-        The old 120 000-character cap silently dropped financial statements from
-        200-page TSMC annual reports.  The fix raises the default to 500 000
-        (~200 pages of dense text) and makes it configurable via env var.
+        PR #15 replaced the old CR_ETL_MAX_TEXT_CHARS leading-slice with a
+        page-first pipeline: build_page_bound_chunks caps each section's input
+        at 24 000 chars of page-selected text before it reaches _build_etl_prompt.
+        _build_etl_prompt therefore receives pre-bounded text and passes it
+        through unchanged — there is no second truncation layer.
 
-        Source: credit_report/generation/etl.py ; credit_report/config.py
+        For non-annual document types, the full extracted text is passed to the
+        LLM (no arbitrary cap), which is acceptable for shorter documents.
+
+        Source: credit_report/generation/etl.py ; credit_report/generation/document_pipeline.py
         """
         from credit_report.generation import etl as etl_mod
-        from credit_report.config import CR_ETL_MAX_TEXT_CHARS
+        from credit_report.generation.document_pipeline import build_page_bound_chunks
 
-        # Fix confirmed: cap raised well above 120 000 (old limit).
-        assert CR_ETL_MAX_TEXT_CHARS > 120_000, (
-            f"CR_ETL_MAX_TEXT_CHARS must be > 120000 after fix, got {CR_ETL_MAX_TEXT_CHARS}"
+        # page-bound chunk builder enforces a 24k char ceiling.
+        # (DocumentPage objects are not needed — simulate with a helper.)
+        class _FakePage:
+            def __init__(self, text, n):
+                self.merged_text = text
+                self.pdf_page_no = n
+                self.printed_page_start = str(n)
+
+        pages = [_FakePage("X" * 1000, i) for i in range(1, 100)]
+        chunk = build_page_bound_chunks(pages, max_chars=24_000)
+        assert len(chunk) <= 24_000 + 200, (  # small slack for markers
+            f"build_page_bound_chunks must cap at 24 000 chars, got {len(chunk)}"
         )
 
-        # Build a text with a clearly unique overflow sentinel so we can detect
-        # whether the chars BEYOND the cap leaked into the prompt.  Using the same
-        # character for both body and overflow would make the overflow a substring
-        # of the body and the assertion would trivially pass.
-        body = "A" * CR_ETL_MAX_TEXT_CHARS
-        overflow_sentinel = "OVERFLOW_SENTINEL_ZZZ_" * 2500  # 55 000 chars, all Z
-        long_text = body + overflow_sentinel
-
-        assert len(long_text) == CR_ETL_MAX_TEXT_CHARS + len(overflow_sentinel)
-
-        # _build_etl_prompt is a private helper; call it directly.
-        _sys, user_prompt = etl_mod._build_etl_prompt("annual_report", long_text, [4, 7])
-
-        # The overflow sentinel must NOT appear in the generated prompt.
-        assert "OVERFLOW_SENTINEL_ZZZ" not in user_prompt, (
-            "Chars beyond CR_ETL_MAX_TEXT_CHARS must be absent from the prompt"
-        )
-        # The body (up to the cap) must be present.
-        assert "A" * 100 in user_prompt, (
-            "First CR_ETL_MAX_TEXT_CHARS chars (body) must appear in the prompt"
+        # _build_etl_prompt passes text through unchanged (no second truncation).
+        sentinel = "UNIQUE_SENTINEL_XYZ_123"
+        _sys, user_prompt = etl_mod._build_etl_prompt("financial_statement", sentinel, [7])
+        assert sentinel in user_prompt, (
+            "_build_etl_prompt must pass the full text through to the prompt"
         )
 
     # ── Bug #13 (FIXED) ────────────────────────────────────────────────────

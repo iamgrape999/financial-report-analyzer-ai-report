@@ -717,9 +717,9 @@ async def test_etl_endpoint_returns_etlresult_schema(db, tmp_path):
         report_id=rid,
         original_filename="test_annual.pdf",
         file_size_bytes=1024,
-        document_type="annual_report",
+        document_type="financial_statement",  # annual_report requires page-first scan-pages (PR #15)
         file_format="pdf",
-        etl_status="pending",
+        etl_status="uploaded",
         uploaded_by=user.id,
     ))
     await db.flush()
@@ -756,7 +756,7 @@ async def test_etl_endpoint_returns_etlresult_schema(db, tmp_path):
                 pass
 
     assert result.doc_id == doc_id
-    assert result.document_type == "annual_report"
+    assert result.document_type == "financial_statement"
     assert sorted(result.sections_extracted) == [4, 7]
     assert "4" in result.data
     assert "7" in result.data

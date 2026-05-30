@@ -2193,7 +2193,15 @@ async function loadReportDetail(rid){
       const fmt=(d.file_format||'').toUpperCase()||'?';
       const fmtColor={PDF:'danger',DOCX:'primary',PPTX:'warning',TXT:'secondary',JPG:'success',PNG:'success',IMG:'success'}[fmt]||'secondary';
       const typeLabel=DOC_TYPE_LABELS[d.document_type]||d.document_type||'Other';
-      const etlBadge=d.etl_status==='done'?'<span class="badge bg-success ms-1" style="font-size:9px">ETL✓</span>':d.etl_status==='error'?'<span class="badge bg-danger ms-1" style="font-size:9px">ETL!</span>':'';
+      const etlStatus=d.etl_status||'uploaded';
+      const etlBadgeMap={
+        uploaded:['secondary','Uploaded'],page_scanning:['info','Scanning'],page_scan_done:['primary','Pages✓'],
+        etl_planned:['primary','Planned'],extracting:['warning','ETL…'],partial_ready:['warning','Partial'],
+        ready_for_review:['success','Review✓'],committed:['success','Committed'],low_coverage_failed:['danger','Low coverage'],
+        error:['danger','ETL!'],done:['success','ETL✓'],pending:['secondary','Pending']
+      };
+      const [etlColor,etlText]=etlBadgeMap[etlStatus]||['secondary',etlStatus];
+      const etlBadge=`<span class="badge bg-${etlColor} ms-1" style="font-size:9px">${esc(etlText)}</span>`;
       return`<div class="border rounded p-1 mb-1" style="font-size:11px;">
         <div class="d-flex align-items-center gap-1 flex-wrap">
           <span class="badge bg-${fmtColor}" style="font-size:9px">${esc(fmt)}</span>
@@ -2201,8 +2209,10 @@ async function loadReportDetail(rid){
           <span class="text-muted">${fb(d.file_size_bytes)}</span>${etlBadge}
         </div>
         <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
-        <div class="d-flex gap-1 mt-1">
-          <button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>
+        <div class="d-flex gap-1 mt-1 flex-wrap">
+          ${d.document_type==='annual_report'
+            ? `<button class="btn btn-outline-primary btn-sm py-0 px-1" style="font-size:10px" onclick="annualReportSmartImport('${d.id}','${esc(d.original_filename)}')">📄 Page ETL</button>`
+            : `<button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>`}
           <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:10px" onclick="deleteDocument('${d.id}')">🗑 Delete</button>
         </div>
       </div>`;
@@ -2886,6 +2896,74 @@ async function deleteDocument(docId){
     const res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId,{method:'DELETE',headers:H()});
     if(!res.ok&&res.status!==204){const d=await res.json().catch(()=>({}));throw new Error(d.detail||tl('Delete failed','刪除失敗'));}
     toast(tl('Document deleted','文件已刪除'),'success');
+    await loadReportDetail(currentRid);
+  }catch(e){toast(e.message,'danger');}
+}
+
+async function annualReportSmartImport(docId,filename){
+  const modal=new bootstrap.Modal(document.getElementById('etlModal'));
+  const body=document.getElementById('etlModalBody');
+  const st=document.getElementById('etlModalStatus');
+  const targetSections=[4,7,2,3,6,8,9,10];
+  const steps=[];
+  const renderSteps=()=>steps.map(x=>`<li class="${x.ok?'text-success':x.warn?'text-warning':'text-muted'}">${esc(x.label)}</li>`).join('');
+  const setStep=(label,opts={})=>{steps.push({label,ok:!!opts.ok,warn:!!opts.warn});body.innerHTML=`<div class="p-3"><div class="alert alert-info py-2"><strong>${tl('Page-first Annual Report ETL','年報逐頁 ETL')}</strong><br><small>${esc(filename)}</small></div><ol class="small mb-0">${renderSteps()}</ol></div>`;};
+  st.textContent=tl('Scanning pages…','正在掃描頁面…');
+  body.innerHTML=`<div class="text-center py-5"><div class="spinner-border text-primary" style="width:3rem;height:3rem;"></div><div class="mt-3 text-muted fw-semibold">${tl('Preparing page-first annual report ETL…','正在準備年報逐頁 ETL…')}</div></div>`;
+  modal.show();
+  try{
+    setStep(tl('Scanning every PDF page','掃描每一頁 PDF'));
+    let res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/scan-pages',{method:'POST',headers:H()});
+    let d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error((d.detail&&JSON.stringify(d.detail))||tl('Page scan failed','頁面掃描失敗'));
+    setStep(tl(`Scan complete: ${d.processed_pages}/${d.total_pages} pages`,`掃描完成：${d.processed_pages}/${d.total_pages} 頁`),{ok:true});
+
+    setStep(tl('Planning section ETL coverage','規劃段落 ETL 覆蓋範圍'));
+    res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/plan-etl',{method:'POST',headers:H()});
+    d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error((d.detail&&JSON.stringify(d.detail))||tl('ETL planning failed','ETL 規劃失敗'));
+    setStep(tl('Plan ready for sections 1–10','第 1–10 段規劃完成'),{ok:true});
+
+    const sectionResults=[];
+    for(const sec of targetSections){
+      st.textContent=tl(`Running §${sec}…`,`正在執行 §${sec}…`);
+      res=await fetch(API+'/reports/'+currentRid+'/documents/'+docId+'/etl-section/'+sec,{method:'POST',headers:H()});
+      d=await res.json().catch(()=>({}));
+      if(res.ok){
+        sectionResults.push(d);
+        setStep(tl(`§${sec} extracted from pages ${((d.source_pages||[]).join(', ')||'—')}`,`§${sec} 已從頁面 ${((d.source_pages||[]).join(', ')||'—')} 萃取`),{ok:true});
+      }else{
+        setStep(tl(`§${sec} skipped/failed: ${JSON.stringify(d.detail||res.status)}`,`§${sec} 略過/失敗：${JSON.stringify(d.detail||res.status)}`),{warn:true});
+      }
+    }
+
+    res=await fetch(API+'/reports/'+currentRid+'/smart-import/proposals?doc_id='+encodeURIComponent(docId),{method:'POST',headers:H()});
+    const proposals=await res.json().catch(()=>[]);
+    if(!res.ok)throw new Error(tl('Could not load Smart Import proposals','無法載入 Smart Import 提案'));
+    const ready=proposals.filter(p=>p.status==='ready_for_review');
+    const failed=proposals.filter(p=>p.status==='low_coverage_failed');
+    const proposalCards=proposals.map(p=>{
+      const preview=JSON.stringify(p.proposed_json||{},null,2).slice(0,900);
+      const pages=((p.evidence_map||{}).source_pages||[]).join(', ')||'—';
+      const canCommit=p.status==='ready_for_review';
+      return `<div class="card mb-2"><div class="card-header py-2 d-flex justify-content-between align-items-center"><span class="fw-bold">§${p.section_no} — ${esc(snm(p.section_no))}</span><span class="badge bg-${canCommit?'success':'danger'}">${esc(p.status||'unknown')}</span></div><div class="card-body p-2"><div class="small text-muted mb-1">${tl('Source pages','來源頁碼')}: ${esc(pages)} · ${tl('Coverage','覆蓋率')}: ${Math.round((p.coverage_score||0)*100)}%</div><details><summary class="small text-muted" style="cursor:pointer">${tl('Show proposal JSON','顯示提案 JSON')}</summary><pre class="mt-2" style="font-size:11px;max-height:220px;overflow:auto;background:#f8f9fa;padding:8px;border-radius:4px;">${esc(preview)}${preview.length===900?'\n…':''}</pre></details>${canCommit?`<button class="btn btn-sm btn-primary mt-2" onclick="commitSmartImportProposal('${p.id}')">${tl('Commit to §','寫入 §')}${p.section_no}</button>`:`<div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">${tl('Low coverage proposals cannot be committed.','低覆蓋率提案不可寫入。')}</div>`}</div></div>`;
+    }).join('');
+    body.innerHTML=`<div class="alert alert-${ready.length?'success':'warning'} m-3 py-2"><strong>${tl('Page-first ETL complete','逐頁 ETL 完成')}</strong><br><small>${tl(`${ready.length} reviewable proposal(s), ${failed.length} low-coverage proposal(s).`,`${ready.length} 個可審查提案，${failed.length} 個低覆蓋率提案。`)}</small></div><div class="px-3 pb-3">${proposalCards||`<div class="alert alert-warning">${tl('No Smart Import proposals were created.','未建立 Smart Import 提案。')}</div>`}</div>`;
+    st.textContent=tl('Review proposals','審查提案');
+    await loadReportDetail(currentRid);
+  }catch(e){
+    body.innerHTML=`<div class="alert alert-danger m-3"><strong>${tl('Page-first ETL failed:','逐頁 ETL 失敗：')}</strong> ${esc(e.message)}</div>`;
+    st.textContent=tl('Error','錯誤');
+    await loadReportDetail(currentRid);
+  }
+}
+
+async function commitSmartImportProposal(proposalId){
+  try{
+    const res=await fetch(API+'/reports/'+currentRid+'/smart-import/'+proposalId+'/commit',{method:'POST',headers:H()});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(d.detail||tl('Commit failed','寫入失敗'));
+    toast(tl(`Committed ${d.fields_imported||0} fields to §${d.section_no}`,`已寫入 ${d.fields_imported||0} 個欄位至 §${d.section_no}`),'success');
     await loadReportDetail(currentRid);
   }catch(e){toast(e.message,'danger');}
 }

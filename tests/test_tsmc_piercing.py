@@ -166,28 +166,29 @@ class TestETLTruncation:
         return full_text[:total_chars]
 
     def test_prompt_contains_only_first_120k_chars(self):
-        """ETL prompt truncates document text at CR_ETL_MAX_TEXT_CHARS (now 500 000).
+        """ETL text is now bounded by build_page_bound_chunks (24k) not a leading slice.
 
-        Source: generation/etl.py
-            text_snippet = text[:CR_ETL_MAX_TEXT_CHARS]
+        PR #15 replaced CR_ETL_MAX_TEXT_CHARS leading-slice truncation with a
+        page-first pipeline: build_page_bound_chunks caps each section's input
+        at 24 000 chars before it reaches _build_etl_prompt.  _build_etl_prompt
+        passes the text through unchanged.
+
+        Source: generation/document_pipeline.py (build_page_bound_chunks)
         """
-        from credit_report.config import CR_ETL_MAX_TEXT_CHARS
-        from credit_report.generation.etl import _build_etl_prompt
+        from credit_report.generation.document_pipeline import build_page_bound_chunks
 
-        # Use text longer than the new 500k cap to trigger truncation.
-        full_text = self._realistic_tsmc_text(CR_ETL_MAX_TEXT_CHARS + 100_000)
-        _, user_prompt = _build_etl_prompt("annual_report", full_text, [4, 7])
+        class _FakePage:
+            def __init__(self, text, n):
+                self.merged_text = text
+                self.pdf_page_no = n
+                self.printed_page_start = str(n)
 
-        start = user_prompt.index("---DOCUMENT TEXT START---") + len("---DOCUMENT TEXT START---")
-        end = user_prompt.index("---DOCUMENT TEXT END---")
-        doc_slice = user_prompt[start:end]
-
-        assert len(doc_slice.strip()) <= CR_ETL_MAX_TEXT_CHARS + 5, (
-            "Document slice in prompt exceeds CR_ETL_MAX_TEXT_CHARS — "
-            "truncation guard may have been removed."
+        # 100 pages × 1 000 chars each = 100 000 chars raw; chunk must be ≤ 24k.
+        pages = [_FakePage("X" * 1000, i) for i in range(1, 101)]
+        chunk = build_page_bound_chunks(pages, max_chars=24_000)
+        assert len(chunk) <= 24_200, (
+            f"build_page_bound_chunks must cap at ~24 000 chars; got {len(chunk)}"
         )
-        truncated_chars = len(full_text) - CR_ETL_MAX_TEXT_CHARS
-        assert truncated_chars > 0, "No truncation occurred — full text must exceed cap."
 
     def test_financial_statements_are_beyond_truncation_point(self):
         """FIX verified: with 500k cap, financial statements within 600k text are covered.
@@ -218,33 +219,32 @@ class TestETLTruncation:
         )
 
     def test_logger_reports_truncation_flag(self):
-        """_build_etl_prompt logs truncated=True when text exceeds CR_ETL_MAX_TEXT_CHARS.
+        """_build_etl_prompt logs page_bound_no_leading_slice=true (PR #15 change).
 
-        The logger uses % formatting with positional args; we format each call
-        to reconstruct the final log message and search for 'truncated=True'.
+        PR #15 removed the CR_ETL_MAX_TEXT_CHARS leading-slice and its
+        'truncated=True/False' log field, replacing them with page-bound
+        chunks.  The logger now reports 'page_bound_no_leading_slice=true'
+        to confirm the new behavior.
         """
-        from credit_report.config import CR_ETL_MAX_TEXT_CHARS
         from credit_report.generation.etl import _build_etl_prompt
 
-        # Use text longer than the new 500k cap to trigger truncation.
-        full_text = self._realistic_tsmc_text(CR_ETL_MAX_TEXT_CHARS + 100_000)
+        sample_text = self._realistic_tsmc_text(5000)
         with patch("credit_report.generation.etl.logger") as mock_log:
-            _build_etl_prompt("annual_report", full_text, [4, 7])
-            truncated_logged = False
+            _build_etl_prompt("annual_report", sample_text, [4, 7])
+            page_bound_logged = False
             for call in mock_log.info.call_args_list:
-                pos_args = call[0]  # (fmt, arg1, arg2, ...)
+                pos_args = call[0]
                 if pos_args:
                     try:
                         formatted = pos_args[0] % pos_args[1:]
-                        if "truncated=True" in formatted:
-                            truncated_logged = True
+                        if "page_bound_no_leading_slice" in formatted:
+                            page_bound_logged = True
                             break
                     except (TypeError, ValueError):
                         pass
-        assert truncated_logged, (
-            "etl.py did not produce a log line containing 'truncated=True' "
-            "for a 600 000-char document. "
-            "Either the logging call was removed or the truncation logic changed."
+        assert page_bound_logged, (
+            "etl.py did not log 'page_bound_no_leading_slice' — "
+            "check that _build_etl_prompt log line was not removed or renamed."
         )
 
 

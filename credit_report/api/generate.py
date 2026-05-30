@@ -24,8 +24,19 @@ from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, CR_MAX_CONCURRENT_
 from credit_report.database import get_db
 from credit_report.generation.evidence import extract_text_from_file, extract_text_from_file_path, save_document_text
 from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
-from credit_report.generation.models import SectionDocument
+from credit_report.generation.models import SectionDocument, SectionImportProposal
 from credit_report.integrations.twse import TWSEOpenAPIClient, build_section7_input
+from credit_report.generation.document_pipeline import (
+    build_page_bound_chunks,
+    commit_section_import_proposal,
+    create_section_import_proposal,
+    get_page_scan_coverage,
+    plan_document_etl,
+    scan_document_pages,
+    select_pages_for_section,
+    validate_annual_report_gates,
+    is_probably_annual_report,
+)
 from credit_report.generation.pipeline import (
     check_hard_dependencies,
     get_section_output,
@@ -33,6 +44,7 @@ from credit_report.generation.pipeline import (
     run_section_generation,
 )
 from credit_report.models import Report, SectionInput, SectionOutput
+from credit_report.audit.events import write_event
 from credit_report.security.auth import get_current_user, require_analyst
 from credit_report.security.models import User
 
@@ -46,6 +58,7 @@ _extraction_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_EXTRACTIONS)
 _TASK_TTL_SECONDS = 6 * 60 * 60
 _MAX_GENERATION_TASKS = 200
 _background_tasks: set[asyncio.Task] = set()
+_TASKS_FILE = runtime_config.CREDIT_REPORTS_ROOT.parent / "generation_tasks.json"
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -333,6 +346,44 @@ class ETLResult(BaseModel):
     data: dict[str, dict]  # {str(section_no): {field: value}}
 
 
+class PageScanResult(BaseModel):
+    document_id: str
+    total_pages: int
+    processed_pages: int
+    native_text_pages: int
+    table_pages_detected: int
+    financial_pages_detected: int
+    toc_parsed: bool
+    coverage_pct: float
+
+
+class ETLPlanResult(BaseModel):
+    document_id: str
+    target_sections: dict[str, dict]
+
+
+class SectionETLResult(BaseModel):
+    doc_id: str
+    document_type: str
+    section_no: int
+    source_pages: list[int]
+    coverage: dict
+    data: dict
+
+
+class SmartImportProposalOut(BaseModel):
+    id: str
+    report_id: str
+    section_no: int
+    proposed_json: Optional[dict] = None
+    evidence_map: Optional[dict] = None
+    coverage_score: Optional[float] = None
+    missing_required_fields: Optional[list] = None
+    status: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
 class SectionJsonImportResult(BaseModel):
     section_no: int
     fields_imported: int
@@ -369,34 +420,50 @@ class GenerateTaskResult(BaseModel):
     detail: Optional[str] = None
 
 
-# Task registry: in-memory primary store with disk-based persistence.
-# Tasks are written to disk on every create/update so they survive process restarts.
-# On Render, the disk: mount in render.yaml makes this path persistent across deploys.
+# Single-instance task registry persisted to disk so polling survives Render
+# starter-instance restarts when a persistent disk is attached.
 _generation_tasks: dict[str, dict] = {}
-_TASKS_FILE = Path(os.getenv("CREDIT_REPORTS_ROOT", "./data/credit_reports")).parent / "_generation_tasks.json"
 
 
 def _save_tasks_to_disk() -> None:
-    """Best-effort write of the task registry to disk for cross-restart persistence."""
+    """Persist the bounded generation task registry for status polling."""
     try:
         _TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _TASKS_FILE.write_text(json.dumps(_generation_tasks))
-    except Exception:
-        pass
+        _TASKS_FILE.write_text(json.dumps(_generation_tasks), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("generation_task_registry: failed to persist tasks: %s", exc)
 
 
 def _load_tasks_from_disk() -> None:
-    """Reload non-expired tasks from disk on startup."""
+    """Reload non-expired tasks, marking interrupted in-flight tasks as errors."""
     try:
-        if _TASKS_FILE.exists():
-            data = json.loads(_TASKS_FILE.read_text())
-            now = time.time()
-            for task_id, task in data.items():
-                age = now - float(task.get("updated_at", task.get("created_at", now)))
-                if age <= _TASK_TTL_SECONDS:
-                    _generation_tasks[task_id] = task
-    except Exception:
-        pass
+        if not _TASKS_FILE.exists():
+            return
+        data = json.loads(_TASKS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        now = time.time()
+        changed = False
+        for task_id, task in data.items():
+            if not isinstance(task, dict):
+                continue
+            age = now - float(task.get("updated_at", task.get("created_at", now)))
+            if age > _TASK_TTL_SECONDS:
+                changed = True
+                continue
+            restored = dict(task)
+            if restored.get("status") == "running":
+                restored.update({
+                    "status": "error",
+                    "detail": "Generation was interrupted by a server restart. Please retry.",
+                    "updated_at": now,
+                })
+                changed = True
+            _generation_tasks[task_id] = restored
+        if changed:
+            _save_tasks_to_disk()
+    except Exception as exc:
+        logger.warning("generation_task_registry: failed to load tasks: %s", exc)
 
 
 _load_tasks_from_disk()
@@ -407,12 +474,14 @@ _load_tasks_from_disk()
 def _cleanup_generation_tasks(now: float | None = None) -> None:
     """Bound the in-memory task registry used by the polling API."""
     now = time.time() if now is None else now
+    changed = False
     expired = [
         task_id for task_id, task in _generation_tasks.items()
         if now - float(task.get("updated_at", task.get("created_at", now))) > _TASK_TTL_SECONDS
     ]
     for task_id in expired:
         _generation_tasks.pop(task_id, None)
+        changed = True
 
     overflow = len(_generation_tasks) - _MAX_GENERATION_TASKS
     if overflow > 0:
@@ -422,6 +491,10 @@ def _cleanup_generation_tasks(now: float | None = None) -> None:
         )
         for task_id in oldest[:overflow]:
             _generation_tasks.pop(task_id, None)
+            changed = True
+
+    if changed:
+        _save_tasks_to_disk()
 
 
 def _create_generation_task(initial: dict) -> str:
@@ -441,6 +514,7 @@ def _update_generation_task(task_id: str, updates: dict) -> None:
     task.update(updates)
     task["updated_at"] = time.time()
     _save_tasks_to_disk()
+
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
     result = await db.execute(
@@ -606,6 +680,9 @@ async def upload_document(
 
     document_type = _clean_document_type(document_type)
     fname = _safe_filename(file.filename or "upload", "upload")
+    if document_type != "annual_report" and is_probably_annual_report(filename=fname):
+        logger.info("upload_document: inferred annual_report from filename=%r selected_type=%s", fname, document_type)
+        document_type = "annual_report"
     ext = _ensure_supported_extension(fname)
 
     doc_id = str(uuid.uuid4())
@@ -619,7 +696,7 @@ async def upload_document(
         file_size_bytes=file_size,
         document_type=document_type,
         file_format=ext,
-        etl_status="pending",
+        etl_status="uploaded",
         uploaded_by=current_user.id,
     )
     db.add(doc)
@@ -657,6 +734,9 @@ async def upload_document_url(
         _save_document_filename(report_id, doc_id, fname)
         file_size = len(file_bytes)
     ext = _extension_from_filename(fname)
+    if document_type != "annual_report" and is_probably_annual_report(filename=fname):
+        logger.info("upload_document_url: inferred annual_report from filename=%r selected_type=%s", fname, document_type)
+        document_type = "annual_report"
 
     logger.info("upload_document_url: accepted url=%r file=%r type=%s bytes=%d doc=%s report=%s user=%s", payload.url, fname, document_type, file_size, doc_id, report_id, current_user.id)
 
@@ -667,7 +747,7 @@ async def upload_document_url(
         file_size_bytes=file_size,
         document_type=document_type,
         file_format=ext,
-        etl_status="pending",
+        etl_status="uploaded",
         uploaded_by=current_user.id,
     )
     db.add(doc)
@@ -691,6 +771,205 @@ async def list_documents(
         .order_by(SectionDocument.uploaded_at.desc())
     )
     return list(result.scalars().all())
+
+
+
+async def _get_report_document(db: AsyncSession, report_id: str, doc_id: str) -> SectionDocument:
+    result = await db.execute(
+        select(SectionDocument).where(
+            SectionDocument.id == doc_id,
+            SectionDocument.report_id == report_id,
+            SectionDocument.is_deleted == False,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@router.post("/documents/{doc_id}/scan-pages", response_model=PageScanResult)
+async def scan_pages_endpoint(
+    report_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Build a page-level manifest before any section ETL is allowed.
+
+    This endpoint is the hard boundary between upload and extraction: annual
+    reports must be converted into page/block/table metadata so later ETL can
+    cite source pages and fail low-coverage inputs instead of pretending a
+    leading text slice is complete.
+    """
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    doc = await _get_report_document(db, report_id, doc_id)
+    binary_path = _document_binary_path(report_id, doc_id)
+    if not binary_path.exists():
+        raise HTTPException(status_code=422, detail="Document binary not found — please re-upload")
+    try:
+        summary = await scan_document_pages(db, report_id, doc, binary_path)
+    except ValueError as exc:
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("scan_pages_endpoint: failed doc=%s report=%s: %s", doc_id, report_id, exc)
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"Page scan failed: {exc}") from exc
+    return summary.as_dict()
+
+
+@router.post("/documents/{doc_id}/plan-etl", response_model=ETLPlanResult)
+async def plan_etl_endpoint(
+    report_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Plan section-specific ETL support and unsupported-field guards."""
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    doc = await _get_report_document(db, report_id, doc_id)
+    coverage = await get_page_scan_coverage(db, doc_id)
+    if coverage["processed_pages"] == 0:
+        raise HTTPException(status_code=409, detail="Run scan-pages before planning ETL")
+    return await plan_document_etl(db, doc)
+
+
+@router.post("/documents/{doc_id}/etl-section/{section_no}", response_model=SectionETLResult)
+async def etl_section_endpoint(
+    report_id: str,
+    doc_id: str,
+    section_no: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Run targeted ETL for exactly one report section using page-selected chunks."""
+    if section_no < 1 or section_no > 10:
+        raise HTTPException(status_code=400, detail="section_no must be between 1 and 10")
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    doc = await _get_report_document(db, report_id, doc_id)
+    coverage = await get_page_scan_coverage(db, doc_id)
+    if coverage["processed_pages"] == 0:
+        raise HTTPException(status_code=409, detail="Run scan-pages before section ETL")
+    if coverage["processed_pages"] != coverage["total_pages"]:
+        doc.etl_status = "low_coverage_failed"
+        await db.commit()
+        raise HTTPException(status_code=409, detail="Page coverage gate failed: not all pages processed")
+
+    pages = await select_pages_for_section(db, doc_id, section_no)
+    chunk = build_page_bound_chunks(pages)
+    if not chunk:
+        doc.etl_status = "low_coverage_failed"
+        await db.commit()
+        raise HTTPException(status_code=422, detail="No page-level candidate text found for this section")
+
+    gate = validate_annual_report_gates(chunk, section_no if doc.document_type == "annual_report" else None)
+    if section_no == 7 and not gate["passed"]:
+        doc.etl_status = "low_coverage_failed"
+        await db.commit()
+        raise HTTPException(status_code=422, detail={"message": "Section 7 minimum financial coverage gate failed", **gate})
+
+    doc.etl_status = "extracting"
+    await db.flush()
+    try:
+        extracted = await etl_document(text=chunk, document_type=doc.document_type or "other", section_nos=[section_no])
+    except ValueError as exc:
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("etl_section_endpoint: ETL failed doc=%s section=%s: %s", doc_id, section_no, exc)
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"Section ETL failed: {exc}") from exc
+
+    section_data = extracted.get(section_no, {})
+    proposal = await create_section_import_proposal(
+        db,
+        report_id,
+        doc_id,
+        section_no,
+        section_data,
+        [p.pdf_page_no for p in pages],
+        gate["coverage_score"],
+        gate["missing"],
+    )
+    doc.etl_status = "ready_for_review" if proposal.status == "ready_for_review" else "low_coverage_failed"
+    await db.commit()
+    return SectionETLResult(
+        doc_id=doc_id,
+        document_type=doc.document_type or "other",
+        section_no=section_no,
+        source_pages=[p.pdf_page_no for p in pages],
+        coverage=gate,
+        data=section_data,
+    )
+
+
+@router.post("/smart-import/proposals", response_model=list[SmartImportProposalOut])
+async def smart_import_proposals_endpoint(
+    report_id: str,
+    doc_id: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """List reviewable Smart Import proposals for forensic UI review."""
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    query = select(SectionImportProposal).where(SectionImportProposal.report_id == report_id)
+    # doc_id is accepted for API symmetry; proposals carry document_id in evidence_map.
+    result = await db.execute(query.order_by(SectionImportProposal.section_no, SectionImportProposal.created_at.desc()))
+    proposals = list(result.scalars().all())
+    if doc_id:
+        proposals = [p for p in proposals if (p.evidence_map or {}).get("document_id") == doc_id]
+    return proposals
+
+
+@router.post("/smart-import/{proposal_id}/commit", response_model=SectionJsonImportResult)
+async def smart_import_commit_endpoint(
+    report_id: str,
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Commit a reviewed Smart Import proposal to SectionInput with an audit trail."""
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    result = await db.execute(
+        select(SectionImportProposal).where(
+            SectionImportProposal.id == proposal_id,
+            SectionImportProposal.report_id == report_id,
+        )
+    )
+    proposal = result.scalar_one_or_none()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Smart Import proposal not found")
+    if proposal.status == "low_coverage_failed":
+        raise HTTPException(status_code=409, detail="Cannot commit a low-coverage proposal")
+
+    await commit_section_import_proposal(db, proposal, current_user.id)
+    await write_event(
+        db,
+        action="smart_import_commit",
+        actor_user_id=current_user.id,
+        actor_role=getattr(current_user, "role", None),
+        report_id=report_id,
+        target_type="section_import_proposal",
+        target_id=proposal_id,
+        after=proposal.proposed_json,
+        extra=proposal.evidence_map,
+    )
+    await db.commit()
+    return SectionJsonImportResult(
+        section_no=proposal.section_no,
+        fields_imported=_count_leaf_fields(proposal.proposed_json or {}),
+        message="Smart Import proposal committed",
+    )
 
 
 @router.post("/documents/{doc_id}/etl", response_model=ETLResult)
@@ -754,10 +1033,64 @@ async def etl_document_endpoint(
         raise HTTPException(status_code=422, detail="Document appears to have no extractable text")
 
     doc_type = doc.document_type or "other"
+    if doc_type != "annual_report" and is_probably_annual_report(doc.original_filename, text):
+        logger.warning(
+            "etl_document_endpoint: coerced likely annual report doc=%s from type=%s filename=%r",
+            doc_id,
+            doc_type,
+            doc.original_filename,
+        )
+        doc.document_type = "annual_report"
+        doc_type = "annual_report"
+        await db.flush()
     logger.info("etl_document_endpoint: doc=%s type=%s chars=%d report=%s user=%s", doc_id, doc_type, len(text), report_id, current_user.id)
 
     try:
-        extracted = await etl_document(text=text, document_type=doc_type)
+        coverage = await get_page_scan_coverage(db, doc_id)
+        if doc_type == "annual_report":
+            if coverage["processed_pages"] == 0:
+                doc.etl_status = "low_coverage_failed"
+                await db.commit()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Annual-report ETL requires page-first scan-pages before extraction",
+                )
+            if coverage["processed_pages"] != coverage["total_pages"]:
+                doc.etl_status = "low_coverage_failed"
+                await db.commit()
+                raise HTTPException(status_code=409, detail="Page coverage gate failed: not all pages processed")
+
+            extracted: dict[int, dict] = {}
+            for section_no in DOCUMENT_SECTION_MAP.get(doc_type, [4, 7]):
+                pages = await select_pages_for_section(db, doc_id, section_no)
+                chunk = build_page_bound_chunks(pages)
+                if not chunk:
+                    continue
+                gate = validate_annual_report_gates(chunk, section_no)
+                if section_no == 7 and not gate["passed"]:
+                    doc.etl_status = "low_coverage_failed"
+                    await db.commit()
+                    raise HTTPException(
+                        status_code=422,
+                        detail={"message": "Section 7 minimum financial coverage gate failed", **gate},
+                    )
+                section_result = await etl_document(text=chunk, document_type=doc_type, section_nos=[section_no])
+                extracted.update(section_result)
+                await create_section_import_proposal(
+                    db,
+                    report_id,
+                    doc_id,
+                    section_no,
+                    section_result.get(section_no, {}),
+                    [p.pdf_page_no for p in pages],
+                    gate["coverage_score"],
+                    gate["missing"],
+                )
+        else:
+            # Non-annual document types can still use legacy full-text extraction; annual reports cannot.
+            extracted = await etl_document(text=text, document_type=doc_type)
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.warning("etl_document_endpoint: config error doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
@@ -769,7 +1102,8 @@ async def etl_document_endpoint(
         await db.commit()  # commit before raise — get_db rolls back on exception
         raise HTTPException(status_code=500, detail=f"ETL extraction failed: {exc}")
 
-    doc.etl_status = "done"
+    doc.etl_status = "ready_for_review" if extracted else "low_coverage_failed"
+    await db.commit()
 
     return ETLResult(
         doc_id=doc_id,
