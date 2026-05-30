@@ -2,9 +2,13 @@ services:
   - type: web
     name: financial-report-analyzer
     runtime: python
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt && mkdir -p data/credit_reports data/memory data/logs
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: mkdir -p data/credit_reports data/memory data/logs && python scripts/prepare_database.py && uvicorn main:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: financial-report-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     healthCheckPath: /health
     envVars:
       # Optional: set to a PostgreSQL connection string for persistent storage.
