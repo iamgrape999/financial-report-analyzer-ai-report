@@ -23,8 +23,18 @@ from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB, CR_MAX_CONCURRENT_
 from credit_report.database import get_db
 from credit_report.generation.evidence import extract_text_from_file, extract_text_from_file_path, save_document_text
 from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
-from credit_report.generation.models import SectionDocument
+from credit_report.generation.models import SectionDocument, SectionImportProposal
 from credit_report.integrations.twse import TWSEOpenAPIClient, build_section7_input
+from credit_report.generation.document_pipeline import (
+    build_page_bound_chunks,
+    commit_section_import_proposal,
+    create_section_import_proposal,
+    get_page_scan_coverage,
+    plan_document_etl,
+    scan_document_pages,
+    select_pages_for_section,
+    validate_annual_report_gates,
+)
 from credit_report.generation.pipeline import (
     check_hard_dependencies,
     get_section_output,
@@ -32,6 +42,7 @@ from credit_report.generation.pipeline import (
     run_section_generation,
 )
 from credit_report.models import Report, SectionInput, SectionOutput
+from credit_report.audit.events import write_event
 from credit_report.security.auth import get_current_user, require_analyst
 from credit_report.security.models import User
 
@@ -328,6 +339,44 @@ class ETLResult(BaseModel):
     document_type: str
     sections_extracted: list[int]
     data: dict[str, dict]  # {str(section_no): {field: value}}
+
+
+class PageScanResult(BaseModel):
+    document_id: str
+    total_pages: int
+    processed_pages: int
+    native_text_pages: int
+    table_pages_detected: int
+    financial_pages_detected: int
+    toc_parsed: bool
+    coverage_pct: float
+
+
+class ETLPlanResult(BaseModel):
+    document_id: str
+    target_sections: dict[str, dict]
+
+
+class SectionETLResult(BaseModel):
+    doc_id: str
+    document_type: str
+    section_no: int
+    source_pages: list[int]
+    coverage: dict
+    data: dict
+
+
+class SmartImportProposalOut(BaseModel):
+    id: str
+    report_id: str
+    section_no: int
+    proposed_json: Optional[dict] = None
+    evidence_map: Optional[dict] = None
+    coverage_score: Optional[float] = None
+    missing_required_fields: Optional[list] = None
+    status: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
 class SectionJsonImportResult(BaseModel):
@@ -638,7 +687,7 @@ async def upload_document(
         file_size_bytes=file_size,
         document_type=document_type,
         file_format=ext,
-        etl_status="pending",
+        etl_status="uploaded",
         uploaded_by=current_user.id,
     )
     db.add(doc)
@@ -686,7 +735,7 @@ async def upload_document_url(
         file_size_bytes=file_size,
         document_type=document_type,
         file_format=ext,
-        etl_status="pending",
+        etl_status="uploaded",
         uploaded_by=current_user.id,
     )
     db.add(doc)
@@ -710,6 +759,205 @@ async def list_documents(
         .order_by(SectionDocument.uploaded_at.desc())
     )
     return list(result.scalars().all())
+
+
+
+async def _get_report_document(db: AsyncSession, report_id: str, doc_id: str) -> SectionDocument:
+    result = await db.execute(
+        select(SectionDocument).where(
+            SectionDocument.id == doc_id,
+            SectionDocument.report_id == report_id,
+            SectionDocument.is_deleted == False,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@router.post("/documents/{doc_id}/scan-pages", response_model=PageScanResult)
+async def scan_pages_endpoint(
+    report_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Build a page-level manifest before any section ETL is allowed.
+
+    This endpoint is the hard boundary between upload and extraction: annual
+    reports must be converted into page/block/table metadata so later ETL can
+    cite source pages and fail low-coverage inputs instead of pretending a
+    leading text slice is complete.
+    """
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    doc = await _get_report_document(db, report_id, doc_id)
+    binary_path = _document_binary_path(report_id, doc_id)
+    if not binary_path.exists():
+        raise HTTPException(status_code=422, detail="Document binary not found — please re-upload")
+    try:
+        summary = await scan_document_pages(db, report_id, doc, binary_path)
+    except ValueError as exc:
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("scan_pages_endpoint: failed doc=%s report=%s: %s", doc_id, report_id, exc)
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"Page scan failed: {exc}") from exc
+    return summary.as_dict()
+
+
+@router.post("/documents/{doc_id}/plan-etl", response_model=ETLPlanResult)
+async def plan_etl_endpoint(
+    report_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Plan section-specific ETL support and unsupported-field guards."""
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    doc = await _get_report_document(db, report_id, doc_id)
+    coverage = await get_page_scan_coverage(db, doc_id)
+    if coverage["processed_pages"] == 0:
+        raise HTTPException(status_code=409, detail="Run scan-pages before planning ETL")
+    return await plan_document_etl(db, doc)
+
+
+@router.post("/documents/{doc_id}/etl-section/{section_no}", response_model=SectionETLResult)
+async def etl_section_endpoint(
+    report_id: str,
+    doc_id: str,
+    section_no: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Run targeted ETL for exactly one report section using page-selected chunks."""
+    if section_no < 1 or section_no > 10:
+        raise HTTPException(status_code=400, detail="section_no must be between 1 and 10")
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    doc = await _get_report_document(db, report_id, doc_id)
+    coverage = await get_page_scan_coverage(db, doc_id)
+    if coverage["processed_pages"] == 0:
+        raise HTTPException(status_code=409, detail="Run scan-pages before section ETL")
+    if coverage["processed_pages"] != coverage["total_pages"]:
+        doc.etl_status = "low_coverage_failed"
+        await db.commit()
+        raise HTTPException(status_code=409, detail="Page coverage gate failed: not all pages processed")
+
+    pages = await select_pages_for_section(db, doc_id, section_no)
+    chunk = build_page_bound_chunks(pages)
+    if not chunk:
+        doc.etl_status = "low_coverage_failed"
+        await db.commit()
+        raise HTTPException(status_code=422, detail="No page-level candidate text found for this section")
+
+    gate = validate_annual_report_gates(chunk, section_no if doc.document_type == "annual_report" else None)
+    if section_no == 7 and not gate["passed"]:
+        doc.etl_status = "low_coverage_failed"
+        await db.commit()
+        raise HTTPException(status_code=422, detail={"message": "Section 7 minimum financial coverage gate failed", **gate})
+
+    doc.etl_status = "extracting"
+    await db.flush()
+    try:
+        extracted = await etl_document(text=chunk, document_type=doc.document_type or "other", section_nos=[section_no])
+    except ValueError as exc:
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("etl_section_endpoint: ETL failed doc=%s section=%s: %s", doc_id, section_no, exc)
+        doc.etl_status = "error"
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"Section ETL failed: {exc}") from exc
+
+    section_data = extracted.get(section_no, {})
+    proposal = await create_section_import_proposal(
+        db,
+        report_id,
+        doc_id,
+        section_no,
+        section_data,
+        [p.pdf_page_no for p in pages],
+        gate["coverage_score"],
+        gate["missing"],
+    )
+    doc.etl_status = "ready_for_review" if proposal.status == "ready_for_review" else "low_coverage_failed"
+    await db.commit()
+    return SectionETLResult(
+        doc_id=doc_id,
+        document_type=doc.document_type or "other",
+        section_no=section_no,
+        source_pages=[p.pdf_page_no for p in pages],
+        coverage=gate,
+        data=section_data,
+    )
+
+
+@router.post("/smart-import/proposals", response_model=list[SmartImportProposalOut])
+async def smart_import_proposals_endpoint(
+    report_id: str,
+    doc_id: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """List reviewable Smart Import proposals for forensic UI review."""
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    query = select(SectionImportProposal).where(SectionImportProposal.report_id == report_id)
+    # doc_id is accepted for API symmetry; proposals carry document_id in evidence_map.
+    result = await db.execute(query.order_by(SectionImportProposal.section_no, SectionImportProposal.created_at.desc()))
+    proposals = list(result.scalars().all())
+    if doc_id:
+        proposals = [p for p in proposals if (p.evidence_map or {}).get("document_id") == doc_id]
+    return proposals
+
+
+@router.post("/smart-import/{proposal_id}/commit", response_model=SectionJsonImportResult)
+async def smart_import_commit_endpoint(
+    report_id: str,
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_analyst),
+):
+    """Commit a reviewed Smart Import proposal to SectionInput with an audit trail."""
+    report = await _require_report(db, report_id)
+    _assert_owner_or_admin(report, current_user)
+    result = await db.execute(
+        select(SectionImportProposal).where(
+            SectionImportProposal.id == proposal_id,
+            SectionImportProposal.report_id == report_id,
+        )
+    )
+    proposal = result.scalar_one_or_none()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Smart Import proposal not found")
+    if proposal.status == "low_coverage_failed":
+        raise HTTPException(status_code=409, detail="Cannot commit a low-coverage proposal")
+
+    await commit_section_import_proposal(db, proposal, current_user.id)
+    await write_event(
+        db,
+        action="smart_import_commit",
+        actor_user_id=current_user.id,
+        actor_role=getattr(current_user, "role", None),
+        report_id=report_id,
+        target_type="section_import_proposal",
+        target_id=proposal_id,
+        after=proposal.proposed_json,
+        extra=proposal.evidence_map,
+    )
+    await db.commit()
+    return SectionJsonImportResult(
+        section_no=proposal.section_no,
+        fields_imported=_count_leaf_fields(proposal.proposed_json or {}),
+        message="Smart Import proposal committed",
+    )
 
 
 @router.post("/documents/{doc_id}/etl", response_model=ETLResult)
@@ -776,7 +1024,51 @@ async def etl_document_endpoint(
     logger.info("etl_document_endpoint: doc=%s type=%s chars=%d report=%s user=%s", doc_id, doc_type, len(text), report_id, current_user.id)
 
     try:
-        extracted = await etl_document(text=text, document_type=doc_type)
+        coverage = await get_page_scan_coverage(db, doc_id)
+        if doc_type == "annual_report":
+            if coverage["processed_pages"] == 0:
+                doc.etl_status = "low_coverage_failed"
+                await db.commit()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Annual-report ETL requires page-first scan-pages before extraction",
+                )
+            if coverage["processed_pages"] != coverage["total_pages"]:
+                doc.etl_status = "low_coverage_failed"
+                await db.commit()
+                raise HTTPException(status_code=409, detail="Page coverage gate failed: not all pages processed")
+
+            extracted: dict[int, dict] = {}
+            for section_no in DOCUMENT_SECTION_MAP.get(doc_type, [4, 7]):
+                pages = await select_pages_for_section(db, doc_id, section_no)
+                chunk = build_page_bound_chunks(pages)
+                if not chunk:
+                    continue
+                gate = validate_annual_report_gates(chunk, section_no)
+                if section_no == 7 and not gate["passed"]:
+                    doc.etl_status = "low_coverage_failed"
+                    await db.commit()
+                    raise HTTPException(
+                        status_code=422,
+                        detail={"message": "Section 7 minimum financial coverage gate failed", **gate},
+                    )
+                section_result = await etl_document(text=chunk, document_type=doc_type, section_nos=[section_no])
+                extracted.update(section_result)
+                await create_section_import_proposal(
+                    db,
+                    report_id,
+                    doc_id,
+                    section_no,
+                    section_result.get(section_no, {}),
+                    [p.pdf_page_no for p in pages],
+                    gate["coverage_score"],
+                    gate["missing"],
+                )
+        else:
+            # Non-annual document types can still use legacy full-text extraction; annual reports cannot.
+            extracted = await etl_document(text=text, document_type=doc_type)
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.warning("etl_document_endpoint: config error doc=%s: %s", doc_id, exc)
         doc.etl_status = "error"
@@ -788,7 +1080,8 @@ async def etl_document_endpoint(
         await db.commit()  # commit before raise — get_db rolls back on exception
         raise HTTPException(status_code=500, detail=f"ETL extraction failed: {exc}")
 
-    doc.etl_status = "done"
+    doc.etl_status = "ready_for_review" if extracted else "low_coverage_failed"
+    await db.commit()
 
     return ETLResult(
         doc_id=doc_id,
