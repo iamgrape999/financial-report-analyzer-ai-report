@@ -39,7 +39,9 @@ import importlib
 import inspect
 import io
 import json
+import os
 import re
+import tempfile
 import textwrap
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -201,6 +203,33 @@ class TestCrossDeployStateBugs:
         assert len(migrations) >= 5, (
             f"Expected several alembic migrations, found {len(migrations)}"
         )
+
+        # FUNCTIONAL guard: 'alembic upgrade head' must actually SUCCEED on a
+        # fresh DB.  A bare string match is not enough — multiple heads or
+        # SQLite-incompatible DDL would crash the startCommand on deploy.
+        # (1) Exactly one head — no unmerged branch points.
+        import subprocess
+        heads = subprocess.run(
+            ["alembic", "heads"], cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        head_lines = [ln for ln in heads.stdout.splitlines() if "(head)" in ln]
+        assert len(head_lines) == 1, (
+            f"alembic must have exactly one head, found {len(head_lines)}: {head_lines!r} — "
+            "'alembic upgrade head' is ambiguous with multiple heads"
+        )
+        # (2) Full upgrade succeeds on a throwaway SQLite DB (Render's default
+        #     when DATABASE_URL is unset), proving the DDL is dialect-safe.
+        with tempfile.TemporaryDirectory() as _td:
+            db_path = Path(_td) / "verify.db"
+            env = {**os.environ, "DATABASE_URL": f"sqlite+aiosqlite:///{db_path}"}
+            up = subprocess.run(
+                ["alembic", "upgrade", "head"],
+                cwd=REPO_ROOT, capture_output=True, text=True, env=env,
+            )
+            assert up.returncode == 0, (
+                f"'alembic upgrade head' must succeed on SQLite; exit={up.returncode}\n"
+                f"STDERR:\n{up.stderr[-2000:]}"
+            )
 
 
 # ===========================================================================

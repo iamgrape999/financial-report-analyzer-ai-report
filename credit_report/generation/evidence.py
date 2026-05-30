@@ -496,15 +496,17 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             # Expand merged cells so non-anchor cells carry the anchor's value.
+            # Non-anchor cells are read-only MergedCell objects while the range
+            # is merged, so we must unmerge first, then write the anchor value
+            # into every cell of the (former) range.
             for merged_range in list(ws.merged_cells.ranges):
-                anchor_value = ws.cell(merged_range.min_row, merged_range.min_col).value
-                for row in ws.iter_rows(
-                    min_row=merged_range.min_row, max_row=merged_range.max_row,
-                    min_col=merged_range.min_col, max_col=merged_range.max_col,
-                ):
-                    for cell in row:
-                        if (cell.row, cell.column) != (merged_range.min_row, merged_range.min_col):
-                            cell.value = anchor_value
+                min_row, min_col = merged_range.min_row, merged_range.min_col
+                max_row, max_col = merged_range.max_row, merged_range.max_col
+                anchor_value = ws.cell(min_row, min_col).value
+                ws.unmerge_cells(str(merged_range))
+                for r in range(min_row, max_row + 1):
+                    for c in range(min_col, max_col + 1):
+                        ws.cell(r, c).value = anchor_value
             rows = list(ws.iter_rows(values_only=True))
             if not rows:
                 continue
