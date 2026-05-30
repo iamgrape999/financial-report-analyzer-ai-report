@@ -135,14 +135,14 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <h4 class="text-center mb-4 fw-bold text-primary" data-i18n="login.title">Sign In</h4>
       <div class="mb-3">
         <label class="form-label fw-semibold" data-i18n="login.email">Email</label>
-        <input id="loginEmail" type="email" class="form-control form-control-lg" autocomplete="username" autofocus
+        <input id="loginEmail" data-testid="login-email" type="email" class="form-control form-control-lg" autocomplete="username" autofocus
                oninput="loginClearErr('email')">
         <div id="loginEmailErr" class="login-field-err d-none"></div>
       </div>
       <div class="mb-3">
         <label class="form-label fw-semibold" data-i18n="login.password">Password</label>
         <div class="input-group">
-          <input id="loginPw" type="password" class="form-control form-control-lg" autocomplete="current-password"
+          <input id="loginPw" data-testid="login-password" type="password" class="form-control form-control-lg" autocomplete="current-password"
                  oninput="loginClearErr('pw')">
           <button class="btn btn-outline-secondary" type="button" id="togglePwBtn" onclick="loginTogglePw()" tabindex="-1"
                   title="顯示/隱藏密碼" style="border-color:#ced4da;font-size:1.1rem;padding:0 0.8rem;">👁</button>
@@ -150,7 +150,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <div id="loginPwErr" class="login-field-err d-none"></div>
       </div>
       <div id="loginErr" class="alert alert-danger d-none mb-3" role="alert"></div>
-      <button id="loginBtn" class="btn btn-primary w-100 fw-semibold py-2 fs-5" onclick="doLogin()">
+      <button id="loginBtn" data-testid="login-submit" class="btn btn-primary w-100 fw-semibold py-2 fs-5" onclick="doLogin()">
         <span id="loginSpin" class="spinner-border spinner-border-sm d-none me-2"></span><span data-i18n="login.submit">Sign In</span></button>
       <div id="loginHint" data-i18n="login.hint">登入問題？請聯絡系統管理員重設密碼</div>
     </div>
@@ -161,7 +161,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 <div id="viewDashboard" class="view container py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h5 class="fw-bold mb-0" data-i18n="dash.reports">📋 Reports</h5>
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createModal" data-i18n="dash.new_report">+ New Report</button>
+    <button class="btn btn-primary btn-sm" data-testid="create-report" data-bs-toggle="modal" data-bs-target="#createModal" data-i18n="dash.new_report">+ New Report</button>
   </div>
   <div class="card">
     <div class="card-body p-0">
@@ -195,7 +195,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <div class="card h-100">
         <div class="card-header py-2" data-i18n="rd.evidence_header">📎 Evidence Documents <small class="text-muted fw-normal">(optional — enables ETL &amp; improves AI quality)</small></div>
         <div class="card-body small d-flex flex-column gap-2">
-          <select id="docType" class="form-select form-select-sm">
+          <select id="docType" data-testid="document-type-select" class="form-select form-select-sm">
             <option value="annual_report">📋 年報 / Annual Report</option>
             <option value="financial_statement">💹 財務報告 / Financial Statement (Audited)</option>
             <option value="analyst_presentation">🎤 法說會 / Analyst Presentation</option>
@@ -209,7 +209,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
             <option value="other">📁 其他 / Other</option>
           </select>
           <div class="d-flex gap-2">
-            <input type="file" id="pdfInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.tif,.xlsx,.xls" class="form-control form-control-sm">
+            <input type="file" id="pdfInput" data-testid="document-upload-input" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.csv,.md,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.tif,.xlsx,.xls" class="form-control form-control-sm">
             <button class="btn btn-outline-primary btn-sm" id="uploadFileBtn" onclick="uploadPDF()" data-i18n="rd.upload">Upload</button>
           </div>
           <div class="input-group input-group-sm">
@@ -297,7 +297,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
         <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate()" data-i18n="sp.load_template">📋 Load Template</button>
         <small class="text-muted align-self-center" data-i18n="sp.load_template_hint">Replace template values with actual report data, then Save.</small>
       </div>
-      <textarea id="jsonEd" class="form-control json-ed" rows="20"></textarea>
+      <textarea id="jsonEd" data-testid="section-7-input" class="form-control json-ed" rows="20"></textarea>
       <div class="d-flex gap-2 mt-2 align-items-center">
         <button class="btn btn-primary btn-sm" onclick="saveSectionInput()" data-i18n="sp.save_input">💾 Save Input</button>
         <span id="savedAt" class="text-muted small"></span>
@@ -502,7 +502,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
       <div class="mb-3"><label class="form-label fw-semibold" data-i18n="modal.borrower">Borrower Name</label>
-        <input id="nBorrower" class="form-control" data-i18n-placeholder="modal.borrower_ph" placeholder="ACME Shipping Ltd."></div>
+        <input id="nBorrower" data-testid="report-title" class="form-control" data-i18n-placeholder="modal.borrower_ph" placeholder="ACME Shipping Ltd."></div>
       <div class="mb-3"><label class="form-label fw-semibold" data-i18n="modal.industry">Industry</label>
         <select id="nIndustry" class="form-select">
           <option value="marine" data-i18n="modal.industry_marine">Marine / Shipping</option>
@@ -522,7 +522,7 @@ textarea.json-ed{font-family:'Courier New',monospace;font-size:12px;resize:verti
 </div>
 
 <!-- ETL Modal -->
-<div class="modal fade" id="etlModal" tabindex="-1">
+<div class="modal fade" id="etlModal" data-testid="etl-modal" tabindex="-1">
   <div class="modal-dialog modal-xl"><div class="modal-content">
     <div class="modal-header" style="background:#1a1a1a;color:#fff;">
       <h5 class="modal-title fw-bold" data-i18n="etl.title">🔍 AI Document ETL — Extracted Section Data</h5>
@@ -2211,7 +2211,7 @@ async function loadReportDetail(rid){
         <div class="text-muted mt-1" style="font-size:10px">${esc(typeLabel)}</div>
         <div class="d-flex gap-1 mt-1 flex-wrap">
           ${d.document_type==='annual_report'
-            ? `<button class="btn btn-outline-primary btn-sm py-0 px-1" style="font-size:10px" onclick="annualReportSmartImport('${d.id}','${esc(d.original_filename)}')">📄 Page ETL</button>`
+            ? `<button class="btn btn-outline-primary btn-sm py-0 px-1" style="font-size:10px" data-testid="page-etl-button" onclick="annualReportSmartImport('${d.id}','${esc(d.original_filename)}')">📄 Page ETL</button>`
             : `<button class="btn btn-outline-success btn-sm py-0 px-1" style="font-size:10px" onclick="etlDocument('${d.id}','${esc(d.original_filename)}')">🔍 ETL</button>`}
           <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:10px" onclick="deleteDocument('${d.id}')">🗑 Delete</button>
         </div>
@@ -2946,7 +2946,7 @@ async function annualReportSmartImport(docId,filename){
       const preview=JSON.stringify(p.proposed_json||{},null,2).slice(0,900);
       const pages=((p.evidence_map||{}).source_pages||[]).join(', ')||'—';
       const canCommit=p.status==='ready_for_review';
-      return `<div class="card mb-2"><div class="card-header py-2 d-flex justify-content-between align-items-center"><span class="fw-bold">§${p.section_no} — ${esc(snm(p.section_no))}</span><span class="badge bg-${canCommit?'success':'danger'}">${esc(p.status||'unknown')}</span></div><div class="card-body p-2"><div class="small text-muted mb-1">${tl('Source pages','來源頁碼')}: ${esc(pages)} · ${tl('Coverage','覆蓋率')}: ${Math.round((p.coverage_score||0)*100)}%</div><details><summary class="small text-muted" style="cursor:pointer">${tl('Show proposal JSON','顯示提案 JSON')}</summary><pre class="mt-2" style="font-size:11px;max-height:220px;overflow:auto;background:#f8f9fa;padding:8px;border-radius:4px;">${esc(preview)}${preview.length===900?'\n…':''}</pre></details>${canCommit?`<button class="btn btn-sm btn-primary mt-2" onclick="commitSmartImportProposal('${p.id}')">${tl('Commit to §','寫入 §')}${p.section_no}</button>`:`<div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">${tl('Low coverage proposals cannot be committed.','低覆蓋率提案不可寫入。')}</div>`}</div></div>`;
+      return `<div class="card mb-2" data-testid="smart-import-proposal-card"><div class="card-header py-2 d-flex justify-content-between align-items-center"><span class="fw-bold">§${p.section_no} — ${esc(snm(p.section_no))}</span><span class="badge bg-${canCommit?'success':'danger'}">${esc(p.status||'unknown')}</span></div><div class="card-body p-2"><div class="small text-muted mb-1">${tl('Source pages','來源頁碼')}: ${esc(pages)} · ${tl('Coverage','覆蓋率')}: ${Math.round((p.coverage_score||0)*100)}%</div><details><summary class="small text-muted" style="cursor:pointer">${tl('Show proposal JSON','顯示提案 JSON')}</summary><pre class="mt-2" style="font-size:11px;max-height:220px;overflow:auto;background:#f8f9fa;padding:8px;border-radius:4px;">${esc(preview)}${preview.length===900?'\n…':''}</pre></details>${canCommit?`<button class="btn btn-sm btn-primary mt-2" data-testid="smart-import-commit-button" onclick="commitSmartImportProposal('${p.id}')">${tl('Commit to §','寫入 §')}${p.section_no}</button>`:`<div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">${tl('Low coverage proposals cannot be committed.','低覆蓋率提案不可寫入。')}</div>`}</div></div>`;
     }).join('');
     body.innerHTML=`<div class="alert alert-${ready.length?'success':'warning'} m-3 py-2"><strong>${tl('Page-first ETL complete','逐頁 ETL 完成')}</strong><br><small>${tl(`${ready.length} reviewable proposal(s), ${failed.length} low-coverage proposal(s).`,`${ready.length} 個可審查提案，${failed.length} 個低覆蓋率提案。`)}</small></div><div class="px-3 pb-3">${proposalCards||`<div class="alert alert-warning">${tl('No Smart Import proposals were created.','未建立 Smart Import 提案。')}</div>`}</div>`;
     st.textContent=tl('Review proposals','審查提案');

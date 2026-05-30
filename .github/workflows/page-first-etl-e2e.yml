@@ -1,0 +1,170 @@
+name: Page-first Annual Report ETL E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      browser_channel:
+        description: "Preferred browser channel for Playwright UI E2E"
+        required: true
+        default: "chrome"
+        type: choice
+        options:
+          - chrome
+          - chromium
+
+permissions:
+  contents: read
+
+env:
+  E2E_BASE_URL: http://127.0.0.1:8000
+  E2E_TIMEOUT_MS: "900000"
+  E2E_HEADLESS: "false"
+  E2E_USE_REAL_CHROME: ${{ inputs.browser_channel == 'chrome' }}
+  ENVIRONMENT: e2e
+  AUTO_CREATE_TABLES: "true"
+  DATABASE_URL: sqlite+aiosqlite:///./data/e2e_credit_report.db
+  CREDIT_REPORTS_ROOT: ./data/e2e_credit_reports
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  real-e2e:
+    name: Real TSMC page-first ETL E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: non-production-e2e
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate required non-production E2E secrets
+        env:
+          E2E_EMAIL_SECRET: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD_SECRET: ${{ secrets.E2E_PASSWORD }}
+          GEMINI_API_KEY_SECRET: ${{ secrets.GEMINI_API_KEY }}
+          TSMC_ANNUAL_REPORT_BASE64_SECRET: ${{ secrets.TSMC_ANNUAL_REPORT_BASE64 }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in E2E_EMAIL_SECRET E2E_PASSWORD_SECRET GEMINI_API_KEY_SECRET TSMC_ANNUAL_REPORT_BASE64_SECRET; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error title=Missing E2E secret::${name%_SECRET} is required in the non-production-e2e environment."
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            cat <<'EOF'
+          Required secrets:
+          - E2E_EMAIL: non-production admin/analyst account email.
+          - E2E_PASSWORD: matching password; also used to seed the local E2E admin account.
+          - GEMINI_API_KEY: non-production ETL/OCR key for real AI extraction.
+          - TSMC_ANNUAL_REPORT_BASE64: base64-encoded real TSMC annual-report PDF artifact.
+          EOF
+            exit 1
+          fi
+
+      - name: Install Python and Playwright dependencies
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+          if [[ "${{ inputs.browser_channel }}" == "chrome" ]]; then
+            python -m playwright install chrome || echo "Chrome channel install failed; runner script will fall back to bundled Chromium."
+          fi
+
+      - name: Materialize real TSMC PDF artifact and .env.e2e
+        env:
+          E2E_EMAIL_SECRET: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD_SECRET: ${{ secrets.E2E_PASSWORD }}
+          TSMC_ANNUAL_REPORT_BASE64_SECRET: ${{ secrets.TSMC_ANNUAL_REPORT_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/e2e data/e2e_credit_reports data
+          PDF_PATH="$(pwd)/test-results/e2e/tsmc_annual_report.pdf"
+          printf '%s' "$TSMC_ANNUAL_REPORT_BASE64_SECRET" | base64 --decode > "$PDF_PATH"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('test-results/e2e/tsmc_annual_report.pdf')
+          size = p.stat().st_size if p.exists() else 0
+          head = p.read_bytes()[:5] if p.exists() else b''
+          if size < 1024 * 1024 or head != b'%PDF-':
+              raise SystemExit(f'Invalid TSMC PDF artifact: {p} size={size} head={head!r}. Provide a real base64-encoded TSMC annual-report PDF.')
+          print(f'Real TSMC PDF artifact materialized: {p.resolve()} ({size} bytes)')
+          PY
+          cat > .env.e2e <<EOF
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_EMAIL=${E2E_EMAIL_SECRET}
+          E2E_PASSWORD=${E2E_PASSWORD_SECRET}
+          TSMC_ANNUAL_REPORT_PATH=${PDF_PATH}
+          E2E_HEADLESS=${E2E_HEADLESS}
+          E2E_USE_REAL_CHROME=${E2E_USE_REAL_CHROME}
+          E2E_TIMEOUT_MS=${E2E_TIMEOUT_MS}
+          EOF
+
+      - name: Start app with isolated SQLite E2E database
+        env:
+          ADMIN_EMAIL: ${{ secrets.E2E_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'non-production-e2e-secret-key-change-me' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_OCR_MODEL: ${{ secrets.GEMINI_OCR_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_ETL_MODEL: ${{ secrets.GEMINI_ETL_MODEL || 'gemini-2.5-flash' }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/e2e data/e2e_credit_reports
+          python scripts/prepare_database.py
+          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8000 > test-results/e2e/server.log 2>&1 &
+          echo $! > test-results/e2e/server.pid
+          for i in {1..120}; do
+            if curl -fsS http://127.0.0.1:8000/health > test-results/e2e/health.json; then
+              cat test-results/e2e/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error title=App startup failed::/health did not become ready within 120 seconds."
+          tail -200 test-results/e2e/server.log || true
+          exit 1
+
+      - name: Run real API and Playwright UI E2E
+        env:
+          ADMIN_EMAIL: ${{ secrets.E2E_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'non-production-e2e-secret-key-change-me' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_OCR_MODEL: ${{ secrets.GEMINI_OCR_MODEL || 'gemini-2.5-flash' }}
+          GEMINI_ETL_MODEL: ${{ secrets.GEMINI_ETL_MODEL || 'gemini-2.5-flash' }}
+        run: |
+          set -euo pipefail
+          xvfb-run -a scripts/run_page_first_etl_e2e.sh
+
+      - name: Stop app
+        if: always()
+        run: |
+          if [[ -f test-results/e2e/server.pid ]]; then
+            kill "$(cat test-results/e2e/server.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: page-first-etl-e2e-artifacts-${{ github.run_id }}
+          path: |
+            test-results/e2e/**
+          if-no-files-found: warn
+          retention-days: 14
