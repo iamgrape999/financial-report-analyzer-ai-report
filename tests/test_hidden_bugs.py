@@ -102,25 +102,42 @@ class TestCrossDeployStateBugs:
 
     # ── Bug #2 ─────────────────────────────────────────────────────────────
     def test_seed_admin_always_rehashes_password_on_startup(self):
-        """_seed_admin re-hashes and commits the admin password every startup.
+        """_seed_admin unconditionally overwrites the admin hash from the env var.
 
-        If ADMIN_PASSWORD is cleared or changed in the env after initial
-        deployment, the next startup will overwrite the stored hash.  An
-        operator who removes ADMIN_PASSWORD to prevent auto-seeding will
-        instead lock themselves out (main.py:113-116).
+        VERIFIED PRECISE SCOPE: the function first checks
+        ``if not email or not password: return``, so clearing ADMIN_PASSWORD
+        causes an early return — it does NOT lock the admin out.
+
+        The real operational hazard is the opposite direction: whenever
+        ADMIN_PASSWORD is set to ANY non-empty value, every startup unconditionally
+        overwrites the stored hash with that value (main.py:113-116).  Concretely:
+          - Operator accidentally fat-fingers ADMIN_PASSWORD during a redeploy →
+            all existing sessions still have the old hash in their tokens, but
+            the next login attempt with the old password fails immediately.
+          - There is no "confirm before overwrite" guard; the env var is always
+            the source of truth at startup time.
 
         Source: main.py:93-127 (_seed_admin function)
         """
         import main as main_mod
 
         src = inspect.getsource(main_mod._seed_admin)
-        # The unconditional re-hash path must exist: when ``if user:`` branch
-        # runs, it always calls hash_password(password) and commits.
-        assert "hash_password(password)" in src, (
-            "Expected _seed_admin to unconditionally re-hash the password for "
-            "existing admin users"
+
+        # 1. Confirm the early-return guard (clearing ADMIN_PASSWORD is safe).
+        assert "if not email or not password:" in src, (
+            "Expected early return when ADMIN_PASSWORD is empty"
         )
-        assert "user.hashed_password = hash_password(password)" in src
+
+        # 2. Confirm the unconditional rehash when user exists and password non-empty.
+        assert "user.hashed_password = hash_password(password)" in src, (
+            "Expected unconditional hash overwrite when existing admin found"
+        )
+
+        # 3. No comparison against the existing hash before overwriting.
+        assert "verify_password" not in src, (
+            "No verify_password check before overwrite — any ADMIN_PASSWORD change "
+            "takes effect immediately on next startup, intended or not"
+        )
 
     # ── Bug #3 ─────────────────────────────────────────────────────────────
     def test_postgres_url_scheme_not_rewritten_to_asyncpg(self):
@@ -336,18 +353,35 @@ class TestInMemoryStateBugs:
 
     # ── Bug #8 ─────────────────────────────────────────────────────────────
     def test_asyncio_create_task_reference_not_retained(self):
-        """asyncio.create_task() return value is discarded in _schedule_document_text_extraction.
+        """asyncio.create_task() return value is discarded — formal GC risk.
 
-        Python's event loop only holds a *weak* reference to tasks created
-        with create_task().  If no other reference exists, the GC may collect
-        the coroutine before it finishes.  The result is silent data-loss:
-        no text extracted, no error raised.
+        asyncio._all_tasks is a WeakSet.  The Python docs explicitly state:
+        "Save a reference to the result of create_task() to avoid a task
+        disappearing mid-execution."
+
+        VERIFIED SEVERITY (nuanced): in this specific code path the task
+        immediately enters ``async with _extraction_semaphore`` then
+        ``await loop.run_in_executor(...)``; both the semaphore's waiter queue
+        and the executor Future's done-callbacks hold strong references during
+        execution, so GC does not manifest in normal operation.
+
+        The code is still formally wrong per the documented API contract — a
+        future Python release or a subtle event-loop scheduling change could
+        expose the latent risk.  The correct fix is one line:
+          ``_task = asyncio.create_task(runner())``.
 
         Source: credit_report/api/generate.py:179-182
+                Python docs: asyncio.create_task()
         """
-        src = Path(REPO_ROOT / "credit_report" / "api" / "generate.py").read_text()
+        import asyncio.tasks as _tasks
+        import weakref
 
-        # Locate the _schedule_document_text_extraction function body.
+        # Confirm the event loop tracks tasks in a WeakSet (formal GC risk).
+        assert isinstance(_tasks._all_tasks, weakref.WeakSet), (
+            "asyncio._all_tasks must be a WeakSet — confirms GC risk is formally present"
+        )
+
+        src = Path(REPO_ROOT / "credit_report" / "api" / "generate.py").read_text()
         tree = ast.parse(src)
         fn_node = next(
             n for n in ast.walk(tree)
@@ -355,24 +389,26 @@ class TestInMemoryStateBugs:
         )
         fn_src = ast.get_source_segment(src, fn_node) or ""
 
-        # The call must be ``asyncio.create_task(runner())`` — not assigned.
+        # The call is bare — task reference is not stored in any variable.
         assert "asyncio.create_task(runner())" in fn_src, (
-            "Expected bare asyncio.create_task(runner()) in _schedule_document_text_extraction"
+            "Expected bare asyncio.create_task(runner()) — reference not retained"
         )
-
-        # Confirm no variable is assigned the return value of create_task.
-        # A safe implementation would write:  _task = asyncio.create_task(runner())
         assert not re.search(r"\w+\s*=\s*asyncio\.create_task\(", fn_src), (
-            "Task reference IS stored — the GC-risk bug may have been fixed"
+            "Task reference IS stored — the formal-risk bug may have been fixed"
         )
 
     # ── Bug #9 ─────────────────────────────────────────────────────────────
     def test_extraction_semaphore_is_module_level_not_shared_across_workers(self):
-        """_extraction_semaphore is a module-level asyncio.Semaphore.
+        """_extraction_semaphore is a per-process asyncio.Semaphore (future-risk only).
 
-        On single-process Render free-tier this is fine.  But it is per-process:
-        if Render ever scales to multiple workers the semaphore provides no
-        cross-process back-pressure.  Document in-flight guarantees collapse.
+        VERIFIED SCOPE: for the current Render free-tier single-process model
+        this works correctly and is NOT a bug today.  It is a latent design
+        risk: if Render ever scales to multiple workers (e.g. uvicorn --workers N)
+        each process has its own semaphore, so the per-instance extraction limit
+        of 1 would silently become N concurrent extractions overall.
+
+        This test guards the architecture — the semaphore exists and is
+        module-level — so any future multi-worker refactor surfaces here.
 
         Source: credit_report/api/generate.py:44
         """
@@ -390,10 +426,19 @@ class TestInMemoryStateBugs:
     def test_safe_add_columns_dedup_keeps_oldest_row_deletes_newer(self):
         """The startup dedup DELETE uses MIN(id), keeping the *oldest* row.
 
-        If a race condition produces two section_inputs rows for the same
-        (report_id, section_no), the startup DELETE will keep the row with
-        the lowest id — the *first* write — and discard any newer version.
-        This silently loses the most-recent user edits on the next redeploy.
+        VERIFIED PRECISE SCOPE: ``_upsert_section_input_json`` does a true
+        SELECT-then-UPDATE, so user edits never produce duplicate rows.
+        Duplicate rows arise only from a concurrent-generation race condition
+        where two requests both INSERT because both SELECTed an empty result
+        simultaneously.  In that narrow race scenario both rows contain
+        effectively identical AI-generated content, so MIN(id) vs MAX(id) is
+        equivalent — no user data is lost.
+
+        The code fact is still correct and worth pinning: the dedup strategy
+        is oldest-wins (MIN), not newest-wins.  A future code change that
+        allows legitimate user-initiated second INSERTs (e.g. re-triggering
+        section input via a new API path that bypasses the upsert) would
+        silently lose the newer row on the next startup.
 
         Source: main.py:70-76 (_safe_add_columns dedup block)
         """
@@ -643,20 +688,27 @@ class TestBrowserSecurityBugs:
         assert "dompurify" not in html.lower()
 
     # ── Bug #17 ────────────────────────────────────────────────────────────
-    def test_cors_wildcard_disables_credential_support(self):
-        """CORS_ALLOW_ORIGINS='*' forces allow_credentials=False.
+    def test_cors_wildcard_forces_credentials_false_cookie_auth_impossible(self):
+        """CORS_ALLOW_ORIGINS='*' forces allow_credentials=False — a design constraint.
 
-        When ``allow_credentials=True`` + ``allow_origins=["*"]`` are
-        combined, CORS spec (and FastAPI) raise ``ValueError``.  The code
-        correctly guards against this (main.py:160-161), but the consequence
-        is that browsers cannot send cookies or ``Authorization`` headers on
-        the wildcard-origin CORS response — fetch calls with ``credentials:
-        'include'`` will be blocked.
+        VERIFIED PRECISE SCOPE: the frontend uses ``Authorization: Bearer <token>``
+        in request headers (index.html:1994 ``function H()``), NOT cookies.
+        In CORS terminology, "credentials" means cookies + TLS client certs +
+        HTTP auth — NOT custom headers like Authorization: Bearer.
+        Therefore ``allow_credentials=False`` + ``allow_origins=["*"]`` works
+        correctly for this app: all fetch calls succeed.
 
-        Source: main.py:159-162
+        What IS constrained by this config:
+        - Cookie-based cross-origin auth: impossible (browser would block it).
+          This matters if anyone tries to add SSO or session-cookie auth later.
+        - The FastAPI CORS middleware correctly guards against the
+          ``allow_credentials=True + allow_origins=["*"]`` combination that
+          would raise ``ValueError`` at startup — that guard is also tested here.
+
+        Source: main.py:159-162 ; static/index.html:1994
                 render.yaml:42-43
         """
-        # Verify render.yaml ships with wildcard.
+        # 1. Verify render.yaml ships with wildcard.
         data = yaml.safe_load(RENDER_YAML.read_text())
         env_vars = {e["key"]: e.get("value", "") for e in data["services"][0].get("envVars", [])}
         cors_value = env_vars.get("CORS_ALLOW_ORIGINS", "")
@@ -664,13 +716,22 @@ class TestBrowserSecurityBugs:
             f"render.yaml CORS_ALLOW_ORIGINS expected '*', got {cors_value!r}"
         )
 
-        # Reproduce the main.py credential-disable logic.
-        cors_origins_raw = cors_value
-        cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+        # 2. Confirm the app correctly disables credentials for wildcard (avoids ValueError).
+        cors_origins = [o.strip() for o in cors_value.split(",") if o.strip()]
         allow_creds = "*" not in cors_origins
         assert allow_creds is False, (
-            "With CORS_ALLOW_ORIGINS='*', allow_credentials must be False — "
-            "browsers will reject credentialed requests"
+            "With CORS_ALLOW_ORIGINS='*', allow_credentials must be False to "
+            "avoid FastAPI ValueError at startup"
+        )
+
+        # 3. Confirm the frontend uses Bearer header auth (not cookies).
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        assert "function H(){return{'Authorization':'Bearer '+token}" in html, (
+            "Frontend must use Authorization: Bearer header (not cookies) — "
+            "confirming credentials=False is not a functional block"
+        )
+        assert "credentials:'include'" not in html, (
+            "Frontend must NOT use credentials:'include' — Bearer header is sufficient"
         )
 
     # ── Bug #18 ────────────────────────────────────────────────────────────
