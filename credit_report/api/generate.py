@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import re
 import uuid
@@ -44,6 +45,7 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024
 _extraction_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_EXTRACTIONS)
 _TASK_TTL_SECONDS = 6 * 60 * 60
 _MAX_GENERATION_TASKS = 200
+_background_tasks: set[asyncio.Task] = set()
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -177,7 +179,9 @@ def _schedule_document_text_extraction(report_id: str, doc_id: str, binary_path:
             )
 
     try:
-        asyncio.create_task(runner())
+        task = asyncio.create_task(runner())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         _extract_and_save_document_text(report_id, doc_id, binary_path, fname)
 
@@ -365,9 +369,37 @@ class GenerateTaskResult(BaseModel):
     detail: Optional[str] = None
 
 
-# In-memory task registry — acceptable for single-instance deployments.
-# Entries are never evicted; memory usage is bounded by restart cadence.
+# Task registry: in-memory primary store with disk-based persistence.
+# Tasks are written to disk on every create/update so they survive process restarts.
+# On Render, the disk: mount in render.yaml makes this path persistent across deploys.
 _generation_tasks: dict[str, dict] = {}
+_TASKS_FILE = Path(os.getenv("CREDIT_REPORTS_ROOT", "./data/credit_reports")).parent / "_generation_tasks.json"
+
+
+def _save_tasks_to_disk() -> None:
+    """Best-effort write of the task registry to disk for cross-restart persistence."""
+    try:
+        _TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _TASKS_FILE.write_text(json.dumps(_generation_tasks))
+    except Exception:
+        pass
+
+
+def _load_tasks_from_disk() -> None:
+    """Reload non-expired tasks from disk on startup."""
+    try:
+        if _TASKS_FILE.exists():
+            data = json.loads(_TASKS_FILE.read_text())
+            now = time.time()
+            for task_id, task in data.items():
+                age = now - float(task.get("updated_at", task.get("created_at", now)))
+                if age <= _TASK_TTL_SECONDS:
+                    _generation_tasks[task_id] = task
+    except Exception:
+        pass
+
+
+_load_tasks_from_disk()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -397,6 +429,7 @@ def _create_generation_task(initial: dict) -> str:
     task_id = str(uuid.uuid4())
     now = time.time()
     _generation_tasks[task_id] = {**initial, "created_at": now, "updated_at": now}
+    _save_tasks_to_disk()
     return task_id
 
 
@@ -407,6 +440,7 @@ def _update_generation_task(task_id: str, updates: dict) -> None:
         return
     task.update(updates)
     task["updated_at"] = time.time()
+    _save_tasks_to_disk()
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
     result = await db.execute(

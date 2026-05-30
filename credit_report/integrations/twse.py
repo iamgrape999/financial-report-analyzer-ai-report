@@ -313,6 +313,13 @@ class TWSEOpenAPIClient:
             async with httpx.AsyncClient(timeout=self.timeout_seconds, verify=False, headers=headers) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "")
+                if "json" not in content_type and not resp.text.strip().startswith("["):
+                    logger.warning(
+                        "TWSE OpenAPI returned non-JSON content-type=%r endpoint=%s — skipping JSON parse",
+                        content_type, endpoint,
+                    )
+                    raise ValueError(f"Non-JSON response from TWSE: content-type={content_type!r}")
                 data = resp.json()
                 return data if isinstance(data, list) else []
         except Exception as exc:
@@ -345,6 +352,15 @@ def build_section7_input(stock_code: str, bundle: dict[str, list[dict[str, Any]]
     profile_rows = _rows_for_code(bundle.get("company_profile", []), stock_code)
     profile_row = profile_rows[0] if profile_rows else {}
     profile = {name: _get(profile_row, aliases) for name, aliases in PROFILE_FIELD_ALIASES.items() if _get(profile_row, aliases) not in (None, "")}
+    # paid_in_capital from TWSE is raw TWD (e.g. 259_303_805_450 for TSMC).
+    # Financial statement metrics use thousands NTD — normalise here for consistency.
+    if "paid_in_capital" in profile:
+        try:
+            raw = float(str(profile["paid_in_capital"]).replace(",", ""))
+            profile["paid_in_capital"] = raw / 1_000
+            profile["paid_in_capital_unit"] = "thousands_NTD"
+        except (ValueError, TypeError):
+            pass
 
     income = _parse_statement(bundle.get("income_statement_general", []), stock_code, INCOME_METRIC_ALIASES)
     balance = _parse_statement(bundle.get("balance_sheet_general", []), stock_code, BALANCE_METRIC_ALIASES)

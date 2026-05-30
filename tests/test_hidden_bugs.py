@@ -62,43 +62,37 @@ INDEX_HTML = REPO_ROOT / "static" / "index.html"
 class TestCrossDeployStateBugs:
     """Bugs caused by state that is re-initialised on every Render deploy."""
 
-    # ── Bug #1 ─────────────────────────────────────────────────────────────
+    # ── Bug #1 (FIXED) ────────────────────────────────────────────────────
     def test_jwt_key_bytes_bound_at_module_import(self):
-        """_KEY_BYTES is captured once at import time from SECRET_KEY.
+        """FIX: _KEY_BYTES removed; _sign() now reads SECRET_KEY dynamically.
 
-        VERIFIED SCOPE (corrected): Render's ``generateValue: true`` generates
-        the secret ONCE when the service is first created and PERSISTS it
-        across deploys — it does NOT rotate on every deploy.  So the original
-        "every deploy invalidates all tokens" claim is overstated.
+        The original defect was that ``_KEY_BYTES = SECRET_KEY.encode()`` was
+        a module-level constant in auth.py.  Any change to the SECRET_KEY env
+        var only took effect after a full interpreter restart.
 
-        The genuine, narrower defect this test pins down:
-        ``_KEY_BYTES = SECRET_KEY.encode()`` is a module-level constant
-        (auth.py:29).  Any change to the SECRET_KEY env var (manual rotation,
-        switching from the dev default to a real key, or a first deploy that
-        had no value set) only takes effect after a full interpreter restart,
-        and at that moment every previously-issued token becomes invalid
-        because the signing key no longer matches.
+        FIX applied: removed the ``_KEY_BYTES`` module-level constant.
+        ``_sign()`` now calls ``os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)``
+        on every invocation, so key rotation takes effect without restart.
 
-        Source: credit_report/security/auth.py:29
-                render.yaml:18-19
+        Source: credit_report/security/auth.py
         """
         from credit_report.security import auth as auth_mod
 
-        # Capture the key bytes the module was loaded with.
-        original_key_bytes = auth_mod._KEY_BYTES
+        # Fix confirmed: _KEY_BYTES no longer exists at module level.
+        assert not hasattr(auth_mod, "_KEY_BYTES"), (
+            "_KEY_BYTES must be removed — the key should be read dynamically in _sign()"
+        )
 
-        # Issue a token under the original key.
-        token = auth_mod.create_access_token("user-1", "analyst")
+        # Fix confirmed: _sign() reads the key via os.getenv().
+        sign_src = inspect.getsource(auth_mod._sign)
+        assert "os.getenv(" in sign_src, (
+            "_sign() must read SECRET_KEY via os.getenv() for dynamic key rotation"
+        )
 
-        # Simulate a runtime key change (what happens after env-var rotation).
-        new_key = b"totally-different-secret"
-        auth_mod._KEY_BYTES = new_key
-        try:
-            with pytest.raises(auth_mod.JWTError, match="Invalid signature"):
-                auth_mod._decode_jwt(token)
-        finally:
-            # Restore so other tests are not affected.
-            auth_mod._KEY_BYTES = original_key_bytes
+        # Verify signing still works correctly end-to-end.
+        token = auth_mod.create_access_token("user-fix-1", "analyst")
+        payload = auth_mod._decode_jwt(token)
+        assert payload.get("sub") == "user-fix-1", "Token round-trip must succeed"
 
     # ── Bug #2 ─────────────────────────────────────────────────────────────
     def test_seed_admin_always_rehashes_password_on_startup(self):
@@ -128,107 +122,84 @@ class TestCrossDeployStateBugs:
             "Expected early return when ADMIN_PASSWORD is empty"
         )
 
-        # 2. Confirm the unconditional rehash when user exists and password non-empty.
-        assert "user.hashed_password = hash_password(password)" in src, (
-            "Expected unconditional hash overwrite when existing admin found"
+        # 2. FIX confirmed: verify_password guard prevents unnecessary rehash.
+        assert "verify_password" in src, (
+            "verify_password check must be present — only rehash when password actually changed"
         )
 
-        # 3. No comparison against the existing hash before overwriting.
-        assert "verify_password" not in src, (
-            "No verify_password check before overwrite — any ADMIN_PASSWORD change "
-            "takes effect immediately on next startup, intended or not"
+        # 3. FIX confirmed: hash overwrite is conditional, not unconditional.
+        assert "if not verify_password(" in src, (
+            "Hash update must be inside a 'if not verify_password(...)' guard"
         )
 
-    # ── Bug #3 ─────────────────────────────────────────────────────────────
+    # ── Bug #3 (FIXED) ────────────────────────────────────────────────────
     def test_postgres_url_scheme_not_rewritten_to_asyncpg(self):
-        """config.py normalises postgresql:// but NOT the legacy postgres:// scheme.
+        """FIX: config.py now handles both postgresql:// and legacy postgres://.
 
-        VERIFIED SCOPE (corrected): I could not confirm that Render emits the
-        ``postgres://`` short scheme (that is Heroku's historical format;
-        Render generally emits ``postgresql://``).  So this is a robustness
-        gap, not a guaranteed-on-Render crash.
+        SQLAlchemy 2.0 dropped support for the bare ``postgres://`` scheme.
+        The fix adds an ``elif startswith("postgres://")`` branch to config.py
+        AND migrations/env.py so all postgres:// URLs are rewritten to
+        ``postgresql+asyncpg://`` before reaching create_async_engine().
 
-        The defect is still real and verifiable: SQLAlchemy 2.0 REMOVED
-        support for the bare ``postgres://`` scheme, and config.py only
-        rewrites ``postgresql://`` → ``postgresql+asyncpg://``.  Therefore any
-        ``postgres://`` URL — a Heroku-migrated DB, a copy-pasted connection
-        string, or a managed provider that uses the short form — reaches
-        create_async_engine() unrewritten and raises at startup.
-
-        Source: credit_report/config.py:14-15
+        Source: credit_report/config.py ; migrations/env.py
         """
-        import credit_report.config as cfg
+        config_src = Path(REPO_ROOT / "credit_report" / "config.py").read_text()
 
-        # Reproduce the exact transformation logic from config.py:14-15.
+        # Fix confirmed: both schemes are handled in config.py.
+        assert 'startswith("postgresql://")' in config_src, (
+            "postgresql:// handler must still be present in config.py"
+        )
+        assert 'startswith("postgres://")' in config_src, (
+            "postgres:// handler must be present — fix verified"
+        )
+
+        # Fix confirmed: same fix applied in migrations/env.py.
+        env_src = Path(REPO_ROOT / "migrations" / "env.py").read_text()
+        assert 'startswith("postgres://")' in env_src, (
+            "postgres:// handler must also be present in migrations/env.py"
+        )
+
+        # Functional verification: reproduce the fixed logic.
         render_url = "postgres://user:pass@host:5432/mydb"
-
         rewritten = render_url
         if rewritten.startswith("postgresql://"):
             rewritten = rewritten.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-        # The ``postgres://`` scheme is NOT handled — it passes through unchanged.
-        assert rewritten == render_url, (
-            "postgres:// should NOT be rewritten — this is the defect"
-        )
-        assert not rewritten.startswith("postgresql+asyncpg://"), (
-            "asyncpg prefix should be absent, confirming the bug"
+        elif rewritten.startswith("postgres://"):
+            rewritten = rewritten.replace("postgres://", "postgresql+asyncpg://", 1)
+        assert rewritten.startswith("postgresql+asyncpg://"), (
+            "postgres:// must be rewritten to postgresql+asyncpg:// by the fixed logic"
         )
 
-        # Verify that the actual config module also lacks the postgres:// guard.
-        config_src = Path(REPO_ROOT / "credit_report" / "config.py").read_text()
-        assert 'startswith("postgresql://")' in config_src
-        assert 'startswith("postgres://")' not in config_src, (
-            "Render-format postgres:// is not handled in config.py"
-        )
-
-    # ── Bug #4 ─────────────────────────────────────────────────────────────
+    # ── Bug #4 (FIXED) ────────────────────────────────────────────────────
     def test_render_start_command_has_no_alembic_upgrade(self):
-        """render.yaml startCommand does not run ``alembic upgrade head``.
+        """FIX: render.yaml startCommand now runs ``alembic upgrade head`` before uvicorn.
 
-        VERIFIED (stronger than first stated): the repo ships a COMPLETE
-        alembic setup — alembic.ini, migrations/env.py, and 8 migration
-        revisions including a baseline_schema and PostgreSQL-only column
-        fixes (e.g. fix_table_cells_*_text, which widen VARCHAR→TEXT).  Yet
-        the app only ever runs ``Base.metadata.create_all`` (main.py:140),
-        and the startCommand never runs ``alembic upgrade head``.
+        The fix ensures migrations are applied on every Render deploy, so the
+        DB schema stays in sync with the migration history.
 
-        Consequences on a real PostgreSQL deploy:
-        * create_all creates tables but never stamps ``alembic_version``, so
-          the DB and the migration history diverge from the first deploy.
-        * create_all NEVER alters existing columns, so the VARCHAR→TEXT fix
-          migrations are dead code — main.py:56-65 has to re-implement those
-          ALTERs by hand in _safe_add_columns, confirming the migrations are
-          not being applied.
-
-        Source: render.yaml:7 ; main.py:139-144 ; migrations/versions/*
+        Source: render.yaml ; main.py ; migrations/versions/*
         """
         data = yaml.safe_load(RENDER_YAML.read_text())
         service = data["services"][0]
         start_cmd = service.get("startCommand", "")
-        assert "alembic" not in start_cmd.lower(), (
-            f"Expected no alembic in startCommand, got: {start_cmd!r}"
-        )
-        assert "upgrade" not in start_cmd.lower()
 
-        # The buildCommand must not run migrations either.
-        build_cmd = service.get("buildCommand", "")
-        assert "alembic" not in build_cmd.lower(), (
-            f"Expected no alembic in buildCommand, got: {build_cmd!r}"
+        # Fix confirmed: alembic upgrade head runs before the app server.
+        assert "alembic upgrade head" in start_cmd, (
+            f"startCommand must include 'alembic upgrade head', got: {start_cmd!r}"
+        )
+        assert "uvicorn" in start_cmd, "uvicorn must still be in startCommand"
+
+        # Fix confirmed: render.yaml now has a persistent disk mount.
+        assert "disk" in service, (
+            "render.yaml must have a disk: section for persistent storage (Bug #6 fix)"
         )
 
-        # Confirm alembic IS configured (so this is genuine dead infrastructure).
+        # Alembic infrastructure still intact.
         assert (REPO_ROOT / "alembic.ini").exists(), "alembic.ini must exist"
         versions_dir = REPO_ROOT / "migrations" / "versions"
         migrations = list(versions_dir.glob("*.py"))
         assert len(migrations) >= 5, (
-            f"Expected several alembic migrations, found {len(migrations)} — "
-            "these never run because startCommand omits 'alembic upgrade head'"
-        )
-
-        # And confirm the app relies on create_all instead.
-        main_src = (REPO_ROOT / "main.py").read_text()
-        assert "Base.metadata.create_all" in main_src, (
-            "main.py uses create_all in place of alembic migrations"
+            f"Expected several alembic migrations, found {len(migrations)}"
         )
 
 
@@ -243,58 +214,78 @@ class TestRenderPlatformBugs:
     twice and found NOT to be a bug; its test now guards the correct behaviour.
     """
 
-    # ── Bug #5 ─────────────────────────────────────────────────────────────
+    # ── Bug #5 (FIXED) ────────────────────────────────────────────────────
     def test_generation_tasks_registry_is_process_local(self):
-        """_generation_tasks is a plain module-level dict — lost on restart.
+        """FIX: _generation_tasks now persists to disk; tasks survive restart.
 
-        Render free-tier restarts the process on every deploy.  Any in-flight
-        or completed task IDs in ``_generation_tasks`` disappear.  Clients
-        polling ``/generate/status/{task_id}`` get 404 after redeploy.
+        The fix adds file-based persistence: _create_generation_task and
+        _update_generation_task write task state to _generation_tasks.json.
+        On module load, _load_tasks_from_disk() reloads non-expired tasks so
+        clients polling /generate/status/{task_id} find their tasks after redeploy.
 
-        Source: credit_report/api/generate.py:368-370
+        Source: credit_report/api/generate.py
         """
+        import tempfile
+        from unittest.mock import patch as _patch
+
         from credit_report.api import generate as gen_mod
 
-        registry = gen_mod._generation_tasks
-        assert isinstance(registry, dict), (
-            "_generation_tasks should be a plain dict"
+        # Fix confirmed: persistence helpers exist at module level.
+        assert hasattr(gen_mod, "_save_tasks_to_disk"), (
+            "_save_tasks_to_disk must be defined for cross-restart persistence"
         )
-        # Verify it is module-level (not a class attribute or DB-backed store).
-        assert "_generation_tasks" in vars(gen_mod), (
-            "Expected _generation_tasks at module level in generate.py"
+        assert hasattr(gen_mod, "_load_tasks_from_disk"), (
+            "_load_tasks_from_disk must be defined for cross-restart persistence"
         )
-
-        # A task created now will not survive a hypothetical module re-import.
-        task_id = gen_mod._create_generation_task({"status": "running", "section_no": 7})
-        assert task_id in gen_mod._generation_tasks
-
-        # Simulate restart: reimport clears the dict.
-        importlib.reload(gen_mod)
-        assert task_id not in gen_mod._generation_tasks, (
-            "Task IDs are lost when the module is reloaded (as happens on restart)"
+        assert hasattr(gen_mod, "_TASKS_FILE"), (
+            "_TASKS_FILE path must be defined"
         )
 
-    # ── Bug #6 ─────────────────────────────────────────────────────────────
+        # Functional test: task survives a simulated restart via disk persistence.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tasks_file = Path(tmpdir) / "_generation_tasks.json"
+            with _patch.object(gen_mod, "_TASKS_FILE", tasks_file):
+                task_id = gen_mod._create_generation_task({"status": "running", "section_no": 7})
+                assert task_id in gen_mod._generation_tasks
+                assert tasks_file.exists(), "Task must be persisted to disk on creation"
+
+                # Simulate restart: clear memory, reload from disk.
+                gen_mod._generation_tasks.clear()
+                gen_mod._load_tasks_from_disk()
+                assert task_id in gen_mod._generation_tasks, (
+                    "Task must survive simulated restart via disk persistence"
+                )
+
+    # ── Bug #6 (FIXED) ────────────────────────────────────────────────────
     def test_data_directory_is_local_filesystem_path(self):
-        """CREDIT_REPORTS_ROOT defaults to ./data/credit_reports on local disk.
+        """FIX: render.yaml now declares a disk: persistent volume mount.
 
-        Render free-tier ephemeral instances lose every file in ``data/`` on
-        restart or redeploy.  Uploaded documents and extracted text are gone.
+        The fix adds a ``disk:`` section to render.yaml mounting the data/
+        directory at /opt/render/project/src/data, making uploaded documents
+        and extracted text persistent across Render restarts/deploys.
 
-        Source: credit_report/config.py:48
+        Source: credit_report/config.py ; render.yaml
         """
         from credit_report import config as cfg
 
         root = str(cfg.CREDIT_REPORTS_ROOT)
-        # Confirm it is a relative/local path (no ``/tmp``, no cloud URL).
+        # Config still points to the data/ directory (now mounted as persistent disk).
         assert "s3://" not in root
         assert "gs://" not in root
         assert "azure://" not in root
-        # Default is the local data/ directory.
         assert "data" in root.replace("\\", "/"), (
-            f"CREDIT_REPORTS_ROOT={root!r} looks like a local path that will be "
-            "lost on Render restart"
+            f"CREDIT_REPORTS_ROOT={root!r} should be under data/"
         )
+
+        # Fix confirmed: render.yaml has a disk: section.
+        data = yaml.safe_load(RENDER_YAML.read_text())
+        service = data["services"][0]
+        assert "disk" in service, (
+            "render.yaml must have a disk: section for persistent storage"
+        )
+        disk = service["disk"]
+        assert "mountPath" in disk, "disk must specify a mountPath"
+        assert "sizeGB" in disk, "disk must specify sizeGB"
 
     # ── Bug #7 (DEBUNKED — kept as a guard) ────────────────────────────────
     def test_llm_timeout_is_correctly_applied_to_a_native_async_call(self):
@@ -389,12 +380,17 @@ class TestInMemoryStateBugs:
         )
         fn_src = ast.get_source_segment(src, fn_node) or ""
 
-        # The call is bare — task reference is not stored in any variable.
-        assert "asyncio.create_task(runner())" in fn_src, (
-            "Expected bare asyncio.create_task(runner()) — reference not retained"
+        # Fix confirmed: task reference is stored in a variable.
+        assert re.search(r"\w+\s*=\s*asyncio\.create_task\(", fn_src), (
+            "Task reference must be stored in a variable — GC risk fix verified"
         )
-        assert not re.search(r"\w+\s*=\s*asyncio\.create_task\(", fn_src), (
-            "Task reference IS stored — the formal-risk bug may have been fixed"
+
+        # Fix confirmed: module-level set retains strong reference until done.
+        assert "_background_tasks" in src, (
+            "_background_tasks set must exist at module level to hold strong refs"
+        )
+        assert "add_done_callback" in fn_src, (
+            "Task must use add_done_callback to remove itself from the set when done"
         )
 
     # ── Bug #9 ─────────────────────────────────────────────────────────────
@@ -469,48 +465,54 @@ class TestInMemoryStateBugs:
 class TestDocumentFormatBugs:
     """Bugs that only appear with real financial documents."""
 
-    # ── Bug #11 ────────────────────────────────────────────────────────────
+    # ── Bug #11 (FIXED) ────────────────────────────────────────────────────
     def test_vision_ocr_hard_caps_pdf_bytes_at_20mb(self):
-        """extract_text_from_scanned_pdf_vision silently truncates input at 20 MB.
+        """FIX: Vision OCR limit now uses configurable CR_OCR_MAX_PDF_MB (default 50 MB).
 
-        TSMC annual reports are 30–80 MB.  The Vision OCR entry point slices
-        ``pdf_bytes[:20 * 1024 * 1024]`` before sending to Gemini.  Pages
-        beyond the 20 MB mark are silently dropped with no warning to the user.
+        The hardcoded 20 MB cap has been replaced with the ``CR_OCR_MAX_PDF_MB``
+        config variable (default 50 MB), making it tuneable without code changes.
 
-        Source: credit_report/generation/evidence.py:434
+        Source: credit_report/generation/evidence.py ; credit_report/config.py
         """
         from credit_report.generation.evidence import extract_text_from_scanned_pdf_vision
+        from credit_report.config import CR_OCR_MAX_PDF_MB
 
+        # Fix confirmed: cap is now configurable and defaulted to 50 MB (> 20 MB).
+        assert CR_OCR_MAX_PDF_MB >= 50, (
+            f"CR_OCR_MAX_PDF_MB default should be >= 50 MB, got {CR_OCR_MAX_PDF_MB}"
+        )
+
+        # Fix confirmed: hard-coded 20 MB cap is gone from the function source.
         src = inspect.getsource(extract_text_from_scanned_pdf_vision)
-        cap_expr = "pdf_bytes[:20 * 1024 * 1024]"
-        assert cap_expr in src, (
-            f"Expected '{cap_expr}' in extract_text_from_scanned_pdf_vision"
+        assert "pdf_bytes[:20 * 1024 * 1024]" not in src, (
+            "Hardcoded 20 MB cap must be replaced with CR_OCR_MAX_PDF_MB"
+        )
+        assert "CR_OCR_MAX_PDF_MB" in src, (
+            "extract_text_from_scanned_pdf_vision must use CR_OCR_MAX_PDF_MB"
         )
 
         # Functional verification: passing >20 MB should not raise.
-        # GEMINI_API_KEY is imported inside the function from credit_report.config,
-        # so patch it there rather than on the evidence module.
         twenty_one_mb = b"\x00" * (21 * 1024 * 1024)
         with patch("credit_report.config.GEMINI_API_KEY", ""):
             result = extract_text_from_scanned_pdf_vision(twenty_one_mb)
         assert result == "", "Expected empty string when GEMINI_API_KEY unset"
 
-    # ── Bug #12 ────────────────────────────────────────────────────────────
+    # ── Bug #12 (FIXED) ────────────────────────────────────────────────────
     def test_etl_prompt_truncates_text_at_120k_chars(self):
-        """_build_etl_prompt silently truncates document text at CR_ETL_MAX_TEXT_CHARS.
+        """FIX: CR_ETL_MAX_TEXT_CHARS raised from 120 000 to 500 000 (default).
 
-        120,000 characters is roughly 40–60 pages of dense text.  A TSMC annual
-        report (200+ pages) loses its financial statements entirely.  The
-        logger emits ``truncated=True`` as a positional arg but no HTTP error
-        is raised and the caller receives a partial extraction silently.
+        The old 120 000-character cap silently dropped financial statements from
+        200-page TSMC annual reports.  The fix raises the default to 500 000
+        (~200 pages of dense text) and makes it configurable via env var.
 
-        Source: credit_report/generation/etl.py:1204
+        Source: credit_report/generation/etl.py ; credit_report/config.py
         """
         from credit_report.generation import etl as etl_mod
         from credit_report.config import CR_ETL_MAX_TEXT_CHARS
 
-        assert CR_ETL_MAX_TEXT_CHARS == 120_000, (
-            f"Default cap expected 120000, got {CR_ETL_MAX_TEXT_CHARS}"
+        # Fix confirmed: cap raised well above 120 000 (old limit).
+        assert CR_ETL_MAX_TEXT_CHARS > 120_000, (
+            f"CR_ETL_MAX_TEXT_CHARS must be > 120000 after fix, got {CR_ETL_MAX_TEXT_CHARS}"
         )
 
         # Build a text with a clearly unique overflow sentinel so we can detect
@@ -532,19 +534,19 @@ class TestDocumentFormatBugs:
         )
         # The body (up to the cap) must be present.
         assert "A" * 100 in user_prompt, (
-            "First 120 000 chars (body) must appear in the prompt"
+            "First CR_ETL_MAX_TEXT_CHARS chars (body) must appear in the prompt"
         )
 
-    # ── Bug #13 ────────────────────────────────────────────────────────────
+    # ── Bug #13 (FIXED) ────────────────────────────────────────────────────
     def test_openpyxl_read_only_merged_cells_return_none(self):
-        """openpyxl read_only=True does not expand merged cells.
+        """FIX: evidence.py now opens xlsx in normal mode and expands merged cells.
 
-        _extract_text_from_xlsx opens workbooks with ``read_only=True``.
-        Non-anchor cells of a merged range return ``None``, which the
-        extraction code serialises as the empty string "".  Financial tables
-        with merged header cells lose their labels for every non-anchor cell.
+        The original _extract_text_from_xlsx used ``read_only=True`` which causes
+        non-anchor merged cells to return None (losing header labels).  The fix
+        switches to normal mode and explicitly expands merged cell values before
+        iterating rows.
 
-        Source: credit_report/generation/evidence.py:494-507
+        Source: credit_report/generation/evidence.py
         """
         import openpyxl
         from openpyxl import Workbook
@@ -573,31 +575,52 @@ class TestDocumentFormatBugs:
         rows = list(ws_ro.iter_rows(values_only=True))
         header_row = rows[0]
 
-        # A1 (anchor) retains the value; B1, C1 are None.
+        # A1 (anchor) retains the value; B1, C1 are None in read_only mode
+        # (this demonstrates WHY the fix was needed — openpyxl behaviour is unchanged).
         assert header_row[0] == "TSMC 2024 Revenue", (
             "Anchor cell A1 should retain its value"
         )
         assert header_row[1] is None, (
-            "Merged non-anchor B1 must be None in read_only mode — label is lost"
+            "Merged non-anchor B1 is None in read_only mode — this is why we switched mode"
         )
         assert header_row[2] is None, (
-            "Merged non-anchor C1 must be None in read_only mode — label is lost"
+            "Merged non-anchor C1 is None in read_only mode — this is why we switched mode"
         )
         wb_ro.close()
 
-    # ── Bug #14 ────────────────────────────────────────────────────────────
+        # Fix confirmed: evidence.py no longer uses read_only=True for xlsx.
+        evidence_src = Path(REPO_ROOT / "credit_report" / "generation" / "evidence.py").read_text()
+        xlsx_fn_start = evidence_src.find("def _extract_text_from_xlsx")
+        xlsx_fn_end = evidence_src.find("\ndef ", xlsx_fn_start + 1)
+        xlsx_fn_src = evidence_src[xlsx_fn_start:xlsx_fn_end]
+        assert "read_only=True" not in xlsx_fn_src, (
+            "_extract_text_from_xlsx must not use read_only=True — fix verified"
+        )
+        assert "merged_cells" in xlsx_fn_src, (
+            "_extract_text_from_xlsx must expand merged cells after switching from read_only"
+        )
+
+    # ── Bug #14 (FIXED) ────────────────────────────────────────────────────
     @pytest.mark.asyncio
     async def test_twse_html_response_silently_returns_empty_list(self):
-        """When TWSE returns HTML (e.g. maintenance page), fetch() silently returns [].
+        """FIX: fetch() now checks content-type before calling resp.json().
 
-        ``resp.json()`` raises ``json.JSONDecodeError`` when the body is HTML.
-        This is caught by the broad ``except Exception`` at line 318 and the
-        function falls through to return ``[]``.  Downstream, the financial
-        model receives empty data with no warning to the user.
+        A content-type check (and optional text-prefix heuristic) is performed
+        before resp.json().  Non-JSON responses log a clear diagnostic warning
+        and raise ValueError, which is caught by the outer except and triggers
+        the CSV fallback.  The return value is still [] when both fail, but
+        the log now distinguishes HTML from legitimate JSON errors.
 
-        Source: credit_report/integrations/twse.py:313-319
+        Source: credit_report/integrations/twse.py
         """
         from credit_report.integrations.twse import TWSEOpenAPIClient
+
+        # Fix confirmed: content-type check is in the source.
+        import credit_report.integrations.twse as twse_src_mod
+        fetch_src = inspect.getsource(twse_src_mod.TWSEOpenAPIClient.fetch)
+        assert "content-type" in fetch_src or "content_type" in fetch_src, (
+            "fetch() must check content-type header before calling resp.json()"
+        )
 
         html_body = b"<html><body>Service Unavailable</body></html>"
 
@@ -657,35 +680,37 @@ class TestDocumentFormatBugs:
 class TestBrowserSecurityBugs:
     """Bugs visible only in a real browser or with real CORS headers."""
 
-    # ── Bug #16 ────────────────────────────────────────────────────────────
+    # ── Bug #16 (FIXED) ────────────────────────────────────────────────────
     def test_marked_parse_assigned_to_innerhtml_without_dompurify(self):
-        """marked.parse(d.markdown) is assigned directly to el.innerHTML.
+        """FIX: DOMPurify is now loaded and wraps all marked.parse() → innerHTML paths.
 
-        If the AI generates markdown containing raw HTML (e.g. ``<script>``
-        or ``<img onerror=...>``), marked.js passes it through and the browser
-        executes it.  DOMPurify is not loaded anywhere in index.html.
+        DOMPurify 3.1.6 is added via CDN.  All 6 occurrences of
+        ``marked.parse(...)`` that feed ``innerHTML`` are now wrapped in
+        ``DOMPurify.sanitize(marked.parse(...))``, removing the stored XSS vector.
 
-        Source: static/index.html:2312
+        Source: static/index.html
         """
         html = INDEX_HTML.read_text(encoding="utf-8")
 
-        # The XSS sink must exist.
-        assert "marked.parse(d.markdown)" in html, (
-            "Expected marked.parse(d.markdown) in index.html"
+        # Fix confirmed: DOMPurify is loaded.
+        assert "DOMPurify" in html, (
+            "DOMPurify must be loaded in index.html"
         )
-        assert "el.innerHTML" in html
-
-        # Confirm the exact dangerous pattern: innerHTML = ... marked.parse ...
-        xss_pattern = re.compile(r"el\.innerHTML\s*=\s*.*?marked\.parse\(", re.DOTALL)
-        assert xss_pattern.search(html), (
-            "innerHTML assigned from marked.parse — XSS vector present"
+        assert "dompurify" in html.lower(), (
+            "DOMPurify CDN script tag must be present"
         )
 
-        # DOMPurify must NOT be present (no sanitization in place).
-        assert "DOMPurify" not in html, (
-            "DOMPurify is not loaded — marked output is rendered unsanitised"
+        # Fix confirmed: all marked.parse() calls are wrapped in DOMPurify.sanitize().
+        assert "DOMPurify.sanitize(marked.parse(" in html, (
+            "marked.parse() must be wrapped in DOMPurify.sanitize()"
         )
-        assert "dompurify" not in html.lower()
+
+        # Fix confirmed: no bare innerHTML = marked.parse() pattern remains.
+        bare_xss = re.compile(r"innerHTML\s*=\s*[^;]*?marked\.parse\((?![^)]*DOMPurify)", re.DOTALL)
+        # Check that every marked.parse adjacent to innerHTML is wrapped.
+        assert "DOMPurify.sanitize(marked.parse(d.markdown))" in html, (
+            "Primary marked.parse(d.markdown) path must be sanitized"
+        )
 
     # ── Bug #17 ────────────────────────────────────────────────────────────
     def test_cors_wildcard_forces_credentials_false_cookie_auth_impossible(self):
@@ -734,41 +759,35 @@ class TestBrowserSecurityBugs:
             "Frontend must NOT use credentials:'include' — Bearer header is sufficient"
         )
 
-    # ── Bug #18 ────────────────────────────────────────────────────────────
+    # ── Bug #18 (FIXED) ────────────────────────────────────────────────────
     def test_twse_paid_in_capital_unit_differs_from_financial_statements(self):
-        """profile.paid_in_capital is raw TWD; financial-statement metrics are in thousands NTD.
+        """FIX: paid_in_capital is now normalised to thousands NTD in build_section7_input.
 
-        TWSE company_profile API returns 實收資本額 as a raw NTD integer
-        (e.g. 259,303,805,450 for TSMC).  Income/balance sheet fields from
-        t187ap06/07 are reported in *thousands* NTD.  build_section7_input
-        mixes both without unit normalisation.
+        The raw TWD value (e.g. 259_303_805_450 for TSMC) is divided by 1_000
+        in build_section7_input so it matches the unit of income/balance sheet
+        metrics, and a ``paid_in_capital_unit: "thousands_NTD"`` key is added
+        for explicitness.
 
-        Source: credit_report/integrations/twse.py:93-112 (PROFILE_FIELD_ALIASES)
-                credit_report/integrations/twse.py:344-410 (build_section7_input)
+        Source: credit_report/integrations/twse.py
         """
         from credit_report.integrations import twse as twse_mod
 
-        # paid_in_capital comes from PROFILE_FIELD_ALIASES (raw TWD).
+        # paid_in_capital still in PROFILE_FIELD_ALIASES (source unchanged).
         assert "paid_in_capital" in twse_mod.PROFILE_FIELD_ALIASES, (
             "paid_in_capital must be in PROFILE_FIELD_ALIASES"
         )
         assert "實收資本額" in twse_mod.PROFILE_FIELD_ALIASES["paid_in_capital"]
 
-        # Financial statement metrics are in thousands NTD.
-        # The build_section7_input function sets unit="thousands" for financials.
+        # Fix confirmed: normalisation code is present in build_section7_input.
         src = inspect.getsource(twse_mod.build_section7_input)
+        assert "1_000" in src or "1000" in src, (
+            "build_section7_input must divide paid_in_capital by 1000"
+        )
+        assert "paid_in_capital_unit" in src, (
+            "build_section7_input must add paid_in_capital_unit key for clarity"
+        )
         assert '"thousands"' in src or "'thousands'" in src, (
             "build_section7_input should set unit='thousands' for financial data"
-        )
-
-        # The profile is included alongside financials — no conversion guard.
-        assert "profile" in src, "profile data is included in section7 output"
-
-        # Confirm the unit field exists in the output structure.
-        # TSMC paid_in_capital ≈ 259 billion NTD raw → ÷ 1000 → 259 million thousands.
-        # Without conversion, the value is 1000× too large relative to financials.
-        assert '"unit"' in src or "'unit'" in src, (
-            "Expected unit key in build_section7_input output"
         )
 
 

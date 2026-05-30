@@ -13,6 +13,8 @@ DATABASE_URL: str = os.getenv(
 )
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "false" if IS_PRODUCTION else "true").lower() == "true"
 
 # ── LLM ──────────────────────────────────────────────────────────────────────────────────────
@@ -48,7 +50,8 @@ SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
 CREDIT_REPORTS_ROOT: Path = Path(os.getenv("CREDIT_REPORTS_ROOT", "./data/credit_reports"))
 CR_MAX_CHUNKS_PER_SECTION: int = int(os.getenv("CR_MAX_CHUNKS_PER_SECTION", "12"))
 CREDIT_REPORT_MAX_UPLOAD_MB: int = int(os.getenv("CREDIT_REPORT_MAX_UPLOAD_MB", "20"))
-CR_ETL_MAX_TEXT_CHARS: int = int(os.getenv("CR_ETL_MAX_TEXT_CHARS", "120000"))
+CR_ETL_MAX_TEXT_CHARS: int = int(os.getenv("CR_ETL_MAX_TEXT_CHARS", "500000"))
+CR_OCR_MAX_PDF_MB: int = int(os.getenv("CR_OCR_MAX_PDF_MB", "50"))
 
 CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "*")
 

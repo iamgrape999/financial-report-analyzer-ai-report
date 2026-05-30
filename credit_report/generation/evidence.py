@@ -7,7 +7,7 @@ from itertools import count
 from pathlib import Path
 from typing import Optional
 
-from credit_report.config import CREDIT_REPORTS_ROOT, CR_MAX_CHUNKS_PER_SECTION, SECTION_RETRIEVAL_KEYWORDS
+from credit_report.config import CREDIT_REPORTS_ROOT, CR_MAX_CHUNKS_PER_SECTION, CR_OCR_MAX_PDF_MB, SECTION_RETRIEVAL_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -431,7 +431,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) 
     Gemini 2.5 Flash natively understands PDF inline data.
     """
     pdf_kb = len(pdf_bytes) // 1024
-    data = pdf_bytes[:20 * 1024 * 1024]
+    data = pdf_bytes[:CR_OCR_MAX_PDF_MB * 1024 * 1024]
     truncated = len(data) < len(pdf_bytes)
     logger.info(
         "[OCR] extract_text_from_scanned_pdf_vision: start pdf_kb=%d "
@@ -491,10 +491,20 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
         import openpyxl
         from io import BytesIO
 
-        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
         parts: list[str] = []
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
+            # Expand merged cells so non-anchor cells carry the anchor's value.
+            for merged_range in list(ws.merged_cells.ranges):
+                anchor_value = ws.cell(merged_range.min_row, merged_range.min_col).value
+                for row in ws.iter_rows(
+                    min_row=merged_range.min_row, max_row=merged_range.max_row,
+                    min_col=merged_range.min_col, max_col=merged_range.max_col,
+                ):
+                    for cell in row:
+                        if (cell.row, cell.column) != (merged_range.min_row, merged_range.min_col):
+                            cell.value = anchor_value
             rows = list(ws.iter_rows(values_only=True))
             if not rows:
                 continue
@@ -613,7 +623,7 @@ def extract_text_from_file_path(file_path: Path, filename: str) -> tuple[str, st
                 filename,
             )
             with file_path.open("rb") as fh:
-                text = extract_text_from_scanned_pdf_vision(fh.read(20 * 1024 * 1024))
+                text = extract_text_from_scanned_pdf_vision(fh.read(CR_OCR_MAX_PDF_MB * 1024 * 1024))
         return text, "pdf"
 
     return extract_text_from_file(file_path.read_bytes(), filename)

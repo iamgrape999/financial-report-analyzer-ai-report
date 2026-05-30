@@ -4,7 +4,11 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt && mkdir -p data/credit_reports data/memory data/logs
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: credit-report-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 10
     healthCheckPath: /health
     envVars:
       # Optional: set to a PostgreSQL connection string for persistent storage.
@@ -36,7 +40,9 @@ services:
       - key: CREDIT_REPORT_MAX_UPLOAD_MB
         value: "20"
       - key: CR_ETL_MAX_TEXT_CHARS
-        value: "120000"
+        value: "500000"
+      - key: CR_OCR_MAX_PDF_MB
+        value: "50"
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
       - key: CORS_ALLOW_ORIGINS

@@ -78,49 +78,43 @@ class TestConfigBoundaries:
         )
 
     def test_etl_text_cap_is_120k_chars(self):
-        """CR_ETL_MAX_TEXT_CHARS truncates to 120 000 characters.
+        """FIX: CR_ETL_MAX_TEXT_CHARS raised to 500 000 (was 120 000).
 
-        A 400-page Chinese/English TSMC annual report yields ~500 000–800 000
-        characters of extracted text.  Only the first ~20–25% reaches Gemini.
-        Financial statements (Income Statement, Balance Sheet, Cash Flow) appear
-        in pages 100–250 of the annual report — well beyond the truncation point.
-        Source: credit_report/config.py:51
+        A 400-page TSMC annual report yields ~600 000 characters.  The new default
+        covers ~83% of the report (vs. 20% at 120k), ensuring financial statements
+        in pages 100–250 are included in the Gemini context window.
+        Source: credit_report/config.py
         """
         from credit_report.config import CR_ETL_MAX_TEXT_CHARS
-        assert CR_ETL_MAX_TEXT_CHARS == 120_000, (
-            f"ETL cap changed to {CR_ETL_MAX_TEXT_CHARS}; update this test."
+        assert CR_ETL_MAX_TEXT_CHARS > 120_000, (
+            f"CR_ETL_MAX_TEXT_CHARS must be > 120 000 after fix, got {CR_ETL_MAX_TEXT_CHARS}."
         )
         tsmc_annual_report_chars_low = 500_000
         coverage_pct = CR_ETL_MAX_TEXT_CHARS / tsmc_annual_report_chars_low * 100
-        assert coverage_pct < 30, (
-            f"Coverage is {coverage_pct:.1f}% — DID-ETL-TRUNC may be resolved; "
-            "increase CR_ETL_MAX_TEXT_CHARS and re-validate."
+        assert coverage_pct >= 80, (
+            f"Coverage is {coverage_pct:.1f}% — should be ≥80%% of a typical TSMC report."
         )
 
     def test_vision_ocr_pdf_byte_cap_is_20mb(self):
-        """Gemini Vision OCR receives at most the first 20 MB of a PDF.
+        """FIX: Vision OCR cap raised to CR_OCR_MAX_PDF_MB (default 50 MB).
 
-        For scanned-PDF fallback, evidence.py:434 slices:
-            data = pdf_bytes[:20 * 1024 * 1024]
-        A 54 MB TSMC annual report has ~34 MB of data beyond this cap that
-        Gemini never sees.
-        Source: credit_report/generation/evidence.py:434
+        The hardcoded 20 MB cap is replaced with the configurable CR_OCR_MAX_PDF_MB
+        (default 50 MB), so only ~7% of a 54 MB TSMC report is beyond the cap.
+        Source: credit_report/config.py ; credit_report/generation/evidence.py
         """
-        OCR_CAP_BYTES = 20 * 1024 * 1024
-        tsmc_pdf_bytes = 54 * 1024 * 1024
-        dark_bytes = tsmc_pdf_bytes - OCR_CAP_BYTES
-        dark_pct = dark_bytes / tsmc_pdf_bytes * 100
-        assert dark_pct > 30, (
-            "Expected >30%% of TSMC PDF to be beyond Vision OCR cap. "
-            "DID-OCR-CAP may be resolved; verify by increasing the cap."
-        )
-        # Sanity: cap constant matches actual code
-        import re
+        from credit_report.config import CR_OCR_MAX_PDF_MB
         import credit_report.generation.evidence as ev_mod
-        source = open(ev_mod.__file__).read()
-        assert "20 * 1024 * 1024" in source, (
-            "Vision OCR byte cap constant not found in evidence.py — "
-            "source may have changed; re-inspect DID-OCR-CAP."
+
+        # Cap is now configurable and raised above 20 MB.
+        assert CR_OCR_MAX_PDF_MB > 20, (
+            f"CR_OCR_MAX_PDF_MB must be > 20 after fix, got {CR_OCR_MAX_PDF_MB}."
+        )
+        source = open(ev_mod.__file__, encoding="utf-8").read()
+        assert "CR_OCR_MAX_PDF_MB" in source, (
+            "Vision OCR cap must use CR_OCR_MAX_PDF_MB — fix verified."
+        )
+        assert "20 * 1024 * 1024" not in source, (
+            "Hardcoded 20 MB cap must be removed — fix verified."
         )
 
     def test_no_table_parsing_libraries(self):
@@ -166,21 +160,22 @@ class TestETLTruncation:
             "營業利益 Operating Profit 1,003,227,000  1,189,280,000\n"
             "稅後淨利 Net Income       838,497,000   959,437,000\n"
             "基本每股盈餘 EPS (NTD)         32.34         37.00\n\n"
-        ) * 500
+        ) * 5000
 
         full_text = header + financials
         return full_text[:total_chars]
 
     def test_prompt_contains_only_first_120k_chars(self):
-        """ETL prompt truncates document text at CR_ETL_MAX_TEXT_CHARS.
+        """ETL prompt truncates document text at CR_ETL_MAX_TEXT_CHARS (now 500 000).
 
-        Source: generation/etl.py:1204
+        Source: generation/etl.py
             text_snippet = text[:CR_ETL_MAX_TEXT_CHARS]
         """
         from credit_report.config import CR_ETL_MAX_TEXT_CHARS
         from credit_report.generation.etl import _build_etl_prompt
 
-        full_text = self._realistic_tsmc_text(600_000)
+        # Use text longer than the new 500k cap to trigger truncation.
+        full_text = self._realistic_tsmc_text(CR_ETL_MAX_TEXT_CHARS + 100_000)
         _, user_prompt = _build_etl_prompt("annual_report", full_text, [4, 7])
 
         start = user_prompt.index("---DOCUMENT TEXT START---") + len("---DOCUMENT TEXT START---")
@@ -192,31 +187,34 @@ class TestETLTruncation:
             "truncation guard may have been removed."
         )
         truncated_chars = len(full_text) - CR_ETL_MAX_TEXT_CHARS
-        assert truncated_chars > 0, "No truncation occurred — full text fits within cap."
+        assert truncated_chars > 0, "No truncation occurred — full text must exceed cap."
 
     def test_financial_statements_are_beyond_truncation_point(self):
-        """The financial statements section of a TSMC annual report falls after the truncation
-        cutoff of 120 000 characters.
+        """FIX verified: with 500k cap, financial statements within 600k text are covered.
 
-        In the TSMC 2023 Annual Report the consolidated financial statements begin
-        on approximately page 100 of 400 (byte offset ~135 000+).  Only pages 1–~25
-        fit within the 120 000-char window.
+        The raised 500k cap covers enough of a TSMC annual report that financial
+        statements (typically starting at ~135k chars) are fully included.
         """
         from credit_report.config import CR_ETL_MAX_TEXT_CHARS
 
-        full_text = self._realistic_tsmc_text(600_000)
-        # Find where financial-statement markers appear in the full text
+        # Generate text longer than the cap so that truncation still occurs.
+        full_text = self._realistic_tsmc_text(CR_ETL_MAX_TEXT_CHARS + 100_000)
         fs_marker = "合併損益表"
         fs_pos = full_text.find(fs_marker)
         assert fs_pos != -1, "Financial statement marker not found in synthetic text."
 
-        # The marker should appear beyond the truncation point at least once
-        # (financial data is in the back half of the report)
+        # The marker must appear within the COVERED portion (< cap) — fix confirmed.
+        covered = full_text[:CR_ETL_MAX_TEXT_CHARS]
+        assert fs_marker in covered, (
+            f"Financial statement markers must appear within first {CR_ETL_MAX_TEXT_CHARS} chars — "
+            "fix confirmed: the raised cap covers the financial statement section."
+        )
+
+        # The marker should also appear beyond the cap (synthetic text repeats).
         tail = full_text[CR_ETL_MAX_TEXT_CHARS:]
         assert fs_marker in tail, (
-            f"All financial statement markers appear within the first {CR_ETL_MAX_TEXT_CHARS} chars. "
-            "DID-ETL-TRUNC: The test synthetic text may need adjustment, but for a real TSMC "
-            "annual report the financials span pages 100–250 which exceed this cap."
+            "Synthetic text too short to have markers beyond the cap — "
+            "increase _realistic_tsmc_text repetitions."
         )
 
     def test_logger_reports_truncation_flag(self):
@@ -225,9 +223,11 @@ class TestETLTruncation:
         The logger uses % formatting with positional args; we format each call
         to reconstruct the final log message and search for 'truncated=True'.
         """
+        from credit_report.config import CR_ETL_MAX_TEXT_CHARS
         from credit_report.generation.etl import _build_etl_prompt
 
-        full_text = self._realistic_tsmc_text(600_000)
+        # Use text longer than the new 500k cap to trigger truncation.
+        full_text = self._realistic_tsmc_text(CR_ETL_MAX_TEXT_CHARS + 100_000)
         with patch("credit_report.generation.etl.logger") as mock_log:
             _build_etl_prompt("annual_report", full_text, [4, 7])
             truncated_logged = False
@@ -285,13 +285,15 @@ class TestPDFTextQuality:
         )
 
     def test_vision_ocr_cap_at_20mb_in_source(self):
-        """Verify the 20 MB Vision OCR slice is present and unchanged in evidence.py."""
+        """FIX: Vision OCR cap now uses configurable CR_OCR_MAX_PDF_MB (default 50 MB)."""
         import credit_report.generation.evidence as ev_mod
+        from credit_report.config import CR_OCR_MAX_PDF_MB
         source = open(ev_mod.__file__, encoding="utf-8").read()
-        # Line: data = pdf_bytes[:20 * 1024 * 1024]
-        assert "pdf_bytes[:20 * 1024 * 1024]" in source, (
-            "DID-OCR-CAP: Vision OCR byte cap line not found in evidence.py — "
-            "check if the cap was changed or the function was refactored."
+        assert "CR_OCR_MAX_PDF_MB" in source, (
+            "Vision OCR must use CR_OCR_MAX_PDF_MB — fix verified."
+        )
+        assert CR_OCR_MAX_PDF_MB > 20, (
+            f"CR_OCR_MAX_PDF_MB={CR_OCR_MAX_PDF_MB} should be > 20 MB after fix."
         )
 
     def test_extract_text_from_pdf_returns_empty_for_cid_garbage(self):
@@ -581,14 +583,12 @@ class TestTWSEUnitAndMapping:
         )
 
     def test_paid_in_capital_is_raw_twd_not_thousands(self):
-        """paid_in_capital from PROFILE_FIELD_ALIASES is in raw TWD, not thousands.
+        """FIX: paid_in_capital is now normalised to thousands NTD in build_section7_input.
 
-        TSMC's 實收資本額 is "259,303,805,000" TWD.
-        TWSE income statement figures are thousands NTD.
-        These two different scales appear in the same output dict, creating a
-        unit inconsistency: paid_in_capital cannot be compared to revenue without
-        a ÷1000 correction.
-        DID-TWSE-PAID: source integrations/twse.py:104
+        After the fix, paid_in_capital is divided by 1_000 so it matches the
+        unit of income/balance sheet metrics.  TSMC's raw value ~259 B TWD
+        becomes ~259 M thousands-NTD.
+        Source: credit_report/integrations/twse.py
         """
         from credit_report.integrations.twse import build_section7_input
 
@@ -602,18 +602,20 @@ class TestTWSEUnitAndMapping:
         if paid_in_capital is None:
             pytest.skip("paid_in_capital not returned for this mock data set.")
 
-        # Convert to float for comparison
         try:
             capital_val = float(str(paid_in_capital).replace(",", ""))
         except ValueError:
             pytest.skip(f"paid_in_capital is not numeric: {paid_in_capital!r}")
 
-        # The raw TWD value (259 B TWD) is ~1000× larger than the thousands-NTD revenue figure
-        # expressed in the same units.  Both should NOT equal a common "thousands NTD" scale.
-        # TSMC paid_in_capital raw TWD: ~2.59e11 (billion TWD territory)
-        assert capital_val > 1e10, (
-            "DID-TWSE-PAID: paid_in_capital appears to be in thousands NTD — "
-            "verify whether the PROFILE field is now being normalised."
+        # Fix confirmed: value is now in thousands NTD (÷1000 from raw TWD).
+        # TSMC raw TWD ~2.59e11 → thousands NTD ~2.59e8.
+        assert capital_val < 1e10, (
+            "paid_in_capital must be normalised to thousands NTD — "
+            "verify the ÷1000 fix in build_section7_input."
+        )
+        # Also verify the unit annotation is present.
+        assert profile.get("paid_in_capital_unit") == "thousands_NTD", (
+            "paid_in_capital_unit annotation must be 'thousands_NTD' after fix."
         )
 
     def test_no_usd_conversion_in_build_section7(self):
@@ -838,8 +840,11 @@ class TestKnownLimits:
         assert CREDIT_REPORT_MAX_UPLOAD_MB == 20  # DID-UPLOAD-01: raise to ≥ 80 for TSMC
 
     def test_known_limit_etl_truncation_120k(self):
+        """FIX: CR_ETL_MAX_TEXT_CHARS raised from 120 000 to 500 000."""
         from credit_report.config import CR_ETL_MAX_TEXT_CHARS
-        assert CR_ETL_MAX_TEXT_CHARS == 120_000  # DID-ETL-TRUNC: raise to ≥ 500 000 for TSMC
+        assert CR_ETL_MAX_TEXT_CHARS >= 500_000, (
+            f"CR_ETL_MAX_TEXT_CHARS should be >= 500 000 after fix, got {CR_ETL_MAX_TEXT_CHARS}"
+        )
 
     def test_known_limit_twse_unit_thousands_ntd(self):
         """TWSE data unit declared in build_section7_input: thousands NTD (not USD millions)."""
@@ -860,7 +865,9 @@ class TestKnownLimits:
             )
 
     def test_known_limit_vision_ocr_pdf_cap(self):
-        """Vision OCR for PDFs is capped at the first 20 MB of the file."""
+        """FIX: Vision OCR cap raised to CR_OCR_MAX_PDF_MB (default 50 MB)."""
+        from credit_report.config import CR_OCR_MAX_PDF_MB
         import credit_report.generation.evidence as ev
         src = open(ev.__file__, encoding="utf-8").read()
-        assert "20 * 1024 * 1024" in src  # DID-OCR-CAP: increase if processing large PDFs
+        assert "CR_OCR_MAX_PDF_MB" in src, "Vision OCR must use CR_OCR_MAX_PDF_MB"
+        assert CR_OCR_MAX_PDF_MB >= 50  # DID-OCR-CAP: configurable, default ≥ 50 MB

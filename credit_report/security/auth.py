@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -17,16 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from credit_report.config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     ALGORITHM,
+    DEFAULT_SECRET_KEY,
     REFRESH_TOKEN_EXPIRE_DAYS,
-    SECRET_KEY,
 )
 from credit_report.database import get_db
 from credit_report.security.models import User
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/credit-report/auth/login")
-
-_KEY_BYTES = SECRET_KEY.encode("utf-8")
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -42,7 +41,8 @@ def _b64url_decode(s: str) -> bytes:
 
 def _sign(header_b64: str, payload_b64: str) -> str:
     msg = f"{header_b64}.{payload_b64}".encode("utf-8")
-    sig = hmac.new(_KEY_BYTES, msg, hashlib.sha256).digest()
+    key = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY).encode("utf-8")
+    sig = hmac.new(key, msg, hashlib.sha256).digest()
     return _b64url_encode(sig)
 
 

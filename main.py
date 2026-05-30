@@ -29,7 +29,7 @@ import credit_report.generation.models  # noqa: F401
 from sqlalchemy import text
 
 from credit_report.security.models import User
-from credit_report.security.auth import hash_password
+from credit_report.security.auth import hash_password, verify_password
 
 
 async def _safe_add_columns(conn) -> None:
@@ -108,13 +108,16 @@ async def _seed_admin() -> None:
                             user.email, email)
 
         if user:
-            # Always sync password from env var — ensures ADMIN_PASSWORD change takes effect immediately.
-            # This is intentional: env var is the source of truth for the admin credential.
-            user.hashed_password = hash_password(password)
+            # Only rehash when the env var password differs from the stored hash.
+            # This avoids the expensive pbkdf2_sha256 hash on every startup when
+            # ADMIN_PASSWORD hasn't changed, and makes deliberate rotation explicit.
+            if not verify_password(password, user.hashed_password):
+                user.hashed_password = hash_password(password)
+                logger.info("_seed_admin: ADMIN_PASSWORD changed — hash updated for admin=%s", user.email)
             user.is_active = True
             user.role = "admin"
             await session.commit()
-            logger.info("_seed_admin: synced password for admin=%s from ADMIN_PASSWORD env var", user.email)
+            logger.info("_seed_admin: synced role/status for admin=%s", user.email)
         else:
             session.add(User(
                 id=str(uuid.uuid4()),
