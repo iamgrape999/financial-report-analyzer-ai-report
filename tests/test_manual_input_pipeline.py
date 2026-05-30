@@ -1460,9 +1460,9 @@ async def test_generate_section_allowed_for_1_to_10(db, sec_no):
 
 
 @pytest.mark.asyncio
-async def test_generate_section_11_blocked_with_400(db):
-    """generate_section §11 must return HTTP 400 (section_no must be 1-10)."""
-    from fastapi import BackgroundTasks, HTTPException
+async def test_generate_section_11_accepted(db):
+    """generate_section §11 must be accepted (section_no 1-11 are all valid)."""
+    from fastapi import BackgroundTasks
     from credit_report.api.generate import generate_section
 
     rid = str(uuid.uuid4())
@@ -1471,12 +1471,11 @@ async def test_generate_section_11_blocked_with_400(db):
     user.id = owner_id
 
     bg = BackgroundTasks()
-    with pytest.raises(HTTPException) as exc_info:
-        await generate_section(report_id=rid, section_no=11, background_tasks=bg,
-                               db=db, current_user=user)
-    assert exc_info.value.status_code == 400, (
-        f"§11 generate must return 400, got {exc_info.value.status_code}: "
-        f"{exc_info.value.detail}"
+    with patch("credit_report.api.generate.run_section_generation"):
+        result = await generate_section(report_id=rid, section_no=11,
+                                        background_tasks=bg, db=db, current_user=user)
+    assert result.status in ("running", "queued", "accepted"), (
+        f"§11 generate must be accepted, got '{result.status}'"
     )
 
 
@@ -1602,8 +1601,8 @@ class TestSection11FullIntegration:
         assert "11A_report_meta" in readback.input_json
 
     @pytest.mark.asyncio
-    async def test_section_11_generate_blocked(self, db):
-        from fastapi import BackgroundTasks, HTTPException
+    async def test_section_11_generate_accepted(self, db):
+        from fastapi import BackgroundTasks
         from credit_report.api.generate import generate_section
 
         rid = str(uuid.uuid4())
@@ -1612,10 +1611,10 @@ class TestSection11FullIntegration:
         user.id = owner_id
 
         bg = BackgroundTasks()
-        with pytest.raises(HTTPException) as exc_info:
-            await generate_section(report_id=rid, section_no=11, background_tasks=bg,
-                                   db=db, current_user=user)
-        assert exc_info.value.status_code == 400
+        with patch("credit_report.api.generate.run_section_generation"):
+            result = await generate_section(report_id=rid, section_no=11,
+                                            background_tasks=bg, db=db, current_user=user)
+        assert result.status in ("running", "queued", "accepted")
 
     @pytest.mark.asyncio
     async def test_section_11_import_json_allowed(self, db):

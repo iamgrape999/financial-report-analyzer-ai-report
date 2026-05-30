@@ -1568,13 +1568,14 @@ class TestJSONSchemaIntegrity:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestGenerationRules:
-    """§11 must be blocked; §1-10 must be accepted with dependencies patched."""
+    """§11 must be accepted; §1-10 must be accepted with dependencies patched."""
 
     @pytest.mark.asyncio
-    async def test_section_11_blocked(self, db):
-        """generate_section §11 must return HTTP 400."""
-        from fastapi import BackgroundTasks, HTTPException
+    async def test_section_11_accepted(self, db):
+        """generate_section §11 must be accepted (valid section_no 1-11)."""
+        from fastapi import BackgroundTasks
         from credit_report.api.generate import generate_section
+        from unittest.mock import patch
 
         rid = str(uuid.uuid4())
         report, owner_id = await _seed_report(db, rid)
@@ -1582,11 +1583,11 @@ class TestGenerationRules:
         user.id = owner_id
 
         bg = BackgroundTasks()
-        with pytest.raises(HTTPException) as exc_info:
-            await generate_section(report_id=rid, section_no=11, background_tasks=bg,
-                                   db=db, current_user=user)
-        assert exc_info.value.status_code == 400, (
-            f"§11 generate must return 400, got {exc_info.value.status_code}"
+        with patch("credit_report.api.generate.run_section_generation"):
+            result = await generate_section(report_id=rid, section_no=11,
+                                            background_tasks=bg, db=db, current_user=user)
+        assert result.status in ("running", "queued", "accepted"), (
+            f"§11 generate must be accepted, got '{result.status}'"
         )
 
     @pytest.mark.parametrize("sec_no", list(range(1, 11)))

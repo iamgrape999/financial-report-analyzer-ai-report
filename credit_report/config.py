@@ -33,6 +33,10 @@ CR_MAX_CONCURRENT_EXTRACTIONS: int = int(os.getenv("CR_MAX_CONCURRENT_EXTRACTION
 DAILY_TOKEN_LIMIT: int = int(os.getenv("DAILY_TOKEN_LIMIT", "4000000"))
 LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "180"))
 
+# LLM retry on transient errors (429, 503, timeout).
+LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
+LLM_RETRY_BASE_DELAY: float = float(os.getenv("LLM_RETRY_BASE_DELAY", "2.0"))
+
 SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
     1: 16384,   # §1 facility table + T&Cs (21 fields) + deal comparison + account strategy
     2: 16384,   # §2 five mandatory tables (T1-T5); 8192 default cuts off after T1 only
@@ -43,15 +47,19 @@ SECTION_MAX_OUTPUT_TOKENS: dict[int | str, int] = {
     10: 16384,  # §10 appendix
     4: 12288,   # §4 corporate background
     9: 12288,   # §9 credit analysis checklist
+    11: 8192,   # §11 analyst / external research summary
     "default": 8192,
 }
 
 # ── Storage ──────────────────────────────────────────────────────────────────────────────────────
 CREDIT_REPORTS_ROOT: Path = Path(os.getenv("CREDIT_REPORTS_ROOT", "./data/credit_reports"))
 CR_MAX_CHUNKS_PER_SECTION: int = int(os.getenv("CR_MAX_CHUNKS_PER_SECTION", "12"))
-CREDIT_REPORT_MAX_UPLOAD_MB: int = int(os.getenv("CREDIT_REPORT_MAX_UPLOAD_MB", "20"))
+# Raised from 20 MB → 80 MB so Docling can process large enterprise PDFs (TSMC ~60 MB).
+CREDIT_REPORT_MAX_UPLOAD_MB: int = int(os.getenv("CREDIT_REPORT_MAX_UPLOAD_MB", "80"))
 CR_ETL_MAX_TEXT_CHARS: int = int(os.getenv("CR_ETL_MAX_TEXT_CHARS", "500000"))
-CR_OCR_MAX_PDF_MB: int = int(os.getenv("CR_OCR_MAX_PDF_MB", "50"))
+CR_OCR_MAX_PDF_MB: int = int(os.getenv("CR_OCR_MAX_PDF_MB", "80"))
+# Scanned-PDF OCR timeout: 450s handles ~80 MB PDFs on CPU; raise further for GPU hosts.
+CR_OCR_TIMEOUT_SECONDS: float = float(os.getenv("CR_OCR_TIMEOUT_SECONDS", "450"))
 
 CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "*")
 
@@ -62,13 +70,18 @@ ALGORITHM: str = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+# ── Market data integrations ──────────────────────────────────────────────────────────────────
+# Set TWSE_VERIFY_SSL=false only if the TWSE/MOPS TLS cert chain fails on the deployment host.
+TWSE_VERIFY_SSL: bool = os.getenv("TWSE_VERIFY_SSL", "true").lower() != "false"
+# In-process cache TTL for TWSE/TPEx company bundles (seconds). Default 3 hours.
+TWSE_BUNDLE_CACHE_TTL: float = float(os.getenv("TWSE_BUNDLE_CACHE_TTL", str(3 * 3600)))
+
 # ── PromptOps ──────────────────────────────────────────────────────────────────────────────────────
 PROMPT_AUTO_DEPLOY: bool = os.getenv("PROMPT_AUTO_DEPLOY", "false").lower() == "true"
 GOLDEN_DATASET_ROOT: Path = Path(os.getenv("GOLDEN_DATASET_ROOT", "./data/golden_datasets"))
 
 # ── Paths ──────────────────────────────────────────────────────────────────────────────────────
 MODULE_ROOT: Path = Path(__file__).parent
-INDUSTRY_TEMPLATES_ROOT: Path = MODULE_ROOT / "industry_templates"
 
 # ── Generation ordering ────────────────────────────────────────────────────────────────────────────────────────────
 GENERATION_ORDER: list[int] = [4, 7, 1, 3, 2, 5, 6, 8, 9, 10]
@@ -166,6 +179,7 @@ CONTINUATION_END_TOKENS: dict[int, str | None] = {
     8: None,
     9: "[§9 CONTINUED — PART 2 FOLLOWS]",
     10: "[§10 CONTINUED — PART 2]",
+    11: None,
 }
 
 CONTINUATION_RESUME_TOKENS: dict[int, str | None] = {
@@ -179,6 +193,7 @@ CONTINUATION_RESUME_TOKENS: dict[int, str | None] = {
     8: None,
     9: "[§9 CONTINUED]",
     10: "[§10 CONTINUED]",
+    11: None,
 }
 
 

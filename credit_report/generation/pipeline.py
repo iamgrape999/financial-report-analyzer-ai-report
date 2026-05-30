@@ -93,6 +93,8 @@ async def run_section_generation(
     actor_role: str = "analyst",
     preceding_outputs: Optional[dict[int, str]] = None,
     output_language: str = "en",
+    industry: str = "tw_shipping",
+    institution_name: str = "the Bank",
 ) -> SectionOutput:
     """
     Run the full generation pipeline for a single section.
@@ -164,6 +166,8 @@ async def run_section_generation(
                 evidence_chunks=evidence_chunks,
                 preceding_outputs=preceding_outputs,
                 output_language=output_language,
+                industry=industry,
+                institution_name=institution_name,
             )
 
         markdown = _strip_qa_output(markdown)
@@ -303,6 +307,8 @@ async def run_full_report_generation(
     actor_user_id: str,
     actor_role: str = "analyst",
     output_language: str = "en",
+    industry: str = "tw_shipping",
+    institution_name: str = "the Bank",
 ) -> dict[int, str]:
     """
     Generate all sections in GENERATION_ORDER, skipping any whose hard
@@ -330,6 +336,8 @@ async def run_full_report_generation(
                 actor_role=actor_role,
                 preceding_outputs=generated_outputs,
                 output_language=output_language,
+                industry=industry,
+                institution_name=institution_name,
             )
             results[section_no] = output.status
             if output.markdown:

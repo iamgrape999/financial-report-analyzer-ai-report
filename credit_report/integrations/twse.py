@@ -4,16 +4,24 @@ import csv
 import io
 import logging
 import re
+import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 import httpx
+
+from credit_report.config import TWSE_BUNDLE_CACHE_TTL, TWSE_VERIFY_SSL
 
 logger = logging.getLogger(__name__)
 
 TWSE_BASE_URL = "https://openapi.twse.com.tw/v1"
 MOPS_OPEN_DATA_CSV_BASE_URL = "https://mopsfin.twse.com.tw/opendata"
+
+# In-process cache: {stock_code: (fetched_at_monotonic, bundle)}
+# Keyed by stock code; TTL controlled by TWSE_BUNDLE_CACHE_TTL (default 3h).
+# Module-level so it is shared across all TWSEOpenAPIClient instances in a process.
+_bundle_cache: dict[str, tuple[float, dict[str, list[dict[str, Any]]]]] = {}
 
 ENDPOINTS = {
     "company_profile": "/opendata/t187ap03_L",
@@ -305,12 +313,19 @@ def _derive_ratios(income: dict[str, dict[str, float]], balance: dict[str, dict[
 class TWSEOpenAPIClient:
     base_url: str = TWSE_BASE_URL
     timeout_seconds: float = 30.0
+    exchange_name: str = field(default="TWSE", init=False)
 
     async def fetch(self, endpoint: str) -> list[dict[str, Any]]:
         url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         headers = {"Accept": "application/json", "User-Agent": "financial-report-analyzer/1.0"}
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds, verify=False, headers=headers) as client:
+            # TWSE_VERIFY_SSL defaults True; set False only if TWSE's cert chain
+            # fails on the deployment host (known issue on some cloud egress IPs).
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+                verify=TWSE_VERIFY_SSL,
+                headers=headers,
+            ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 content_type = resp.headers.get("content-type", "")
@@ -332,7 +347,11 @@ class TWSEOpenAPIClient:
             dataset = endpoint.rsplit("/", 1)[-1]
             csv_url = f"{MOPS_OPEN_DATA_CSV_BASE_URL}/{dataset}.csv"
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds, verify=False, headers={"User-Agent": "financial-report-analyzer/1.0"}) as client:
+                async with httpx.AsyncClient(
+                    timeout=self.timeout_seconds,
+                    verify=TWSE_VERIFY_SSL,
+                    headers={"User-Agent": "financial-report-analyzer/1.0"},
+                ) as client:
                     resp = await client.get(csv_url)
                     resp.raise_for_status()
                     text = resp.content.decode("utf-8-sig", errors="replace")
@@ -342,9 +361,18 @@ class TWSEOpenAPIClient:
         return []
 
     async def fetch_company_bundle(self, stock_code: str) -> dict[str, list[dict[str, Any]]]:
+        now = time.monotonic()
+        cached = _bundle_cache.get(stock_code)
+        if cached is not None:
+            cached_at, bundle = cached
+            if now - cached_at < TWSE_BUNDLE_CACHE_TTL:
+                logger.debug("fetch_company_bundle: cache hit stock=%s age=%.0fs", stock_code, now - cached_at)
+                return bundle
+
         bundle: dict[str, list[dict[str, Any]]] = {}
         for name, endpoint in ENDPOINTS.items():
             bundle[name] = await self.fetch(endpoint)
+        _bundle_cache[stock_code] = (now, bundle)
         return bundle
 
 

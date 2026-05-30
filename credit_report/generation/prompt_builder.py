@@ -3,10 +3,32 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-SYSTEM_PROMPT = """\
-You are a senior credit analyst at an international commercial bank specialising in \
-structured trade and corporate finance for the marine and shipping industry.
+# Per-industry LLM persona descriptions — injected into the dynamic system prompt.
+_INDUSTRY_DESCRIPTIONS: dict[str, str] = {
+    "tw_semiconductor": (
+        "structured finance and corporate lending for semiconductor, fabless IC design, "
+        "and advanced technology manufacturing companies listed on Taiwan exchanges"
+    ),
+    "tw_banking": (
+        "corporate and wholesale banking analysis for financial institutions, "
+        "commercial banks, and financial holding companies in Taiwan"
+    ),
+    "tw_shipping": (
+        "structured trade and corporate finance for the marine and shipping industry, "
+        "including container shipping, bulk carriers, and shipbuilding"
+    ),
+    "tw_real_estate": (
+        "corporate lending and project finance for real estate developers, "
+        "construction companies, and land development projects in Taiwan"
+    ),
+    "tw_insurance": (
+        "financial analysis and credit assessment for insurance companies, "
+        "life insurers, non-life insurers, and financial holding groups in Taiwan"
+    ),
+    "generic": "corporate and institutional banking across diversified industries",
+}
 
+_SYSTEM_PROMPT_RULES = """\
 Your task is to write one section of a formal Credit Risk Assessment Report. You must:
 - Write in professional banking English
 - Use precise financial terminology
@@ -16,6 +38,19 @@ Your task is to write one section of a formal Credit Risk Assessment Report. You
 - If a figure is not provided in the input data, state "not available" rather than guessing
 - Format numbers with commas (e.g. USD 2,791m) and round to sensible precision
 """
+
+
+def _build_system_prompt(industry: str = "tw_shipping", institution_name: str = "the Bank") -> str:
+    desc = _INDUSTRY_DESCRIPTIONS.get(industry, _INDUSTRY_DESCRIPTIONS["generic"])
+    return (
+        f"You are a senior credit analyst at {institution_name} specialising in {desc}.\n\n"
+        + _SYSTEM_PROMPT_RULES
+    )
+
+
+# Legacy constant kept for any code that imports it directly; resolves to the
+# shipping/CUB default so existing behaviour is unchanged unless overridden.
+SYSTEM_PROMPT = _build_system_prompt(industry="tw_shipping", institution_name="the Bank")
 
 SECTION_HEADINGS: dict[int, str] = {
     1: "Section 1 — Credit Facility & Key Terms",
@@ -28,6 +63,7 @@ SECTION_HEADINGS: dict[int, str] = {
     8: "Section 8 — Changes in Engaged Banks",
     9: "Section 9 — Credit Analysis Checklist",
     10: "Section 10 — Appendix",
+    11: "Section 11 — Analyst / External Research Summary",
 }
 
 SECTION_INSTRUCTIONS: dict[int, str] = {
@@ -1550,6 +1586,54 @@ SECTION_INSTRUCTIONS: dict[int, str] = {
         "3. If token limit → split: `[§10 CONTINUED — PART 2]`\n"
         "4. Priority: Appendix III > Appendix I > Appendix II\n"
     ),
+    11: (
+        # ── §11 Analyst / External Research Summary ───────────────────────────────
+        "## Role\n"
+        "Summarise an analyst or external research report attached as evidence. "
+        "Your output becomes §11 of the credit report — a concise, structured "
+        "synthesis that a credit committee can read in under two minutes.\n\n"
+
+        "## MANDATORY OUTPUT STRUCTURE (in order, no reordering)\n\n"
+
+        "### 11.1 Report Identification\n"
+        "One-row table: Source (broker/house name) | Date | Analyst(s) | Report Title | Pages\n\n"
+
+        "### 11.2 Rating & Target Price\n"
+        "One-row table: Current Rating | Prior Rating | Target Price | Current Price | "
+        "Upside / Downside (%) | Rating Change (Y/N)\n"
+        "- Map to standard values: BUY / OUTPERFORM / ADD → **BUY**; "
+        "HOLD / NEUTRAL / MARKET PERFORM → **HOLD**; "
+        "SELL / UNDERPERFORM / REDUCE → **SELL**.\n"
+        "- If no rating present: write 'Not rated'.\n\n"
+
+        "### 11.3 Investment Thesis (3–5 bullets)\n"
+        "Key reasons for the rating. One bullet per driver. Be specific: cite numbers from the report.\n\n"
+
+        "### 11.4 EPS & Revenue Forecasts\n"
+        "Table columns: Metric | FY(current) Est | FY(+1) Est | FY(+2) Est | YoY Growth\n"
+        "Include: Revenue, Gross Profit, Operating Income, Net Income, EPS, EBITDA (if available).\n"
+        "Use the currency and unit stated in the source report.\n\n"
+
+        "### 11.5 Valuation\n"
+        "One-row table per method used: Method (P/E / EV/EBITDA / P/B / DCF) | "
+        "Multiple / Assumption | Target | Implied Value\n"
+        "State the basis year for the valuation multiple.\n\n"
+
+        "### 11.6 Key Risks\n"
+        "Two columns: Upside Risks | Downside Risks. 2–4 bullets each.\n\n"
+
+        "### 11.7 Analyst vs Management Delta\n"
+        "Where analyst estimates differ materially (>5%) from management guidance, "
+        "call out the gap explicitly: Metric | Management Guidance | Analyst Estimate | Delta.\n"
+        "If no management guidance is referenced: write 'No management guidance cited'.\n\n"
+
+        "## RULES\n"
+        "1. Every number MUST come from the attached evidence — zero hallucination.\n"
+        "2. If a subsection has no data in the evidence, write '[Data not available in source report]'.\n"
+        "3. Do NOT add credit opinions or risk ratings beyond what the analyst wrote.\n"
+        "4. This is a SUMMARY section — do not reproduce verbatim paragraphs from the source.\n"
+        "5. Keep the full section under 1,500 words.\n"
+    ),
 }
 
 OUTPUT_INSTRUCTIONS = """\
@@ -1671,12 +1755,17 @@ def build_section_prompt(
     is_continuation: bool = False,
     continuation_resume_token: Optional[str] = None,
     output_language: str = "en",
+    industry: str = "tw_shipping",
+    institution_name: str = "the Bank",
 ) -> tuple[str, str]:
     """
     Build (system_prompt, user_prompt) for a single section generation call.
 
     When is_continuation=True the user_prompt instructs the model to continue
     from where it left off, using the resume token as a prefix.
+
+    industry / institution_name parameterise the system prompt persona so the
+    LLM context matches the actual deal (e.g. tw_semiconductor instead of shipping).
     """
     heading = SECTION_HEADINGS.get(section_no, f"Section {section_no}")
     instructions = SECTION_INSTRUCTIONS.get(section_no, f"Write {heading}.")
@@ -1736,5 +1825,12 @@ def build_section_prompt(
             f"{OUTPUT_INSTRUCTIONS}"
         )
 
-    system_prompt = SYSTEM_PROMPT + (_ZH_INSTRUCTION if output_language == "zh" else "")
+    # Build dynamic system prompt for this industry/institution.
+    # Also replace every occurrence of "CUB" in the section instructions with
+    # the actual institution name so the LLM context matches the deal.
+    system_prompt = _build_system_prompt(industry=industry, institution_name=institution_name)
+    if output_language == "zh":
+        system_prompt += _ZH_INSTRUCTION
+    if institution_name and institution_name not in ("the Bank", "CUB"):
+        user_prompt = user_prompt.replace("CUB", institution_name)
     return system_prompt, user_prompt

@@ -25,7 +25,8 @@ from credit_report.database import get_db
 from credit_report.generation.evidence import extract_text_from_file, extract_text_from_file_path, save_document_text
 from credit_report.generation.etl import DOCUMENT_SECTION_MAP, etl_document
 from credit_report.generation.models import SectionDocument, SectionImportProposal
-from credit_report.integrations.twse import TWSEOpenAPIClient, build_section7_input
+from credit_report.integrations.market_data import create_market_data_provider
+from credit_report.integrations.twse import build_section7_input
 from credit_report.generation.document_pipeline import (
     build_page_bound_chunks,
     commit_section_import_proposal,
@@ -59,6 +60,42 @@ _TASK_TTL_SECONDS = 6 * 60 * 60
 _MAX_GENERATION_TASKS = 200
 _background_tasks: set[asyncio.Task] = set()
 _TASKS_FILE = runtime_config.CREDIT_REPORTS_ROOT.parent / "generation_tasks.json"
+
+
+async def _infer_output_language(
+    db: AsyncSession,
+    report_id: str,
+    explicit_lang: Optional[str],
+) -> str:
+    """Return output language for generation.
+
+    None  → auto-detect from the report's uploaded document profiles.
+    "en"  → force English (explicit caller choice).
+    "zh"  → force Traditional Chinese (explicit caller choice).
+
+    Auto-detect reads document_profile.language from SectionDocument rows.
+    If any uploaded document has language="zh_tw", defaults to "zh".
+    """
+    if explicit_lang in ("en", "zh"):
+        return explicit_lang
+    # Auto-detect: scan document profiles stored during ETL.
+    try:
+        from credit_report.generation.models import SectionDocument as _SD
+        result = await db.execute(
+            select(_SD.document_profile)
+            .where(_SD.report_id == report_id, _SD.document_profile.isnot(None))
+            .limit(5)
+        )
+        for (profile_dict,) in result:
+            if isinstance(profile_dict, dict) and profile_dict.get("language") == "zh_tw":
+                logger.info(
+                    "_infer_output_language: detected zh_tw from document profile, using zh report=%s",
+                    report_id,
+                )
+                return "zh"
+    except Exception as exc:
+        logger.warning("_infer_output_language: profile lookup failed report=%s: %s", report_id, exc)
+    return "en"
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -330,6 +367,7 @@ class TWSEImportRequest(BaseModel):
     role: str = "guarantor"  # borrower | guarantor
     section_no: int = 7
     merge_existing: bool = True
+    exchange: str = "auto"  # "auto" | "twse" | "tpex"
 
 
 class TWSEImportResult(BaseModel):
@@ -629,30 +667,44 @@ async def import_twse_openapi_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
-    """Import high-coverage TWSE OpenAPI company and financial-statement data into §7."""
+    """Import company and financial-statement data from TWSE or TPEx OpenAPI into §7.
+
+    exchange="auto" (default) auto-detects TWSE vs TPEx from the stock code range.
+    exchange="tpex" forces the TPEx client (OTC-listed companies).
+    exchange="twse" forces the TWSE Main Board client.
+    """
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
 
     stock_code = re.sub(r"\D", "", payload.stock_code or "")
-    if len(stock_code) != 4:
-        raise HTTPException(status_code=400, detail="stock_code must be a 4-digit TWSE listed company code")
+    if len(stock_code) not in (4, 5, 6):
+        raise HTTPException(
+            status_code=400,
+            detail="stock_code must be a 4–6 digit Taiwan-listed company code (TWSE or TPEx)",
+        )
     if payload.role not in {"borrower", "guarantor"}:
         raise HTTPException(status_code=400, detail="role must be 'borrower' or 'guarantor'")
     if payload.section_no != 7:
-        raise HTTPException(status_code=400, detail="TWSE import currently targets section 7")
+        raise HTTPException(status_code=400, detail="Market data import currently targets section 7")
+    if payload.exchange not in {"auto", "twse", "tpex"}:
+        raise HTTPException(status_code=400, detail="exchange must be 'auto', 'twse', or 'tpex'")
 
-    client = TWSEOpenAPIClient()
-    bundle = await client.fetch_company_bundle(stock_code)
+    provider = create_market_data_provider(stock_code, exchange=payload.exchange)
+    bundle = await provider.fetch_company_bundle(stock_code)
     imported = build_section7_input(stock_code, bundle, role=payload.role)
     if not imported.get("twse_import", {}).get("row_counts") or not any(imported["twse_import"]["row_counts"].values()):
-        raise HTTPException(status_code=404, detail=f"No TWSE OpenAPI rows found for stock code {stock_code}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No market data found for stock code {stock_code} on {provider.exchange_name}",
+        )
 
     existing = await _load_section_input(db, report_id, payload.section_no) if payload.merge_existing else {}
     merged = _deep_merge(existing, imported) if payload.merge_existing else imported
     await _upsert_section_input_json(db, report_id, payload.section_no, merged, current_user.id)
     logger.info(
-        "import_twse_openapi_data: report=%s stock=%s role=%s fields=%d user=%s",
-        report_id, stock_code, payload.role, _count_leaf_fields(imported), current_user.id,
+        "import_twse_openapi_data: report=%s stock=%s exchange=%s role=%s fields=%d user=%s",
+        report_id, stock_code, provider.exchange_name, payload.role,
+        _count_leaf_fields(imported), current_user.id,
     )
 
     return TWSEImportResult(
@@ -1235,7 +1287,11 @@ async def generate_section(
     report_id: str,
     section_no: int,
     background_tasks: BackgroundTasks,
-    gen_language: str = Query(default="en", description="Output language: 'en' for English, 'zh' for Traditional Chinese"),
+    gen_language: Optional[str] = Query(
+        default=None,
+        description="Output language: 'en' for English, 'zh' for Traditional Chinese. "
+                    "Omit to auto-detect from uploaded document language.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
@@ -1243,9 +1299,10 @@ async def generate_section(
 
     Returns 202 immediately with a task_id. Poll GET /generate/status/{task_id}
     for completion. Returns 409 if hard dependencies are not yet generated.
+    §11 (analyst/research report summary) is supported and has no hard dependencies.
     """
-    if section_no < 1 or section_no > 10:
-        raise HTTPException(status_code=400, detail="section_no must be 1–10")
+    if section_no < 1 or section_no > 11:
+        raise HTTPException(status_code=400, detail="section_no must be 1–11")
 
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
@@ -1261,7 +1318,7 @@ async def generate_section(
 
     task_id = _create_generation_task({"status": "running", "section_no": section_no})
     user_id, user_role = current_user.id, current_user.role
-    output_lang = gen_language if gen_language in ("en", "zh") else "en"
+    output_lang = await _infer_output_language(db, report_id, gen_language)
 
     async def _bg_generate_section():
         from credit_report.database import AsyncSessionLocal
@@ -1321,7 +1378,11 @@ async def generate_section(
 async def generate_full_report(
     report_id: str,
     background_tasks: BackgroundTasks,
-    gen_language: str = Query(default="en", description="Output language: 'en' for English, 'zh' for Traditional Chinese"),
+    gen_language: Optional[str] = Query(
+        default=None,
+        description="Output language: 'en' for English, 'zh' for Traditional Chinese. "
+                    "Omit to auto-detect from uploaded document language.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_analyst),
 ):
@@ -1355,7 +1416,7 @@ async def generate_full_report(
 
     task_id = _create_generation_task({"status": "running"})
     user_id, user_role = current_user.id, current_user.role
-    full_output_lang = gen_language if gen_language in ("en", "zh") else "en"
+    full_output_lang = await _infer_output_language(db, report_id, gen_language)
 
     async def _bg_generate_full_report():
         from credit_report.database import AsyncSessionLocal

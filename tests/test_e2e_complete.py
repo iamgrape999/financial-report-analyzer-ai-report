@@ -700,10 +700,14 @@ class TestTWSEOpenAPIImport:
 
 class TestGeneration:
 
-    async def test_generate_section_11_blocked(self, ac, admin_hdrs, report):
+    async def test_generate_section_11_accepted(self, ac, admin_hdrs, report):
+        """Stage 3 Item 7: §11 now has a real prompt and is generatable (returns 202)."""
         r = await ac.post(f"{REPORTS}/{report['id']}/generate/11", headers=admin_hdrs)
-        assert r.status_code == 400
-        assert "1" in r.json()["detail"] and "10" in r.json()["detail"]
+        # 202 = queued; 409 = missing hard deps (acceptable); 400 = range error (not acceptable)
+        assert r.status_code in (202, 409), (
+            f"§11 generate returned {r.status_code}: {r.json()}. "
+            "§11 should be generatable after Stage 3 Item 7."
+        )
 
     async def test_generate_section_0_blocked(self, ac, admin_hdrs, report):
         r = await ac.post(f"{REPORTS}/{report['id']}/generate/0", headers=admin_hdrs)

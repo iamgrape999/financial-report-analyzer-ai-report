@@ -57,24 +57,21 @@ def _have(pkg: str) -> bool:
 class TestConfigBoundaries:
     """DID-UPLOAD-01 / DID-ETL-TRUNC / DID-OCR-CAP"""
 
-    def test_upload_cap_is_20mb(self):
-        """CREDIT_REPORT_MAX_UPLOAD_MB is hard-coded to 20 MB.
+    def test_upload_cap_supports_tsmc_pdfs(self):
+        """Stage 3 Item 10: CREDIT_REPORT_MAX_UPLOAD_MB raised to 80 MB.
 
-        TSMC's annual report (e.g. 2023) is ~54 MB; their sustainability
-        report is ~30 MB.  Any value ≤ 29 MB rejects the primary use-case.
-        Source: credit_report/config.py:50
+        TSMC's annual report (~54 MB) and sustainability report (~31 MB)
+        must both fit within the upload cap.
         """
         from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB
-        assert CREDIT_REPORT_MAX_UPLOAD_MB == 20, (
-            f"Upload cap changed to {CREDIT_REPORT_MAX_UPLOAD_MB} MB — "
-            "update this test AND verify TSMC PDFs now fit."
+        assert CREDIT_REPORT_MAX_UPLOAD_MB >= 80, (
+            f"Upload cap is {CREDIT_REPORT_MAX_UPLOAD_MB} MB — must be ≥ 80 MB for TSMC PDFs"
         )
-        # DID-UPLOAD-01: typical TSMC annual report sizes (MB)
+        # Verify TSMC-sized documents are accepted
         tsmc_typical_sizes_mb = {"annual_report_2023": 54, "sustainability_report_2023": 31}
         oversized = {k: v for k, v in tsmc_typical_sizes_mb.items() if v > CREDIT_REPORT_MAX_UPLOAD_MB}
-        assert oversized, (
-            "Expected at least one TSMC document to exceed the 20 MB cap. "
-            "DID-UPLOAD-01 would be resolved if this assertion fires."
+        assert not oversized, (
+            f"Upload cap {CREDIT_REPORT_MAX_UPLOAD_MB} MB still rejects TSMC documents: {oversized}"
         )
 
     def test_etl_text_cap_is_120k_chars(self):
@@ -750,9 +747,9 @@ class TestUploadSizeGuard:
         from fastapi import HTTPException, UploadFile
         from credit_report.api.generate import _persist_upload_to_disk, _MAX_UPLOAD_BYTES
 
-        assert _MAX_UPLOAD_BYTES == 20 * 1024 * 1024
+        assert _MAX_UPLOAD_BYTES >= 80 * 1024 * 1024  # Stage 3: limit raised to 80 MB
 
-        oversized = b"x" * (21 * 1024 * 1024)  # 21 MB
+        oversized = b"x" * (_MAX_UPLOAD_BYTES + 1)  # 1 byte over the current limit
 
         class FakeUpload:
             filename = "tsmc_annual_report_2023.pdf"
@@ -778,7 +775,7 @@ class TestUploadSizeGuard:
                     "test-report-id", "doc-001", FakeUpload(), "tsmc_annual_report_2023.pdf"
                 )
             assert exc_info.value.status_code == 413
-            assert "20 MB" in exc_info.value.detail or "upload limit" in exc_info.value.detail
+            assert "upload limit" in exc_info.value.detail.lower() or "mb" in exc_info.value.detail.lower()
         finally:
             gen_module.runtime_config.CREDIT_REPORTS_ROOT = original_root
 
@@ -836,8 +833,10 @@ class TestKnownLimits:
 
     def test_known_limit_upload_20mb(self):
         from credit_report.config import CREDIT_REPORT_MAX_UPLOAD_MB
-        # Document the limit — this test should be updated if the limit is raised
-        assert CREDIT_REPORT_MAX_UPLOAD_MB == 20  # DID-UPLOAD-01: raise to ≥ 80 for TSMC
+        # Stage 3 Item 10: limit raised to 80 MB for TSMC-scale PDFs
+        assert CREDIT_REPORT_MAX_UPLOAD_MB >= 80, (
+            f"Upload cap is {CREDIT_REPORT_MAX_UPLOAD_MB} MB — must be ≥ 80 MB"
+        )
 
     def test_known_limit_etl_truncation_120k(self):
         """FIX: CR_ETL_MAX_TEXT_CHARS raised from 120 000 to 500 000."""

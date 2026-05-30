@@ -1173,12 +1173,12 @@ class TestSectionInstructionsPresent:
         instr = SECTION_INSTRUCTIONS[sec]
         assert isinstance(instr, str) and len(instr) > 200, f"§{sec} instruction too short"
 
-    def test_sec11_uses_generic_fallback_instruction(self):
-        """§11 (equity research) has no dedicated SECTION_INSTRUCTIONS entry.
-        build_section_prompt() falls back to 'Write Section 11.' which is acceptable
-        because the full JSON payload still provides the AI with all data."""
-        assert 11 not in SECTION_INSTRUCTIONS  # confirmed: uses fallback
-        # Verify the fallback still produces a usable prompt
+    def test_sec11_has_dedicated_instruction(self):
+        """§11 (equity research) now has a dedicated SECTION_INSTRUCTIONS entry
+        with 7 structured subsections for analyst report summarization."""
+        assert 11 in SECTION_INSTRUCTIONS  # Stage 3: §11 fully supported
+        assert len(SECTION_INSTRUCTIONS[11]) > 200
+        # Verify the prompt still includes the payload data
         import copy
         sys_p, usr_p = _build(11, copy.deepcopy(SEC11_PAYLOAD))
         assert "Analyst Input Data" in usr_p

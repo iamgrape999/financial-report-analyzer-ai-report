@@ -30,6 +30,7 @@ from credit_report.generation.models import (
     SectionDocument,
     SectionImportProposal,
 )
+from credit_report.config import CR_OCR_TIMEOUT_SECONDS
 from credit_report.models import SectionInput
 
 FINANCIAL_PAGE_TERMS = (
@@ -612,11 +613,11 @@ async def scan_document_pages(db: AsyncSession, report_id: str, doc: SectionDocu
     # OCR is CPU-intensive: cap at 5 minutes so the API request never hangs
     # indefinitely.  On GPU hardware in production the same job takes ~30 seconds.
     if profile.is_scanned:
-        logger.info("scan_document_pages: scanned PDF detected for doc=%s — re-extracting with OCR (timeout=300s)", doc.id)
+        logger.info("scan_document_pages: scanned PDF detected for doc=%s — re-extracting with OCR (timeout=%.0fs)", doc.id, CR_OCR_TIMEOUT_SECONDS)
         doc.etl_status = "ocr_scanning"
         await db.flush()
         try:
-            page_payloads = await _extract(do_ocr=True, timeout=300.0)
+            page_payloads = await _extract(do_ocr=True, timeout=CR_OCR_TIMEOUT_SECONDS)
             # Re-detect profile with OCR-enriched text
             sample_text = "\n".join(p.get("merged_text", "") for p in page_payloads[:20])
             profile = detect_document_profile(sample_text, filename=doc.original_filename, pages=page_payloads)

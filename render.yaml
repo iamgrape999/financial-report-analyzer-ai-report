@@ -38,11 +38,13 @@ services:
       - key: CR_MAX_CONCURRENT_EXTRACTIONS
         value: "1"
       - key: CREDIT_REPORT_MAX_UPLOAD_MB
-        value: "20"
+        value: "80"
       - key: CR_ETL_MAX_TEXT_CHARS
         value: "500000"
       - key: CR_OCR_MAX_PDF_MB
-        value: "50"
+        value: "80"
+      - key: CR_OCR_TIMEOUT_SECONDS
+        value: "450"
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
       - key: CORS_ALLOW_ORIGINS

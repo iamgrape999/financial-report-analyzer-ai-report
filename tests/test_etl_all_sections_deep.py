@@ -388,11 +388,11 @@ async def test_different_sections_do_not_interfere(db, sec_no):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestGenerateSectionGuards:
-    """§11 must be blocked from AI generation; §1-10 must be allowed."""
+    """§1-11 are generatable; §0, 12+ must be blocked."""
 
-    @pytest.mark.parametrize("sec_no", list(range(1, 11)))
+    @pytest.mark.parametrize("sec_no", list(range(1, 12)))
     @pytest.mark.asyncio
-    async def test_generate_accepts_sections_1_to_10(self, db, sec_no):
+    async def test_generate_accepts_sections_1_to_11(self, db, sec_no):
         from fastapi import BackgroundTasks
         from credit_report.api.generate import generate_section
 
@@ -414,8 +414,8 @@ class TestGenerateSectionGuards:
         assert resp is not None, f"§{sec_no}: generate_section returned None"
 
     @pytest.mark.asyncio
-    async def test_generate_blocks_section_11(self, db):
-        """§11 is reference-only — AI generation must be blocked with 400."""
+    async def test_generate_accepts_section_11(self, db):
+        """Stage 3 Item 7: §11 now has a real prompt and must be accepted (202)."""
         from fastapi import BackgroundTasks
         from credit_report.api.generate import generate_section
 
@@ -423,16 +423,18 @@ class TestGenerateSectionGuards:
         user = _make_user()
         await _seed_report(db, rid, owner_id=user.id)
         mock_bg = MagicMock(spec=BackgroundTasks)
+        mock_bg.add_task = MagicMock()
 
-        with pytest.raises(HTTPException) as exc:
-            await generate_section(
+        with (
+            patch("credit_report.api.generate.run_section_generation", new=AsyncMock()),
+            patch("credit_report.api.generate.check_hard_dependencies",
+                  new=AsyncMock(return_value=[])),
+        ):
+            resp = await generate_section(
                 report_id=rid, section_no=11,
                 db=db, background_tasks=mock_bg, current_user=user,
             )
-        assert exc.value.status_code == 400, (
-            f"§11 generate: expected 400, got {exc.value.status_code}. "
-            f"§11 is analyst reference data — it must NOT be AI-generated."
-        )
+        assert resp is not None, "§11 generate_section must return a task result"
 
     @pytest.mark.parametrize("bad_no", [0, 12, -1, 100, 999])
     @pytest.mark.asyncio
@@ -1148,16 +1150,13 @@ class TestSection11Integration:
             f"2025F is_forecast should be True (analyst forecast), got: {actual_flags['2025F']}"
         )
 
-    def test_section_11_not_generatable_by_ai(self):
-        """§11 is reference data — it must not appear as a valid AI-generate target."""
-        html = _load_html()
-        # The section panel for §11 should not show a "Generate" button
-        # The generate_section API guard at section_no > 10 must be documented
+    def test_section_11_generatable_by_ai(self):
+        """Stage 3 Item 7: §11 now has a real prompt — guard must allow 1–11."""
         from credit_report.api.generate import generate_section
         import inspect
         source = inspect.getsource(generate_section)
-        assert "section_no > 10" in source or "section_no < 1 or section_no > 10" in source, (
-            "generate_section must explicitly guard against section_no > 10"
+        assert "section_no > 11" in source or "section_no < 1 or section_no > 11" in source, (
+            "generate_section must allow section_no up to 11 after Stage 3 Item 7"
         )
 
     def test_section_11_in_etl_schema(self):
