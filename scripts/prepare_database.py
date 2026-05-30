@@ -1,15 +1,19 @@
 """Prepare the database for Render startup.
 
-Fresh databases are upgraded through Alembic normally. Older deployments of this
-app created tables with SQLAlchemy ``create_all`` before Alembic was run; those
-schemas have application tables but no ``alembic_version`` table. In that case,
-running ``alembic upgrade head`` from base attempts to recreate existing tables,
-so we stamp the current schema as the baseline before applying future upgrades.
+PostgreSQL deployments are upgraded through Alembic before the app starts. The
+default Render/local configuration uses SQLite when ``DATABASE_URL`` is unset;
+that database is managed by SQLAlchemy ``create_all`` because some historical
+Alembic migrations use PostgreSQL-style DDL that SQLite cannot execute.
+
+Older deployments may also have application tables but no ``alembic_version``
+row. Do not stamp those schemas as ``head`` automatically: doing so can skip
+constraint/data migrations that still need an operator-reviewed migration path.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -52,6 +56,14 @@ async def _table_state() -> tuple[bool, bool]:
     return has_version_row, bool(table_names & _APP_TABLES)
 
 
+def _is_sqlite_url(url: str) -> bool:
+    return url.startswith("sqlite")
+
+
+def _database_url_was_configured() -> bool:
+    return bool(os.getenv("DATABASE_URL"))
+
+
 def _alembic_config() -> Config:
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
@@ -59,11 +71,22 @@ def _alembic_config() -> Config:
 
 
 def main() -> None:
+    if _is_sqlite_url(DATABASE_URL):
+        if _database_url_was_configured():
+            logger.warning("Skipping Alembic migrations for SQLite DATABASE_URL; app startup will use create_all")
+        else:
+            logger.info("DATABASE_URL is unset; using default SQLite and skipping Alembic migrations")
+        return
+
     has_alembic_version, has_app_tables = asyncio.run(_table_state())
-    cfg = _alembic_config()
     if has_app_tables and not has_alembic_version:
-        logger.info("Existing unversioned schema detected; stamping Alembic baseline at head")
-        command.stamp(cfg, "head")
+        logger.error(
+            "Existing unversioned schema detected; refusing to stamp Alembic head automatically. "
+            "Run a reviewed baseline/migration procedure before enabling startup migrations."
+        )
+        raise SystemExit(1)
+
+    cfg = _alembic_config()
     logger.info("Running Alembic upgrade head")
     command.upgrade(cfg, "head")
 

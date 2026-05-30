@@ -495,15 +495,23 @@ def _extract_text_from_xlsx(file_bytes: bytes) -> str:
         parts: list[str] = []
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
+            max_output_row = min(ws.max_row, 50)
+            max_output_col = min(ws.max_column, 50)
             merged_values: dict[tuple[int, int], object] = {}
             for merged_range in ws.merged_cells.ranges:
+                min_row = max(merged_range.min_row, 1)
+                max_row = min(merged_range.max_row, max_output_row)
+                min_col = max(merged_range.min_col, 1)
+                max_col = min(merged_range.max_col, max_output_col)
+                if min_row > max_row or min_col > max_col:
+                    continue
                 anchor_value = ws.cell(merged_range.min_row, merged_range.min_col).value
-                for row_idx in range(merged_range.min_row, merged_range.max_row + 1):
-                    for col_idx in range(merged_range.min_col, merged_range.max_col + 1):
+                for row_idx in range(min_row, max_row + 1):
+                    for col_idx in range(min_col, max_col + 1):
                         merged_values[(row_idx, col_idx)] = anchor_value
 
             rows: list[list[object]] = []
-            for row in ws.iter_rows(max_row=min(ws.max_row, 50)):
+            for row in ws.iter_rows(max_row=max_output_row, max_col=max_output_col):
                 rows.append([merged_values.get((cell.row, cell.column), cell.value) for cell in row])
             if not rows:
                 continue

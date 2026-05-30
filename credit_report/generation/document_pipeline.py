@@ -53,6 +53,43 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
     8: ("公司債", "會計師", "法規遵循", "重大契約", "訴訟", "關係企業"),
     9: ("內部控制", "法規遵循", "出口管制", "反托拉斯", "勞動", "資安", "風險管理"),
     10: ("目錄", "財務概況", "附錄", "關係企業", "重要契約"),
+    11: (
+        "rating",
+        "buy",
+        "hold",
+        "sell",
+        "neutral",
+        "target price",
+        "price target",
+        "analyst",
+        "broker",
+        "research report",
+        "investment recommendation",
+        "forecast",
+        "estimate",
+        "valuation",
+        "upside",
+        "downside",
+        "PBR",
+        "PER",
+        "ROE",
+        "EPS",
+        "目標價",
+        "投資建議",
+        "個股報告",
+        "年度預測",
+        "季度預測",
+        "每股盈餘",
+        "殖利率",
+        "比率分析",
+    ),
+}
+
+# Section 11 can include short English analyst ratings.  Match them as tokens
+# instead of substrings so ordinary words such as "shareholder" or "holding"
+# do not suppress the fallback page window with false positives.
+SECTION_WORD_BOUNDARY_KEYWORDS: dict[int, tuple[str, ...]] = {
+    11: ("rating", "buy", "hold", "sell", "neutral"),
 }
 
 ANNUAL_SECTION_PLAN = {
@@ -159,7 +196,7 @@ def _printed_page(text: str) -> tuple[str | None, str | None]:
 
 def _section_hint(text: str) -> str | None:
     for section_no, keywords in SECTION_KEYWORDS.items():
-        if any(k in text for k in keywords):
+        if _matches_any_section_keyword(text, keywords, section_no):
             return str(section_no)
     return None
 
@@ -181,6 +218,28 @@ def _periods(text: str) -> list[str]:
     for year in re.findall(r"\b(20\d{2})\b", text):
         values.append(f"FY{year}")
     return sorted(set(values))
+
+
+def _matches_section_keyword(text: str, keyword: str, section_no: int) -> bool:
+    """Return whether text contains a section keyword using safe matching.
+
+    Page text extracted from PDFs often varies casing (for example "Rating",
+    "BUY", or "Target Price"), so comparisons are normalized to lower case.
+    Short §11 English ratings are matched with word boundaries to avoid broad
+    substring hits on unrelated annual-report text such as "holding company".
+    """
+    if not text or not keyword:
+        return False
+
+    normalized_text = re.sub(r"\s+", " ", text).lower()
+    normalized_keyword = re.sub(r"\s+", " ", keyword).lower()
+    if normalized_keyword in SECTION_WORD_BOUNDARY_KEYWORDS.get(section_no, ()):
+        return re.search(rf"(?<!\w){re.escape(normalized_keyword)}(?!\w)", normalized_text) is not None
+    return normalized_keyword in normalized_text
+
+
+def _matches_any_section_keyword(text: str, keywords: tuple[str, ...], section_no: int) -> bool:
+    return any(_matches_section_keyword(text, keyword, section_no) for keyword in keywords)
 
 
 def extract_pdf_pages(file_path: Path) -> list[dict]:
@@ -333,10 +392,13 @@ async def select_pages_for_section(db: AsyncSession, doc_id: str, section_no: in
     if not pages:
         return []
     keywords = SECTION_KEYWORDS.get(section_no, ())
-    selected = [p for p in pages if any(k in (p.merged_text or "") for k in keywords)]
+    selected = [
+        p for p in pages
+        if _matches_any_section_keyword(p.merged_text or "", keywords, section_no)
+    ]
     if section_no == 10:
         selected = pages[: min(5, len(pages))] + selected
-    if not selected and section_no in {4, 7}:
+    if not selected and section_no in {4, 7, 11}:
         selected = pages
     dedup = []
     seen = set()
@@ -411,6 +473,16 @@ def validate_section_proposal_gates(
     missing = list(source_gate.get("missing") or [])
     source_score = float(source_gate.get("coverage_score") or 0.0)
 
+    payload = proposed_json if isinstance(proposed_json, dict) else {}
+    if not payload:
+        return {
+            "passed": False,
+            "missing": sorted(set(missing + ["no_extracted_data"])),
+            "coverage_score": 0.0,
+            "extracted_metric_score": 0.0,
+            "missing_extracted_metrics": ["no_extracted_data"],
+        }
+
     if section_no != 7:
         return {
             "passed": bool(source_gate.get("passed", True)),
@@ -420,7 +492,6 @@ def validate_section_proposal_gates(
             "missing_extracted_metrics": [],
         }
 
-    payload = proposed_json if isinstance(proposed_json, dict) else {}
     haystack = "\n".join(_flatten_json_terms(payload))
     extracted_missing = [
         key for key, terms in SECTION7_TERM_MAP.items()
