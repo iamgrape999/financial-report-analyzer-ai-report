@@ -411,6 +411,16 @@ def validate_section_proposal_gates(
     missing = list(source_gate.get("missing") or [])
     source_score = float(source_gate.get("coverage_score") or 0.0)
 
+    payload = proposed_json if isinstance(proposed_json, dict) else {}
+    if not payload:
+        return {
+            "passed": False,
+            "missing": sorted(set(missing + ["no_extracted_data"])),
+            "coverage_score": 0.0,
+            "extracted_metric_score": 0.0,
+            "missing_extracted_metrics": ["no_extracted_data"],
+        }
+
     if section_no != 7:
         return {
             "passed": bool(source_gate.get("passed", True)),
@@ -420,7 +430,6 @@ def validate_section_proposal_gates(
             "missing_extracted_metrics": [],
         }
 
-    payload = proposed_json if isinstance(proposed_json, dict) else {}
     haystack = "\n".join(_flatten_json_terms(payload))
     extracted_missing = [
         key for key, terms in SECTION7_TERM_MAP.items()
