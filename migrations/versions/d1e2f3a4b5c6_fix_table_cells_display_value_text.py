@@ -20,20 +20,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        'table_cells',
-        'display_value',
-        existing_type=sa.String(length=255),
-        type_=sa.Text(),
-        existing_nullable=True,
-    )
+    # Use batch_alter_table so this is safe on SQLite (which lacks ALTER COLUMN
+    # TYPE) as well as PostgreSQL.  On SQLite alembic recreates the table; on
+    # PostgreSQL it emits a plain ALTER COLUMN.
+    with op.batch_alter_table('table_cells') as batch_op:
+        batch_op.alter_column(
+            'display_value',
+            existing_type=sa.String(length=255),
+            type_=sa.Text(),
+            existing_nullable=True,
+        )
 
 
 def downgrade() -> None:
-    op.alter_column(
-        'table_cells',
-        'display_value',
-        existing_type=sa.Text(),
-        type_=sa.String(length=255),
-        existing_nullable=True,
-    )
+    with op.batch_alter_table('table_cells') as batch_op:
+        batch_op.alter_column(
+            'display_value',
+            existing_type=sa.Text(),
+            type_=sa.String(length=255),
+            existing_nullable=True,
+        )

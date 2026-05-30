@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import re
 import uuid
@@ -56,6 +57,7 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024
 _extraction_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_EXTRACTIONS)
 _TASK_TTL_SECONDS = 6 * 60 * 60
 _MAX_GENERATION_TASKS = 200
+_background_tasks: set[asyncio.Task] = set()
 _TASKS_FILE = runtime_config.CREDIT_REPORTS_ROOT.parent / "generation_tasks.json"
 
 
@@ -190,7 +192,9 @@ def _schedule_document_text_extraction(report_id: str, doc_id: str, binary_path:
             )
 
     try:
-        asyncio.create_task(runner())
+        task = asyncio.create_task(runner())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         _extract_and_save_document_text(report_id, doc_id, binary_path, fname)
 
@@ -462,6 +466,9 @@ def _load_tasks_from_disk() -> None:
         logger.warning("generation_task_registry: failed to load tasks: %s", exc)
 
 
+_load_tasks_from_disk()
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _cleanup_generation_tasks(now: float | None = None) -> None:
@@ -507,8 +514,6 @@ def _update_generation_task(task_id: str, updates: dict) -> None:
     task.update(updates)
     task["updated_at"] = time.time()
     _save_tasks_to_disk()
-
-_load_tasks_from_disk()
 
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:

@@ -7,7 +7,7 @@ from itertools import count
 from pathlib import Path
 from typing import Optional
 
-from credit_report.config import CREDIT_REPORTS_ROOT, CR_MAX_CHUNKS_PER_SECTION, SECTION_RETRIEVAL_KEYWORDS
+from credit_report.config import CREDIT_REPORTS_ROOT, CR_MAX_CHUNKS_PER_SECTION, CR_OCR_MAX_PDF_MB, SECTION_RETRIEVAL_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -431,7 +431,7 @@ def extract_text_from_scanned_pdf_vision(pdf_bytes: bytes, max_pages: int = 20) 
     Gemini 2.5 Flash natively understands PDF inline data.
     """
     pdf_kb = len(pdf_bytes) // 1024
-    data = pdf_bytes[:20 * 1024 * 1024]
+    data = pdf_bytes[:CR_OCR_MAX_PDF_MB * 1024 * 1024]
     truncated = len(data) < len(pdf_bytes)
     logger.info(
         "[OCR] extract_text_from_scanned_pdf_vision: start pdf_kb=%d "
@@ -630,7 +630,7 @@ def extract_text_from_file_path(file_path: Path, filename: str) -> tuple[str, st
                 filename,
             )
             with file_path.open("rb") as fh:
-                text = extract_text_from_scanned_pdf_vision(fh.read(20 * 1024 * 1024))
+                text = extract_text_from_scanned_pdf_vision(fh.read(CR_OCR_MAX_PDF_MB * 1024 * 1024))
         return text, "pdf"
 
     return extract_text_from_file(file_path.read_bytes(), filename)

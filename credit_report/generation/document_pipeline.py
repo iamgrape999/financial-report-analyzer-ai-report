@@ -55,6 +55,7 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
     10: ("目錄", "財務概況", "附錄", "關係企業", "重要契約"),
     11: (
         "rating",
+        "ratings",
         "buy",
         "hold",
         "sell",
@@ -72,6 +73,7 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
         "downside",
         "PBR",
         "PER",
+        "P/E",
         "ROE",
         "EPS",
         "目標價",
@@ -89,7 +91,12 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
 # instead of substrings so ordinary words such as "shareholder" or "holding"
 # do not suppress the fallback page window with false positives.
 SECTION_WORD_BOUNDARY_KEYWORDS: dict[int, tuple[str, ...]] = {
-    11: ("rating", "buy", "hold", "sell", "neutral"),
+    # Section 2: "AI" would otherwise match "chairman", "sustainability", etc.
+    2: ("ai",),
+    # Section 11: "rating" added alongside "ratings" so plurals also match;
+    # "per", "eps", "p/e" are short acronyms that substring-match common words
+    # like "performance" or "percentage" without word-boundary anchoring.
+    11: ("rating", "ratings", "buy", "hold", "sell", "neutral", "per", "eps", "p/e"),
 }
 
 ANNUAL_SECTION_PLAN = {

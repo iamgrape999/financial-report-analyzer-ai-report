@@ -550,11 +550,13 @@ class TestDocuments:
         assert r.status_code == 404
 
     async def test_etl_document(self, ac, admin_hdrs, report):
+        # Use financial_statement type; annual_report now requires page-first
+        # scan-pages before the legacy /etl endpoint is allowed.
         content = b"Annual revenue USD 5.2 billion EBITDA 1.4 billion net income 800 million FY2024."
         up = await ac.post(
             f"{REPORTS}/{report['id']}/documents",
             files={"file": ("annual.txt", content, "text/plain")},
-            data={"document_type": "annual_report"},
+            data={"document_type": "financial_statement"},
             headers=admin_hdrs,
         )
         doc_id = up.json()["id"]
