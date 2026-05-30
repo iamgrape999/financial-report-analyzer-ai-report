@@ -843,8 +843,8 @@ async def etl_section_endpoint(
     current_user: User = Depends(require_analyst),
 ):
     """Run targeted ETL for exactly one report section using page-selected chunks."""
-    if section_no < 1 or section_no > 10:
-        raise HTTPException(status_code=400, detail="section_no must be between 1 and 10")
+    if section_no < 1 or section_no > 11:
+        raise HTTPException(status_code=400, detail="section_no must be between 1 and 11")
     report = await _require_report(db, report_id)
     _assert_owner_or_admin(report, current_user)
     doc = await _get_report_document(db, report_id, doc_id)
@@ -1044,12 +1044,17 @@ async def etl_document_endpoint(
         coverage = await get_page_scan_coverage(db, doc_id)
         if doc_type == "annual_report":
             if coverage["processed_pages"] == 0:
-                doc.etl_status = "low_coverage_failed"
-                await db.commit()
-                raise HTTPException(
-                    status_code=409,
-                    detail="Annual-report ETL requires page-first scan-pages before extraction",
-                )
+                binary_path = _document_binary_path(report_id, doc_id)
+                if not binary_path.exists():
+                    doc.etl_status = "low_coverage_failed"
+                    await db.commit()
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Annual-report binary not found for page-first scan — please re-upload",
+                    )
+                logger.info("etl_document_endpoint: auto-running page scan before annual-report ETL doc=%s", doc_id)
+                await scan_document_pages(db, report_id, doc, binary_path)
+                coverage = await get_page_scan_coverage(db, doc_id)
             if coverage["processed_pages"] != coverage["total_pages"]:
                 doc.etl_status = "low_coverage_failed"
                 await db.commit()
