@@ -55,6 +55,7 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
     10: ("目錄", "財務概況", "附錄", "關係企業", "重要契約"),
     11: (
         "rating",
+        "ratings",
         "buy",
         "hold",
         "sell",
@@ -72,6 +73,7 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
         "downside",
         "PBR",
         "PER",
+        "P/E",
         "ROE",
         "EPS",
         "目標價",
