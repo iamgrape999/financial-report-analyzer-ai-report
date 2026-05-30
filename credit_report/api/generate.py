@@ -34,6 +34,7 @@ from credit_report.generation.document_pipeline import (
     scan_document_pages,
     select_pages_for_section,
     validate_annual_report_gates,
+    is_probably_annual_report,
 )
 from credit_report.generation.pipeline import (
     check_hard_dependencies,
@@ -674,6 +675,9 @@ async def upload_document(
 
     document_type = _clean_document_type(document_type)
     fname = _safe_filename(file.filename or "upload", "upload")
+    if document_type != "annual_report" and is_probably_annual_report(filename=fname):
+        logger.info("upload_document: inferred annual_report from filename=%r selected_type=%s", fname, document_type)
+        document_type = "annual_report"
     ext = _ensure_supported_extension(fname)
 
     doc_id = str(uuid.uuid4())
@@ -725,6 +729,9 @@ async def upload_document_url(
         _save_document_filename(report_id, doc_id, fname)
         file_size = len(file_bytes)
     ext = _extension_from_filename(fname)
+    if document_type != "annual_report" and is_probably_annual_report(filename=fname):
+        logger.info("upload_document_url: inferred annual_report from filename=%r selected_type=%s", fname, document_type)
+        document_type = "annual_report"
 
     logger.info("upload_document_url: accepted url=%r file=%r type=%s bytes=%d doc=%s report=%s user=%s", payload.url, fname, document_type, file_size, doc_id, report_id, current_user.id)
 
@@ -1021,6 +1028,16 @@ async def etl_document_endpoint(
         raise HTTPException(status_code=422, detail="Document appears to have no extractable text")
 
     doc_type = doc.document_type or "other"
+    if doc_type != "annual_report" and is_probably_annual_report(doc.original_filename, text):
+        logger.warning(
+            "etl_document_endpoint: coerced likely annual report doc=%s from type=%s filename=%r",
+            doc_id,
+            doc_type,
+            doc.original_filename,
+        )
+        doc.document_type = "annual_report"
+        doc_type = "annual_report"
+        await db.flush()
     logger.info("etl_document_endpoint: doc=%s type=%s chars=%d report=%s user=%s", doc_id, doc_type, len(text), report_id, current_user.id)
 
     try:

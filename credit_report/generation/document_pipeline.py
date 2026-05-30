@@ -374,6 +374,91 @@ def validate_annual_report_gates(text: str, section_no: int | None = None) -> di
     return {"passed": coverage >= 0.8, "missing": missing, "coverage_score": round(coverage, 4)}
 
 
+def _flatten_json_terms(value: object, prefix: str = "") -> list[str]:
+    terms: list[str] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            key_text = f"{prefix}.{key}" if prefix else str(key)
+            terms.append(key_text)
+            terms.extend(_flatten_json_terms(nested, key_text))
+    elif isinstance(value, list):
+        for item in value:
+            terms.extend(_flatten_json_terms(item, prefix))
+    elif value is not None:
+        terms.append(str(value))
+    return terms
+
+
+def _proposal_contains_any(haystack: str, terms: tuple[str, ...]) -> bool:
+    lowered = haystack.lower()
+    return any(term.lower() in lowered for term in terms)
+
+
+def validate_section_proposal_gates(
+    section_no: int,
+    proposed_json: dict | None,
+    source_gate: dict | None = None,
+) -> dict:
+    """Validate extracted proposal payloads before they become reviewable.
+
+    Source-page coverage alone is not enough: the failure mode we are guarding
+    against is an annual-report ETL run that sees the right pages but still only
+    extracts identity fields such as company name and chairman.  Section 7 must
+    therefore contain recognizable financial metrics in the proposed JSON before
+    Smart Import can present or commit it.
+    """
+    source_gate = source_gate or {"passed": True, "missing": [], "coverage_score": 1.0}
+    missing = list(source_gate.get("missing") or [])
+    source_score = float(source_gate.get("coverage_score") or 0.0)
+
+    if section_no != 7:
+        return {
+            "passed": bool(source_gate.get("passed", True)),
+            "missing": missing,
+            "coverage_score": round(source_score, 4),
+            "extracted_metric_score": 1.0,
+            "missing_extracted_metrics": [],
+        }
+
+    payload = proposed_json if isinstance(proposed_json, dict) else {}
+    haystack = "\n".join(_flatten_json_terms(payload))
+    extracted_missing = [
+        key for key, terms in SECTION7_TERM_MAP.items()
+        if not _proposal_contains_any(haystack, (key, *terms))
+    ]
+    extracted_score = (len(SECTION7_REQUIRED) - len(extracted_missing)) / len(SECTION7_REQUIRED)
+
+    # Require the source pages to pass the hard page gate and require the LLM
+    # output to include a majority of Section 7 financial metric families.  This
+    # deliberately rejects false-success payloads containing only corporate
+    # identity/person fields even when source text is available.
+    passed = bool(source_gate.get("passed", True)) and extracted_score >= 0.5
+    combined_score = min(source_score, extracted_score)
+    return {
+        "passed": passed,
+        "missing": sorted(set(missing + extracted_missing)),
+        "coverage_score": round(combined_score, 4),
+        "source_coverage_score": round(source_score, 4),
+        "extracted_metric_score": round(extracted_score, 4),
+        "missing_extracted_metrics": extracted_missing,
+    }
+
+
+def is_probably_annual_report(filename: str | None = None, text: str | None = None) -> bool:
+    """Detect annual reports even when the upload type was selected wrongly."""
+    filename_text = (filename or "").lower()
+    if any(token in filename_text for token in ("annual report", "annual-report", "年報")):
+        return True
+    sample = (text or "")[:12000]
+    annual_terms = ("年報", "annual report", "致股東報告書", "公司年報", "財務概況")
+    tsmc_terms = ("台灣積體電路", "台積電", "tsmc")
+    financial_terms = ("資產總額", "營業收入淨額", "每股盈餘", "現金流量")
+    return (
+        any(term.lower() in sample.lower() for term in annual_terms)
+        and (any(term.lower() in sample.lower() for term in tsmc_terms) or sum(term in sample for term in financial_terms) >= 2)
+    )
+
+
 async def create_section_import_proposal(
     db: AsyncSession,
     report_id: str,
@@ -384,19 +469,26 @@ async def create_section_import_proposal(
     coverage_score: float,
     missing_required_fields: list[str] | None = None,
 ) -> SectionImportProposal:
+    source_gate = {
+        "passed": coverage_score >= 0.8 or section_no != 7,
+        "missing": missing_required_fields or [],
+        "coverage_score": coverage_score,
+    }
+    proposal_gate = validate_section_proposal_gates(section_no, proposed_json, source_gate)
     evidence = {
         "document_id": doc_id,
         "source_pages": source_pages,
         "source_citation_required": True,
+        "coverage_gate": proposal_gate,
     }
     proposal = SectionImportProposal(
         report_id=report_id,
         section_no=section_no,
         proposed_json=proposed_json,
         evidence_map=evidence,
-        coverage_score=coverage_score,
-        missing_required_fields=missing_required_fields or [],
-        status="ready_for_review" if coverage_score >= 0.8 or section_no != 7 else "low_coverage_failed",
+        coverage_score=proposal_gate["coverage_score"],
+        missing_required_fields=proposal_gate["missing"],
+        status="ready_for_review" if proposal_gate["passed"] else "low_coverage_failed",
     )
     db.add(proposal)
     await db.flush()
