@@ -21,9 +21,12 @@ known platform behaviour — corrections folded into the relevant docstrings):
   * Bug #4 (alembic): STRENGTHENED — alembic is fully configured with 8
     migrations but never run; create_all is used instead (genuine dead
     migration infrastructure + schema drift on PostgreSQL).
-  * Bug #7 (LLM timeout): the "Render 30 s gateway" premise was FALSE (that is
-    Heroku, and generation is a polled BackgroundTask anyway).  Replaced with
-    the real uncancellable run_in_executor thread defect in claude_client.py.
+  * Bug #7 (LLM timeout): DEBUNKED.  Two framings both proved false — the
+    "Render 30 s gateway" premise (that is Heroku; generation is a polled
+    BackgroundTask anyway) AND a follow-up "uncancellable run_in_executor
+    thread" guess.  claude_client awaits the NATIVE async client inside
+    asyncio.wait_for, so the timeout cancels cleanly.  The test now guards
+    that correct implementation instead of asserting a non-existent bug.
 
 Source-file anchors are given in each test docstring so findings can be
 re-verified after refactors.
@@ -213,11 +216,15 @@ class TestCrossDeployStateBugs:
 
 
 # ===========================================================================
-# Group 2 – Render Platform Bugs (#5–#7)
+# Group 2 – Render Platform Bugs (#5–#6 real; #7 debunked)
 # ===========================================================================
 
 class TestRenderPlatformBugs:
-    """Bugs caused by Render's ephemeral-filesystem / single-process model."""
+    """Bugs caused by Render's ephemeral-filesystem / single-process model.
+
+    #5 and #6 are real platform defects.  #7 (LLM timeout) was investigated
+    twice and found NOT to be a bug; its test now guards the correct behaviour.
+    """
 
     # ── Bug #5 ─────────────────────────────────────────────────────────────
     def test_generation_tasks_registry_is_process_local(self):
@@ -272,64 +279,52 @@ class TestRenderPlatformBugs:
             "lost on Render restart"
         )
 
-    # ── Bug #7 (CORRECTED) ─────────────────────────────────────────────────
-    @pytest.mark.asyncio
-    async def test_llm_timeout_does_not_cancel_blocking_executor_thread(self):
-        """LLM_TIMEOUT_SECONDS bounds the await but cannot cancel the SDK thread.
+    # ── Bug #7 (DEBUNKED — kept as a guard) ────────────────────────────────
+    def test_llm_timeout_is_correctly_applied_to_a_native_async_call(self):
+        """The LLM timeout is implemented correctly — the original bug was wrong.
 
-        CORRECTION: the original claim ("LLM_TIMEOUT 180 s > Render's 30 s HTTP
-        gateway") rested on a false premise — Render does NOT impose a 30 s
-        request timeout (that is Heroku's H12 router behaviour), and generation
-        runs as a FastAPI BackgroundTask that the client polls, so there is no
-        synchronous request being cut off at all.
+        Two successive framings of this "bug" both turned out to be FALSE on
+        closer inspection; this test documents the truth so the claim is not
+        re-raised:
 
-        The REAL, sandbox-verifiable defect: _call_gemini wraps the blocking
-        Gemini SDK call as ``asyncio.wait_for(loop.run_in_executor(None,
-        _invoke), timeout=timeout_s)`` (claude_client.py:142-145).  When the
-        timeout fires, ``wait_for`` cancels the *future* and raises
-        ``TimeoutError`` to the caller — but the underlying executor THREAD
-        cannot be cancelled and keeps running to completion, holding a
-        thread-pool worker.  Under repeated slow calls this silently exhausts
-        the default executor and stalls all extraction/generation work.
+        1. "LLM_TIMEOUT 180 s > Render's 30 s HTTP gateway" — false premise.
+           Render does NOT impose a 30 s request timeout (that is Heroku's H12
+           router), and generation runs as a polled FastAPI BackgroundTask, so
+           no synchronous request is being cut off.
+        2. "wait_for cannot cancel the run_in_executor thread" — also false
+           HERE.  claude_client does NOT use run_in_executor for the LLM call;
+           it awaits the NATIVE async client
+           ``client.aio.models.generate_content(...)`` inside
+           ``asyncio.wait_for(..., timeout=LLM_TIMEOUT_SECONDS)``.  wait_for
+           propagates CancelledError into a native coroutine, so the request is
+           cancelled cleanly — no thread leak.
 
-        Source: credit_report/generation/claude_client.py:142-145
+        What IS true and worth pinning: the timeout is genuinely wired up to
+        both Gemini entry points, so it is not a dead config value.
+
+        Source: credit_report/generation/claude_client.py:44-54, 113-127
         """
         import inspect as _inspect
         from credit_report.generation import claude_client
 
-        # 1. Confirm the production code uses the exact uncancellable pattern.
-        call_src = _inspect.getsource(claude_client._call_gemini)
-        assert "run_in_executor" in call_src
-        assert "asyncio.wait_for" in call_src, (
-            "Expected asyncio.wait_for wrapping the executor call"
-        )
-
-        # 2. Demonstrate the pattern's behaviour deterministically.
-        thread_completed = {"value": False}
-
-        def _blocking_work():
-            # Simulate a slow SDK call that ignores cancellation.
-            time.sleep(0.5)
-            thread_completed["value"] = True  # runs even after wait_for gives up
-            return "done"
-
-        loop = asyncio.get_running_loop()
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                loop.run_in_executor(None, _blocking_work),
-                timeout=0.05,  # far shorter than the 0.5 s blocking work
+        for fn_name in ("call_gemini_raw", "generate_section_markdown"):
+            fn = getattr(claude_client, fn_name)
+            src = _inspect.getsource(fn)
+            assert "asyncio.wait_for(" in src, (
+                f"{fn_name} must bound the LLM call with asyncio.wait_for"
             )
-
-        # The caller already received TimeoutError, but the thread keeps going.
-        assert thread_completed["value"] is False, (
-            "Thread should NOT have finished yet at the moment wait_for timed out"
-        )
-        # Give the orphaned thread time to run to completion in the background.
-        await asyncio.sleep(0.8)
-        assert thread_completed["value"] is True, (
-            "The blocking thread ran to completion despite the TimeoutError — "
-            "confirming wait_for cannot cancel a run_in_executor thread"
-        )
+            assert "timeout=LLM_TIMEOUT_SECONDS" in src, (
+                f"{fn_name} must pass LLM_TIMEOUT_SECONDS as the timeout"
+            )
+            # Confirm it wraps the NATIVE async call, not a thread executor —
+            # this is why wait_for can cancel it cleanly (no orphaned thread).
+            assert "client.aio.models.generate_content" in src, (
+                f"{fn_name} should await the native async Gemini client"
+            )
+            assert "run_in_executor" not in src, (
+                f"{fn_name} must NOT use run_in_executor for the LLM call — "
+                "the native-async path is what makes the timeout cancellable"
+            )
 
 
 # ===========================================================================
