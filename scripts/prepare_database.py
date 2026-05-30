@@ -80,11 +80,11 @@ def main() -> None:
 
     has_alembic_version, has_app_tables = asyncio.run(_table_state())
     if has_app_tables and not has_alembic_version:
-        logger.warning(
+        logger.error(
             "Existing unversioned schema detected; refusing to stamp Alembic head automatically. "
             "Run a reviewed baseline/migration procedure before enabling startup migrations."
         )
-        return
+        raise SystemExit(1)
 
     cfg = _alembic_config()
     logger.info("Running Alembic upgrade head")

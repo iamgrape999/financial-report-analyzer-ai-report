@@ -53,6 +53,36 @@ SECTION_KEYWORDS: dict[int, tuple[str, ...]] = {
     8: ("公司債", "會計師", "法規遵循", "重大契約", "訴訟", "關係企業"),
     9: ("內部控制", "法規遵循", "出口管制", "反托拉斯", "勞動", "資安", "風險管理"),
     10: ("目錄", "財務概況", "附錄", "關係企業", "重要契約"),
+    11: (
+        "rating",
+        "buy",
+        "hold",
+        "sell",
+        "neutral",
+        "target price",
+        "price target",
+        "analyst",
+        "broker",
+        "research report",
+        "investment recommendation",
+        "forecast",
+        "estimate",
+        "valuation",
+        "upside",
+        "downside",
+        "PBR",
+        "PER",
+        "ROE",
+        "EPS",
+        "目標價",
+        "投資建議",
+        "個股報告",
+        "年度預測",
+        "季度預測",
+        "每股盈餘",
+        "殖利率",
+        "比率分析",
+    ),
 }
 
 ANNUAL_SECTION_PLAN = {
@@ -336,7 +366,7 @@ async def select_pages_for_section(db: AsyncSession, doc_id: str, section_no: in
     selected = [p for p in pages if any(k in (p.merged_text or "") for k in keywords)]
     if section_no == 10:
         selected = pages[: min(5, len(pages))] + selected
-    if not selected and section_no in {4, 7}:
+    if not selected and section_no in {4, 7, 11}:
         selected = pages
     dedup = []
     seen = set()
