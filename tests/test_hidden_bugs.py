@@ -10,6 +10,21 @@ review.  Two "correction" tests at the end verify that the code actually
 handles quota and semaphore *correctly* — the original bug report overstated
 those two as defects.
 
+RE-VERIFICATION NOTES (after a second, adversarial pass against the code and
+known platform behaviour — corrections folded into the relevant docstrings):
+  * Bug #1 (JWT): Render ``generateValue: true`` persists the secret across
+    deploys; it does NOT rotate every deploy.  Scope narrowed to the real
+    module-level _KEY_BYTES binding + restart semantics.
+  * Bug #3 (postgres://): could not confirm Render emits the short scheme;
+    reframed as a SQLAlchemy-2.0 robustness gap rather than a guaranteed
+    Render crash.  The code behaviour asserted is still exactly true.
+  * Bug #4 (alembic): STRENGTHENED — alembic is fully configured with 8
+    migrations but never run; create_all is used instead (genuine dead
+    migration infrastructure + schema drift on PostgreSQL).
+  * Bug #7 (LLM timeout): the "Render 30 s gateway" premise was FALSE (that is
+    Heroku, and generation is a polled BackgroundTask anyway).  Replaced with
+    the real uncancellable run_in_executor thread defect in claude_client.py.
+
 Source-file anchors are given in each test docstring so findings can be
 re-verified after refactors.
 """
@@ -46,12 +61,20 @@ class TestCrossDeployStateBugs:
 
     # ── Bug #1 ─────────────────────────────────────────────────────────────
     def test_jwt_key_bytes_bound_at_module_import(self):
-        """_KEY_BYTES is set once at module load from SECRET_KEY.
+        """_KEY_BYTES is captured once at import time from SECRET_KEY.
 
-        render.yaml sets ``generateValue: true``, so every Render deploy
-        rotates the secret.  Because _KEY_BYTES is a module-level constant
-        (auth.py:29), the new key only takes effect after a full interpreter
-        restart — not after the env-var is changed at runtime.
+        VERIFIED SCOPE (corrected): Render's ``generateValue: true`` generates
+        the secret ONCE when the service is first created and PERSISTS it
+        across deploys — it does NOT rotate on every deploy.  So the original
+        "every deploy invalidates all tokens" claim is overstated.
+
+        The genuine, narrower defect this test pins down:
+        ``_KEY_BYTES = SECRET_KEY.encode()`` is a module-level constant
+        (auth.py:29).  Any change to the SECRET_KEY env var (manual rotation,
+        switching from the dev default to a real key, or a first deploy that
+        had no value set) only takes effect after a full interpreter restart,
+        and at that moment every previously-issued token becomes invalid
+        because the signing key no longer matches.
 
         Source: credit_report/security/auth.py:29
                 render.yaml:18-19
@@ -98,12 +121,19 @@ class TestCrossDeployStateBugs:
 
     # ── Bug #3 ─────────────────────────────────────────────────────────────
     def test_postgres_url_scheme_not_rewritten_to_asyncpg(self):
-        """config.py rewrites postgresql:// but NOT postgres:// (Render's format).
+        """config.py normalises postgresql:// but NOT the legacy postgres:// scheme.
 
-        Render provides DATABASE_URL starting with ``postgres://``.  The
-        config only handles ``postgresql://``, so the asyncpg driver never
-        receives the correct scheme prefix and raises a ``ValueError`` at
-        startup.
+        VERIFIED SCOPE (corrected): I could not confirm that Render emits the
+        ``postgres://`` short scheme (that is Heroku's historical format;
+        Render generally emits ``postgresql://``).  So this is a robustness
+        gap, not a guaranteed-on-Render crash.
+
+        The defect is still real and verifiable: SQLAlchemy 2.0 REMOVED
+        support for the bare ``postgres://`` scheme, and config.py only
+        rewrites ``postgresql://`` → ``postgresql+asyncpg://``.  Therefore any
+        ``postgres://`` URL — a Heroku-migrated DB, a copy-pasted connection
+        string, or a managed provider that uses the short form — reaches
+        create_async_engine() unrewritten and raises at startup.
 
         Source: credit_report/config.py:14-15
         """
@@ -135,12 +165,22 @@ class TestCrossDeployStateBugs:
     def test_render_start_command_has_no_alembic_upgrade(self):
         """render.yaml startCommand does not run ``alembic upgrade head``.
 
-        The repo contains both alembic and ``Base.metadata.create_all``.
-        Using create_all on a DB managed by alembic prevents future migrations
-        from running correctly.  Without ``alembic upgrade head`` in the start
-        command, schema migrations are silently skipped on every redeploy.
+        VERIFIED (stronger than first stated): the repo ships a COMPLETE
+        alembic setup — alembic.ini, migrations/env.py, and 8 migration
+        revisions including a baseline_schema and PostgreSQL-only column
+        fixes (e.g. fix_table_cells_*_text, which widen VARCHAR→TEXT).  Yet
+        the app only ever runs ``Base.metadata.create_all`` (main.py:140),
+        and the startCommand never runs ``alembic upgrade head``.
 
-        Source: render.yaml:7
+        Consequences on a real PostgreSQL deploy:
+        * create_all creates tables but never stamps ``alembic_version``, so
+          the DB and the migration history diverge from the first deploy.
+        * create_all NEVER alters existing columns, so the VARCHAR→TEXT fix
+          migrations are dead code — main.py:56-65 has to re-implement those
+          ALTERs by hand in _safe_add_columns, confirming the migrations are
+          not being applied.
+
+        Source: render.yaml:7 ; main.py:139-144 ; migrations/versions/*
         """
         data = yaml.safe_load(RENDER_YAML.read_text())
         service = data["services"][0]
@@ -149,6 +189,27 @@ class TestCrossDeployStateBugs:
             f"Expected no alembic in startCommand, got: {start_cmd!r}"
         )
         assert "upgrade" not in start_cmd.lower()
+
+        # The buildCommand must not run migrations either.
+        build_cmd = service.get("buildCommand", "")
+        assert "alembic" not in build_cmd.lower(), (
+            f"Expected no alembic in buildCommand, got: {build_cmd!r}"
+        )
+
+        # Confirm alembic IS configured (so this is genuine dead infrastructure).
+        assert (REPO_ROOT / "alembic.ini").exists(), "alembic.ini must exist"
+        versions_dir = REPO_ROOT / "migrations" / "versions"
+        migrations = list(versions_dir.glob("*.py"))
+        assert len(migrations) >= 5, (
+            f"Expected several alembic migrations, found {len(migrations)} — "
+            "these never run because startCommand omits 'alembic upgrade head'"
+        )
+
+        # And confirm the app relies on create_all instead.
+        main_src = (REPO_ROOT / "main.py").read_text()
+        assert "Base.metadata.create_all" in main_src, (
+            "main.py uses create_all in place of alembic migrations"
+        )
 
 
 # ===========================================================================
@@ -211,24 +272,63 @@ class TestRenderPlatformBugs:
             "lost on Render restart"
         )
 
-    # ── Bug #7 ─────────────────────────────────────────────────────────────
-    def test_llm_timeout_exceeds_render_http_gateway_limit(self):
-        """LLM_TIMEOUT_SECONDS (180 s default) exceeds Render's 30 s HTTP timeout.
+    # ── Bug #7 (CORRECTED) ─────────────────────────────────────────────────
+    @pytest.mark.asyncio
+    async def test_llm_timeout_does_not_cancel_blocking_executor_thread(self):
+        """LLM_TIMEOUT_SECONDS bounds the await but cannot cancel the SDK thread.
 
-        Render terminates HTTP connections that take longer than 30 seconds.
-        A 180-second Gemini/Claude call will always be cut off from the
-        client's perspective, even when the LLM eventually responds.
+        CORRECTION: the original claim ("LLM_TIMEOUT 180 s > Render's 30 s HTTP
+        gateway") rested on a false premise — Render does NOT impose a 30 s
+        request timeout (that is Heroku's H12 router behaviour), and generation
+        runs as a FastAPI BackgroundTask that the client polls, so there is no
+        synchronous request being cut off at all.
 
-        Source: credit_report/config.py:32
-                render.yaml:32 (LLM_TIMEOUT_SECONDS not overridden there)
+        The REAL, sandbox-verifiable defect: _call_gemini wraps the blocking
+        Gemini SDK call as ``asyncio.wait_for(loop.run_in_executor(None,
+        _invoke), timeout=timeout_s)`` (claude_client.py:142-145).  When the
+        timeout fires, ``wait_for`` cancels the *future* and raises
+        ``TimeoutError`` to the caller — but the underlying executor THREAD
+        cannot be cancelled and keeps running to completion, holding a
+        thread-pool worker.  Under repeated slow calls this silently exhausts
+        the default executor and stalls all extraction/generation work.
+
+        Source: credit_report/generation/claude_client.py:142-145
         """
-        from credit_report import config as cfg
+        import inspect as _inspect
+        from credit_report.generation import claude_client
 
-        render_http_gateway_timeout_s = 30  # Render's documented limit
-        assert cfg.LLM_TIMEOUT_SECONDS > render_http_gateway_timeout_s, (
-            f"LLM_TIMEOUT_SECONDS={cfg.LLM_TIMEOUT_SECONDS} > "
-            f"Render gateway={render_http_gateway_timeout_s}s — "
-            "clients will receive a gateway timeout before the LLM responds"
+        # 1. Confirm the production code uses the exact uncancellable pattern.
+        call_src = _inspect.getsource(claude_client._call_gemini)
+        assert "run_in_executor" in call_src
+        assert "asyncio.wait_for" in call_src, (
+            "Expected asyncio.wait_for wrapping the executor call"
+        )
+
+        # 2. Demonstrate the pattern's behaviour deterministically.
+        thread_completed = {"value": False}
+
+        def _blocking_work():
+            # Simulate a slow SDK call that ignores cancellation.
+            time.sleep(0.5)
+            thread_completed["value"] = True  # runs even after wait_for gives up
+            return "done"
+
+        loop = asyncio.get_running_loop()
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _blocking_work),
+                timeout=0.05,  # far shorter than the 0.5 s blocking work
+            )
+
+        # The caller already received TimeoutError, but the thread keeps going.
+        assert thread_completed["value"] is False, (
+            "Thread should NOT have finished yet at the moment wait_for timed out"
+        )
+        # Give the orphaned thread time to run to completion in the background.
+        await asyncio.sleep(0.8)
+        assert thread_completed["value"] is True, (
+            "The blocking thread ran to completion despite the TimeoutError — "
+            "confirming wait_for cannot cancel a run_in_executor thread"
         )
 
 
