@@ -51,6 +51,7 @@ class SectionDocument(Base):
     document_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="other")
     file_format: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # pdf|docx|pptx|txt|jpg|png
     etl_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True, default="uploaded")
+    document_profile: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     uploaded_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
