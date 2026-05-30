@@ -44,6 +44,7 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024
 _extraction_semaphore = asyncio.Semaphore(CR_MAX_CONCURRENT_EXTRACTIONS)
 _TASK_TTL_SECONDS = 6 * 60 * 60
 _MAX_GENERATION_TASKS = 200
+_TASKS_FILE = runtime_config.CREDIT_REPORTS_ROOT.parent / "generation_tasks.json"
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -365,9 +366,50 @@ class GenerateTaskResult(BaseModel):
     detail: Optional[str] = None
 
 
-# In-memory task registry — acceptable for single-instance deployments.
-# Entries are never evicted; memory usage is bounded by restart cadence.
+# Single-instance task registry persisted to disk so polling survives Render
+# starter-instance restarts when a persistent disk is attached.
 _generation_tasks: dict[str, dict] = {}
+
+
+def _save_tasks_to_disk() -> None:
+    """Persist the bounded generation task registry for status polling."""
+    try:
+        _TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _TASKS_FILE.write_text(json.dumps(_generation_tasks), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("generation_task_registry: failed to persist tasks: %s", exc)
+
+
+def _load_tasks_from_disk() -> None:
+    """Reload non-expired tasks, marking interrupted in-flight tasks as errors."""
+    try:
+        if not _TASKS_FILE.exists():
+            return
+        data = json.loads(_TASKS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        now = time.time()
+        changed = False
+        for task_id, task in data.items():
+            if not isinstance(task, dict):
+                continue
+            age = now - float(task.get("updated_at", task.get("created_at", now)))
+            if age > _TASK_TTL_SECONDS:
+                changed = True
+                continue
+            restored = dict(task)
+            if restored.get("status") == "running":
+                restored.update({
+                    "status": "error",
+                    "detail": "Generation was interrupted by a server restart. Please retry.",
+                    "updated_at": now,
+                })
+                changed = True
+            _generation_tasks[task_id] = restored
+        if changed:
+            _save_tasks_to_disk()
+    except Exception as exc:
+        logger.warning("generation_task_registry: failed to load tasks: %s", exc)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -375,12 +417,14 @@ _generation_tasks: dict[str, dict] = {}
 def _cleanup_generation_tasks(now: float | None = None) -> None:
     """Bound the in-memory task registry used by the polling API."""
     now = time.time() if now is None else now
+    changed = False
     expired = [
         task_id for task_id, task in _generation_tasks.items()
         if now - float(task.get("updated_at", task.get("created_at", now))) > _TASK_TTL_SECONDS
     ]
     for task_id in expired:
         _generation_tasks.pop(task_id, None)
+        changed = True
 
     overflow = len(_generation_tasks) - _MAX_GENERATION_TASKS
     if overflow > 0:
@@ -390,6 +434,10 @@ def _cleanup_generation_tasks(now: float | None = None) -> None:
         )
         for task_id in oldest[:overflow]:
             _generation_tasks.pop(task_id, None)
+            changed = True
+
+    if changed:
+        _save_tasks_to_disk()
 
 
 def _create_generation_task(initial: dict) -> str:
@@ -397,6 +445,7 @@ def _create_generation_task(initial: dict) -> str:
     task_id = str(uuid.uuid4())
     now = time.time()
     _generation_tasks[task_id] = {**initial, "created_at": now, "updated_at": now}
+    _save_tasks_to_disk()
     return task_id
 
 
@@ -407,6 +456,10 @@ def _update_generation_task(task_id: str, updates: dict) -> None:
         return
     task.update(updates)
     task["updated_at"] = time.time()
+    _save_tasks_to_disk()
+
+_load_tasks_from_disk()
+
 
 async def _require_report(db: AsyncSession, report_id: str) -> Report:
     result = await db.execute(
