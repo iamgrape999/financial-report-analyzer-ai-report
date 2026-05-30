@@ -7,6 +7,8 @@ annual report.
 """
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import logging
 import re
@@ -143,9 +145,10 @@ class DocumentProfile:
 # Keyword sets per industry profile.  Each entry merges with SECTION_KEYWORDS as
 # a fallback so only the sections that differ need to be overridden.
 SECTION_KEYWORDS_BY_PROFILE: dict[str, dict[int, tuple[str, ...]]] = {
-    "tw_semiconductor": {
-        # Default: SECTION_KEYWORDS (used as fallback)
-    },
+    # tw_semiconductor explicitly mirrors SECTION_KEYWORDS so all profiles have
+    # a concrete mapping and the fallback chain is never relied upon for the
+    # primary industry.
+    "tw_semiconductor": {k: v for k, v in SECTION_KEYWORDS.items()},
     "tw_banking": {
         1: ("銀行簡介", "股票代號", "資本結構", "股本", "負債", "淨值", "信評"),
         2: ("致股東", "淨利差", "放款", "存款", "逾放比", "每股盈餘", "資本適足率", "展望"),
@@ -588,23 +591,37 @@ async def scan_document_pages(db: AsyncSession, report_id: str, doc: SectionDocu
     if (doc.file_format or "").lower() != "pdf":
         raise ValueError("Page scanning currently requires a PDF document")
 
+    # Run Docling (CPU-bound ML inference) in a thread pool to avoid blocking
+    # the async event loop.  All extract_pdf_pages calls go through this helper.
+    loop = asyncio.get_running_loop()
+
+    async def _extract(do_ocr: bool, timeout: float | None = None) -> list[dict]:
+        coro = loop.run_in_executor(None, functools.partial(extract_pdf_pages, binary_path, do_ocr=do_ocr))
+        if timeout is not None:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        return await coro
+
     # First pass: fast extraction (no OCR) to detect profile and check if scanned
-    page_payloads = extract_pdf_pages(binary_path, do_ocr=False)
+    page_payloads = await _extract(do_ocr=False)
 
     # Detect document profile from first-pass text
     sample_text = "\n".join(p.get("merged_text", "") for p in page_payloads[:20])
     profile = detect_document_profile(sample_text, filename=doc.original_filename, pages=page_payloads)
 
-    # If scanned PDF detected, re-extract with OCR enabled (slow but necessary)
+    # If scanned PDF detected, re-extract with OCR enabled.
+    # OCR is CPU-intensive: cap at 5 minutes so the API request never hangs
+    # indefinitely.  On GPU hardware in production the same job takes ~30 seconds.
     if profile.is_scanned:
-        logger.info("scan_document_pages: scanned PDF detected for doc=%s — re-extracting with OCR", doc.id)
+        logger.info("scan_document_pages: scanned PDF detected for doc=%s — re-extracting with OCR (timeout=300s)", doc.id)
         doc.etl_status = "ocr_scanning"
         await db.flush()
         try:
-            page_payloads = extract_pdf_pages(binary_path, do_ocr=True)
+            page_payloads = await _extract(do_ocr=True, timeout=300.0)
             # Re-detect profile with OCR-enriched text
             sample_text = "\n".join(p.get("merged_text", "") for p in page_payloads[:20])
             profile = detect_document_profile(sample_text, filename=doc.original_filename, pages=page_payloads)
+        except asyncio.TimeoutError:
+            logger.warning("OCR timed out after 300s for doc=%s — using first-pass results", doc.id)
         except Exception as exc:
             logger.warning("OCR re-extraction failed for doc=%s (%s) — using first-pass results", doc.id, exc)
 
