@@ -8,14 +8,16 @@ annual report.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from pypdf import PdfReader
 from sqlalchemy import delete, func, select
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from credit_report.generation.models import (
@@ -249,27 +251,116 @@ def _matches_any_section_keyword(text: str, keywords: tuple[str, ...], section_n
     return any(_matches_section_keyword(text, keyword, section_no) for keyword in keywords)
 
 
-def extract_pdf_pages(file_path: Path) -> list[dict]:
+def _docling_extract(file_path: Path, *, do_ocr: bool = False) -> list[dict]:
+    """Extract pages via Docling (table structure, optional OCR).
+
+    OCR is disabled by default because modern annual reports carry a native text
+    layer — enabling it on CPU adds minutes per document without quality gain.
+    Set do_ocr=True only for confirmed image-only (scanned) PDFs.
+
+    Returns the same dict schema as _pypdf_extract so callers are backend-agnostic.
+    """
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    opts = PdfPipelineOptions()
+    opts.do_ocr = do_ocr
+    opts.do_table_structure = True
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
+    )
+    result = converter.convert(str(file_path))
+    doc = result.document
+
+    # Collect page-level text
+    page_texts: dict[int, list[str]] = {}
+    for item, _ in doc.iterate_items():
+        if not hasattr(item, "text") or not item.text:
+            continue
+        for prov in getattr(item, "prov", []):
+            page_no = prov.page_no
+            page_texts.setdefault(page_no, []).append(item.text)
+
+    # Collect table cells per page
+    page_cells: dict[int, list[dict]] = {}
+    for table in doc.tables:
+        for prov in getattr(table, "prov", []):
+            page_no = prov.page_no
+            cells: list[dict] = []
+            grid = getattr(table.data, "grid", None) or []
+            for row_idx, row in enumerate(grid):
+                for col_idx, cell in enumerate(row):
+                    cells.append({
+                        "row": cell.start_row_offset_idx,
+                        "col": cell.start_col_offset_idx,
+                        "row_span": max(cell.row_span, 1),
+                        "col_span": max(cell.col_span, 1),
+                        "text": cell.text or "",
+                    })
+            page_cells.setdefault(page_no, []).extend(cells)
+
+    total_pages = len(doc.pages) if doc.pages else max(page_texts.keys(), default=0)
+    pages = []
+    for page_no in range(1, total_pages + 1):
+        text = "\n".join(page_texts.get(page_no, []))
+        printed_start, printed_end = _printed_page(text)
+        pages.append({
+            "pdf_page_no": page_no,
+            "printed_page_start": printed_start,
+            "printed_page_end": printed_end,
+            "native_text": text,
+            "merged_text": text,
+            "text_quality_score": _quality_score(text),
+            "layout_type": _layout_type(text),
+            "section_hint": _section_hint(text),
+            "table_type": _table_type(text),
+            "periods": _periods(text),
+            "raw_cells": page_cells.get(page_no, []),
+            "extraction_method": "docling",
+        })
+    return pages
+
+
+def _pypdf_extract(file_path: Path) -> list[dict]:
+    """Fallback extraction using pypdf (native text layer only, no OCR)."""
+    from pypdf import PdfReader
+
     reader = PdfReader(str(file_path))
     pages = []
     for idx, page in enumerate(reader.pages, start=1):
-        native_text = page.extract_text() or ""
-        printed_start, printed_end = _printed_page(native_text)
-        pages.append(
-            {
-                "pdf_page_no": idx,
-                "printed_page_start": printed_start,
-                "printed_page_end": printed_end,
-                "native_text": native_text,
-                "merged_text": native_text,
-                "text_quality_score": _quality_score(native_text),
-                "layout_type": _layout_type(native_text),
-                "section_hint": _section_hint(native_text),
-                "table_type": _table_type(native_text),
-                "periods": _periods(native_text),
-            }
-        )
+        text = page.extract_text() or ""
+        printed_start, printed_end = _printed_page(text)
+        pages.append({
+            "pdf_page_no": idx,
+            "printed_page_start": printed_start,
+            "printed_page_end": printed_end,
+            "native_text": text,
+            "merged_text": text,
+            "text_quality_score": _quality_score(text),
+            "layout_type": _layout_type(text),
+            "section_hint": _section_hint(text),
+            "table_type": _table_type(text),
+            "periods": _periods(text),
+            "raw_cells": [],
+            "extraction_method": "pypdf",
+        })
     return pages
+
+
+def extract_pdf_pages(file_path: Path, *, do_ocr: bool = False) -> list[dict]:
+    """Extract pages from a PDF using Docling (table structure) with pypdf fallback.
+
+    Pass do_ocr=True for confirmed scanned PDFs (slow on CPU, requires GPU in prod).
+    """
+    try:
+        pages = _docling_extract(file_path, do_ocr=do_ocr)
+        if pages:
+            return pages
+        logger.warning("Docling returned 0 pages for %s — falling back to pypdf", file_path)
+    except Exception as exc:
+        logger.warning("Docling extraction failed for %s (%s) — falling back to pypdf", file_path, exc)
+    return _pypdf_extract(file_path)
 
 
 async def scan_document_pages(db: AsyncSession, report_id: str, doc: SectionDocument, binary_path: Path) -> PageScanSummary:
@@ -306,13 +397,14 @@ async def scan_document_pages(db: AsyncSession, report_id: str, doc: SectionDocu
         db.add(page)
         await db.flush()
 
+        extraction_method = payload.get("extraction_method", "pypdf")
         block = DocumentBlock(
             page_id=page.id,
             block_type="table" if payload["table_type"] else "paragraph",
             text=text,
             bbox=None,
             confidence=payload["text_quality_score"],
-            extraction_method="native_text",
+            extraction_method=extraction_method,
             section_hint=payload["section_hint"],
         )
         db.add(block)
@@ -323,19 +415,20 @@ async def scan_document_pages(db: AsyncSession, report_id: str, doc: SectionDocu
             toc_parsed = toc_parsed or "財務概況" in text or "目錄" in text
         if any(term in text for term in FINANCIAL_PAGE_TERMS):
             financial_pages += 1
-        if payload["table_type"]:
+        raw_cells = payload.get("raw_cells") or []
+        if payload["table_type"] or raw_cells:
             table_pages += 1
             db.add(
                 ExtractedTable(
                     document_id=doc.id,
                     page_id=page.id,
                     table_type=payload["table_type"],
-                    title=_title_for_table_type(payload["table_type"]),
+                    title=_title_for_table_type(payload["table_type"] or ""),
                     unit="新台幣仟元" if "新台幣" in text or "仟元" in text else None,
                     periods=payload["periods"],
-                    raw_cells=[],
+                    raw_cells=raw_cells,
                     normalized_rows=[],
-                    extraction_method="native_text_heuristic",
+                    extraction_method=extraction_method,
                     confidence=payload["text_quality_score"],
                 )
             )
